@@ -34,7 +34,17 @@ pnpm --filter @las/frontend dev
 
 - 접속 주소: `http://localhost:3000`
 
-### 4) 자주 쓰는 명령어
+### 4) 화면/스타일이 이상할 때 (캐시 초기화)
+
+```bash
+cd /home/user/projects/LAS-system
+pkill -f "next dev|turbo" || true
+rm -rf apps/frontend/.next
+pnpm install --no-frozen-lockfile
+pnpm --filter @las/frontend dev
+```
+
+### 5) 자주 쓰는 명령어
 
 ```bash
 pnpm --filter @las/frontend build
