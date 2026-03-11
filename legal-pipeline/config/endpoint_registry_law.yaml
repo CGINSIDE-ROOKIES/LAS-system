@@ -1,0 +1,267 @@
+version: 0.1
+registry_name: endpoint_registry_law
+applies_to:
+  output_file_id: 01_current_law
+  output_file_name: 01_current_law.json
+  collection_group: current_laws_body
+
+runtime:
+  api_base_url: "http://www.law.go.kr/DRF"
+  auth_param: OC
+  preferred_type: JSON
+  timeout_sec: 30
+  retries:
+    max_attempts: 3
+    backoff_sec: [1, 3, 5]
+  
+policies:
+  include_law_levels: ["법", "시행령", "시행규칙", "체계도 직속 하위법령"]
+  include_parts: ["본문", "부칙", "별표"]
+  exclude_parts: ["별지서식"]
+  raw_store: true
+  normalized_store: true
+  delta_collect_daily: true
+
+validation:
+  required_json_capable_for_enabled: true
+  allow_html_only_if_enabled_false: true
+  fail_on_doc_inconsistency: false
+
+endpoints:
+  law_system_diagram_list:
+    enabled: true
+    family: law
+    role: root_and_descendant_discovery
+    transport: search
+    path: /lawSearch.do
+    target: lsStmd
+    response_types: [XML, JSON, HTML]
+    preferred_type: JSON
+    required_params: [OC, target, type]
+    optional_params: 
+      [query, display, page, sort, efYd, ancYd, date, nb, ancNo, rrClsCd, org, knd, gana, popYn]
+    default_params: 
+      display: 100
+      page: 1
+    parser_key: system_diagram_list_parser
+    emits:
+      - law_name
+      - law_id
+      - law_serial_no
+      - law_type_name
+      - ministry_code
+      - ministry_name
+      - enforced_date
+    use_for:
+      - root_law_resolution
+      - candidate_descendant_enumeration
+    
+  law_system_diagram_detail:
+    enabled: true
+    family: law
+    role: hierarchy_resolution
+    transport: detail
+    path: /lawService.do
+    target: lsStmd
+    response_types: [XML, JSON, HTML]
+    preferred_type: JSON
+    required_params: [OC, target, type]
+    one_of_params:
+      - [ID, MST]
+    optional_params: [LM, LD, LN]
+    emits:
+      - root_law
+      - descendant_law
+      - relation_edges
+    use_for:
+      - exact_descendant_scope
+    
+  law_current_list:
+    enabled: true
+    family: law
+    role: current_law_search
+    transport: search
+    path: /lawSearch.do
+    target: eflaw
+    response_types: [XML, JSON, HTML]
+    preferred_type: JSON
+    required_params: [OC, target, type]
+    optional_params: 
+      [search, query, nw, LID, display, page, sort, efYd, date, ancYd, ancNo, rrClsCd, nb, org, knd, gana, popYn]
+    default_params:
+      nw: "3"
+      display: 100
+      page: 1
+      sort: lasc
+    parser_key: current_law_list_parser
+    emits:
+      - law_name_ko
+      - law_alias
+      - law_id
+      - law_serial_no
+      - promulgation_date
+      - enforcement_date
+      - ministry_code
+      - ministry_name
+      - law_detail_link
+    use_for:
+      - root_law_resolution
+      - law_family_enumeration
+      - fallback_descendant_search
+
+  law_current_detail:
+    enabled: true
+    family: law
+    role: authoritative_body_fetch
+    transport: detail
+    path: /lawService.do
+    target: eflaw
+    response_types: [XML, JSON, HTML]
+    preferred_type: JSON
+    required_params: [OC, target, type]
+    one_of_params:
+      - [ID, MST]
+    conditional_required:
+      - if_param: MST
+        then_required: [efYd]
+    optional_params: [JO, chrClsCd]
+    default_params:
+      chrClsCd: "010202"
+    parser_key: current_law_detail_parser
+    parser_units:
+      - law
+      - article
+      - paragraph
+      - item
+      - subitem
+      - supplementary
+      - annex
+    part_policy:
+      include_body: true
+      include_supplementary: true
+      include_annex: true
+      exclude_attached_form: true
+    use_for:
+      - full_body_backfill
+      - single_article_backfill
+      - annex_capture
+
+  law_current_article:
+    enabled: true
+    family: law
+    role: article_graular_fetch
+    transport: detail
+    path: /lawService.do
+    target: eflawjosub
+    response_types: [XML, JSON, HTML]
+    preferred_type: JSON
+    required_params: [OC, target, type, JO]
+    one_of_params:
+      - [ID, MST]
+    conditional_required:
+      - if_param: MST
+        then_require: [efYd]
+    optional_params: [HANG, HO, MOK]
+    parser_key: current_law_article_parser
+    parser_units:
+      - article
+      - paragraph
+      - item
+      - subitem
+    normalization_rules:
+      JO_format: six_digit_zero_pad
+      hang_format: six_digit_zero_pad
+      ho_format: six_digit_zero_pad
+      mok_encoding: utf8_url_encoded_ko_char
+    use_for:
+      - changed_article_hydrate
+      - fine_grainded_repair
+      - direct_clause_fetch
+
+  law_change_daily:
+    enabled: true
+    family: law
+    role: daily_change_law_datection
+    transport: search
+    path: /lawSearch.do
+    target: lsHstInf
+    response_types: [XML, JSON, HTML]
+    preferred_type: JSON
+    required_params: [OC, target, type, regDt]
+    optional_params: [org, display, page, popYn]
+    default_params:
+      display: 100
+      page: 1
+    parser_key: law_change_daily_parser
+    emits:
+      - change_law_id
+      - law_serial_no
+      - law_name
+      - enfocement_date
+    use_for:
+      - daily_change_candidate
+      - change_law_queue
+
+  law_article_change_daily:
+    enabled: true
+    family: law
+    role: daily_change_article_detection
+    transport: search
+    path: /lawSearch.do
+    target: lsJoHstInf
+    response_types: [XML, JSON]
+    preferred_type: JSON
+    required_params: [OC, target, type]
+    one_of_param_groups:
+      - [regDt]
+      - [fromRegDt, toRegDt]
+    optional_params: [ID, JO, org, page]
+    default_params:
+      page: 1
+    parser_key: law_article_change_daily_parser
+    emits:
+      - change_law_id
+      - change_jo
+      - change_reson
+      - jo_change_date
+      - jo_effective_date
+    use_for:
+      - daily_delta_candidate
+      - changed_article_queue
+    notes:
+      - "regDt는 기본적으로 t-1 기준으로 조회"
+  
+  law_delete_daily:
+    enabled: true
+    family: law
+    role: delete_tombstone_detection
+    transport: search
+    path: /lawSearch.do
+    target: delHst
+    doc_target_label: datDel
+    response_types: [XML, JSON]
+    preferred_type: JSON
+    required_params: [OC, target, type]
+    optional_params: [display, page, knd, delDt, frmDt, toDt]
+    default_params:
+      knd: 1
+      display: 100
+      page: 1
+    parser_key: law_delete_daily_parser
+    emits:
+      - deleted_serial_no
+      - deleted_kind_name
+      - deleted_date
+    use_for:
+      - tombstone_queue
+    doc_exceptions:
+      - "가이드 표기 불일치: 요청 URL/샘플은 delHst, 요청변수 설명은 datDel"
+
+optional_endpoints:
+  law_history_detail:
+    enabled: false
+    path: /lawService.do
+    family: law
+    target: lsHistory
+    response_types: [HTML]
+    reason: "초기 JSON-only 파이프라인 제외"
