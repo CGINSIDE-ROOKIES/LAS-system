@@ -48,7 +48,7 @@
         }
     ],
     "storage": {
-        "format": "json",
+        "format": "JSON",
         "later_transform": "JSONL"
     },
     "schedule": {
@@ -56,6 +56,6 @@
         "related_docs_backfill_first": true
     },
     "pending_verification": [
-        "의견제시샤레의 실제 API target 및 포맷"
+        "의견제시사례의 실제 API target 및 포맷"
     ]
 }

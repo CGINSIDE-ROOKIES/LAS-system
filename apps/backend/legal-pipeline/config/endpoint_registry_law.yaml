@@ -3,7 +3,7 @@ registry_name: endpoint_registry_law
 applies_to:
   output_file_id: 01_current_law
   output_file_name: 01_current_law.json
-  collection_group: current_laws_body
+  collection_group: current_law_body
 
 runtime:
   api_base_url: "http://www.law.go.kr/DRF"
@@ -15,7 +15,7 @@ runtime:
     backoff_sec: [1, 3, 5]
   
 policies:
-  include_law_levels: ["법", "시행령", "시행규칙", "체계도 직속 하위법령"]
+  include_law_levels: ["법", "시행령", "시행규칙", "직속하위법령"]
   include_parts: ["본문", "부칙", "별표"]
   exclude_parts: ["별지서식"]
   raw_store: true
@@ -23,7 +23,7 @@ policies:
   delta_collect_daily: true
 
 validation:
-  required_json_capable_for_enabled: true
+  require_json_capable_for_enabled: true
   allow_html_only_if_enabled_false: true
   fail_on_doc_inconsistency: false
 
@@ -71,7 +71,7 @@ endpoints:
     optional_params: [LM, LD, LN]
     emits:
       - root_law
-      - descendant_law
+      - descendant_laws
       - relation_edges
     use_for:
       - exact_descendant_scope
@@ -149,7 +149,7 @@ endpoints:
   law_current_article:
     enabled: true
     family: law
-    role: article_graular_fetch
+    role: article_granular_fetch
     transport: detail
     path: /lawService.do
     target: eflawjosub
@@ -160,7 +160,7 @@ endpoints:
       - [ID, MST]
     conditional_required:
       - if_param: MST
-        then_require: [efYd]
+        then_required: [efYd]
     optional_params: [HANG, HO, MOK]
     parser_key: current_law_article_parser
     parser_units:
@@ -169,19 +169,19 @@ endpoints:
       - item
       - subitem
     normalization_rules:
-      JO_format: six_digit_zero_pad
+      jo_format: six_digit_zero_pad
       hang_format: six_digit_zero_pad
       ho_format: six_digit_zero_pad
       mok_encoding: utf8_url_encoded_ko_char
     use_for:
       - changed_article_hydrate
-      - fine_grainded_repair
+      - fine_grained_repair
       - direct_clause_fetch
 
   law_change_daily:
     enabled: true
     family: law
-    role: daily_change_law_datection
+    role: daily_change_law_detection
     transport: search
     path: /lawSearch.do
     target: lsHstInf
@@ -194,10 +194,10 @@ endpoints:
       page: 1
     parser_key: law_change_daily_parser
     emits:
-      - change_law_id
+      - changed_law_id
       - law_serial_no
       - law_name
-      - enfocement_date
+      - enforcement_date
     use_for:
       - daily_change_candidate
       - change_law_queue
@@ -220,9 +220,9 @@ endpoints:
       page: 1
     parser_key: law_article_change_daily_parser
     emits:
-      - change_law_id
-      - change_jo
-      - change_reson
+      - changed_law_id
+      - changed_jo
+      - change_reason
       - jo_change_date
       - jo_effective_date
     use_for:
