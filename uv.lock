@@ -2,6 +2,11 @@ version = 1
 revision = 3
 requires-python = ">=3.12"
 
+[manifest]
+members = [
+    "las-system",
+]
+
 [[package]]
 name = "anyio"
 version = "4.12.1"
@@ -73,7 +78,7 @@ wheels = [
 [[package]]
 name = "las-system"
 version = "0.1.0"
-source = { virtual = "." }
+source = { virtual = "apps/backend" }
 dependencies = [
     { name = "httpx" },
 ]
