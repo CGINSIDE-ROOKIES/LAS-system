@@ -1,0 +1,7 @@
+{
+"model": "jinkyeongk/Midm-2.0-Base-Instruct-AWQ",
+"messages": 
+    [
+        {"role": "user", "content": "다음 계약서에서 조문별 포멧팅 문제를 찾고 있어, 한 조문안에 껴있으면 안되는것들이 섞여있지 봐줘. 문제 없으면 Y 아니면 N 으로 대답. 끝에 이유 간단히: "}
+    ]
+}
