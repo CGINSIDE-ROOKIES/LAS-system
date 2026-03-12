@@ -1,45 +1,23 @@
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from src.collector.legal_doc_collector import (
     DETAIL_LINK_KEYS_BY_TARGET,
+    DOC_KIND_KEYS,
+    DOC_TYPE_LABELS,
     ID_KEYS_BY_TARGET,
     NUMBER_KEYS_BY_TARGET,
+    TARGET_CONFIGS,
     TITLE_KEYS_BY_TARGET,
     build_doc_ref,
     extract_list_items,
 )
+from src.common.io_utils import _read_json, _write_json
+from src.common.payload_utils import _first_non_empty, _walk_objects
 from src.export.jsonl_builder import write_jsonl
-
-
-DOC_TYPE_LABELS = {
-    "prec": "판례",
-    "detc": "헌재결정례",
-    "expc": "법령해석례",
-    "decc": "행정심판례",
-}
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as file:
-        data = json.load(file)
-
-    if not isinstance(data, dict):
-        raise ValueError(f"JSON root must be object: {path}")
-
-    return data
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
 
 
 def _normalize_space(text: str) -> str:
@@ -50,25 +28,7 @@ def _stem_to_name(stem: str) -> str:
     return stem.replace("_", " ").strip()
 
 
-def _first_non_empty(mapping: dict[str, Any], *keys: str) -> Any:
-    for key in keys:
-        value = mapping.get(key)
-        if value not in (None, "", []):
-            return value
-    return None
-
-
-def _walk_objects(node: Any):
-    if isinstance(node, dict):
-        yield node
-        for value in node.values():
-            yield from _walk_objects(value)
-    elif isinstance(node, list):
-        for item in node:
-            yield from _walk_objects(item)
-
-
-def _walk_strings(node: Any):
+def _walk_strings(node: Any) -> Iterable[str]:
     if isinstance(node, dict):
         for value in node.values():
             yield from _walk_strings(value)
@@ -221,6 +181,43 @@ def _build_law_article_text(parsed_law: dict[str, Any], article: dict[str, Any])
     return "\n".join(line for line in lines if line).strip()
 
 
+def _build_supplementary_text(parsed_law: dict[str, Any], supplementary: dict[str, Any]) -> str:
+    law_name = str(parsed_law.get("law_name") or "").strip()
+    title = str(supplementary.get("supplementary_title") or "부칙").strip()
+    number = str(supplementary.get("supplementary_no") or "").strip()
+    text = str(supplementary.get("supplementary_text") or "").strip()
+
+    lines = []
+    if law_name:
+        lines.append(f"법령명: {law_name}")
+    lines.append("구성요소: 부칙")
+    if title:
+        lines.append(f"부칙제목: {title}")
+    if number:
+        lines.append(f"부칙번호: {number}")
+    if text:
+        lines.append(text)
+
+    return "\n".join(line for line in lines if line).strip()
+
+
+def _build_appendix_text(parsed_law: dict[str, Any], appendix: dict[str, Any]) -> str:
+    law_name = str(parsed_law.get("law_name") or "").strip()
+    title = str(appendix.get("appendix_title") or "별표").strip()
+    text = str(appendix.get("appendix_text") or "").strip()
+
+    lines = []
+    if law_name:
+        lines.append(f"법령명: {law_name}")
+    lines.append("구성요소: 별표")
+    if title:
+        lines.append(f"별표제목: {title}")
+    if text:
+        lines.append(text)
+
+    return "\n".join(line for line in lines if line).strip()
+
+
 def build_law_records(
     normalized_base_dir: str | Path = "data/normalized/01_current_law",
     max_chars: int = 1200,
@@ -236,46 +233,130 @@ def build_law_records(
         law_id = parsed_law.get("law_id")
         mst = parsed_law.get("mst")
         ef_yd = parsed_law.get("ef_yd")
+        kind_name = parsed_law.get("kind_name")
+        classified_level = parsed_law.get("classified_level")
+        scope_source = parsed_law.get("scope_source")
 
         articles = parsed_law.get("articles", [])
-        if not isinstance(articles, list):
-            continue
+        if isinstance(articles, list):
+            for article in articles:
+                if not isinstance(article, dict):
+                    continue
 
-        for article in articles:
-            if not isinstance(article, dict):
-                continue
+                article_no = article.get("article_no")
+                jo_code = article.get("jo_code")
+                article_text = _build_law_article_text(parsed_law, article)
+                chunks = _chunk_text(article_text, max_chars=max_chars, overlap=overlap)
 
-            article_no = article.get("article_no")
-            jo_code = article.get("jo_code")
-            article_text = _build_law_article_text(parsed_law, article)
-            chunks = _chunk_text(article_text, max_chars=max_chars, overlap=overlap)
+                for chunk_index, chunk in enumerate(chunks):
+                    record_id = "::".join(
+                        [
+                            "law",
+                            law_name or "unknown",
+                            str(jo_code or article_no or chunk_index),
+                            str(chunk_index),
+                        ]
+                    )
 
-            for chunk_index, chunk in enumerate(chunks):
-                record_id = "::".join(
-                    [
-                        "law",
-                        law_name or "unknown",
-                        str(jo_code or article_no or chunk_index),
-                        str(chunk_index),
-                    ]
-                )
+                    records.append(
+                        {
+                            "id": record_id,
+                            "text": chunk,
+                            "doc_type": "law",
+                            "section_type": "article",
+                            "source_group": "01_current_law",
+                            "law_name": law_name,
+                            "law_id": law_id,
+                            "mst": mst,
+                            "ef_yd": ef_yd,
+                            "kind_name": kind_name,
+                            "classified_level": classified_level,
+                            "scope_source": scope_source,
+                            "article_no": article_no,
+                            "jo_code": jo_code,
+                            "chunk_index": chunk_index,
+                            "source_file_path": str(path),
+                        }
+                    )
 
-                records.append(
-                    {
-                        "id": record_id,
-                        "text": chunk,
-                        "doc_type": "law",
-                        "source_group": "01_current_law",
-                        "law_name": law_name,
-                        "law_id": law_id,
-                        "mst": mst,
-                        "ef_yd": ef_yd,
-                        "article_no": article_no,
-                        "jo_code": jo_code,
-                        "chunk_index": chunk_index,
-                        "source_file_path": str(path),
-                    }
-                )
+        supplementary_items = parsed_law.get("supplementary", [])
+        if isinstance(supplementary_items, list):
+            for item_index, supplementary in enumerate(supplementary_items):
+                if not isinstance(supplementary, dict):
+                    continue
+
+                text = _build_supplementary_text(parsed_law, supplementary)
+                chunks = _chunk_text(text, max_chars=max_chars, overlap=overlap)
+
+                for chunk_index, chunk in enumerate(chunks):
+                    record_id = "::".join(
+                        [
+                            "law",
+                            law_name or "unknown",
+                            "supplementary",
+                            str(item_index),
+                            str(chunk_index),
+                        ]
+                    )
+                    records.append(
+                        {
+                            "id": record_id,
+                            "text": chunk,
+                            "doc_type": "law",
+                            "section_type": "supplementary",
+                            "source_group": "01_current_law",
+                            "law_name": law_name,
+                            "law_id": law_id,
+                            "mst": mst,
+                            "ef_yd": ef_yd,
+                            "kind_name": kind_name,
+                            "classified_level": classified_level,
+                            "scope_source": scope_source,
+                            "supplementary_no": supplementary.get("supplementary_no"),
+                            "supplementary_title": supplementary.get("supplementary_title"),
+                            "chunk_index": chunk_index,
+                            "source_file_path": str(path),
+                        }
+                    )
+
+        appendices = parsed_law.get("appendices", [])
+        if isinstance(appendices, list):
+            for item_index, appendix in enumerate(appendices):
+                if not isinstance(appendix, dict):
+                    continue
+
+                text = _build_appendix_text(parsed_law, appendix)
+                chunks = _chunk_text(text, max_chars=max_chars, overlap=overlap)
+
+                for chunk_index, chunk in enumerate(chunks):
+                    record_id = "::".join(
+                        [
+                            "law",
+                            law_name or "unknown",
+                            "appendix",
+                            str(item_index),
+                            str(chunk_index),
+                        ]
+                    )
+                    records.append(
+                        {
+                            "id": record_id,
+                            "text": chunk,
+                            "doc_type": "law",
+                            "section_type": "appendix",
+                            "source_group": "01_current_law",
+                            "law_name": law_name,
+                            "law_id": law_id,
+                            "mst": mst,
+                            "ef_yd": ef_yd,
+                            "kind_name": kind_name,
+                            "classified_level": classified_level,
+                            "scope_source": scope_source,
+                            "appendix_title": appendix.get("appendix_title"),
+                            "chunk_index": chunk_index,
+                            "source_file_path": str(path),
+                        }
+                    )
 
     return records
 
@@ -285,12 +366,14 @@ def _extract_doc_meta_from_payload(target: str, payload: dict[str, Any]) -> dict
     title = _find_first_recursive(payload, TITLE_KEYS_BY_TARGET[target])
     doc_number = _find_first_recursive(payload, NUMBER_KEYS_BY_TARGET[target])
     detail_link = _find_first_recursive(payload, DETAIL_LINK_KEYS_BY_TARGET[target])
+    doc_kind = _find_first_recursive(payload, DOC_KIND_KEYS)
 
     return {
         "doc_id": str(doc_id) if doc_id is not None else None,
         "title": str(title) if title is not None else None,
         "doc_number": str(doc_number) if doc_number is not None else None,
         "detail_link": str(detail_link) if detail_link is not None else None,
+        "doc_kind": str(doc_kind) if doc_kind is not None else None,
     }
 
 
@@ -318,6 +401,8 @@ def _build_related_doc_records_from_text(
             prefix.append(f"문서 제목: {doc_meta['title']}")
         if doc_meta.get("doc_number"):
             prefix.append(f"문서 번호: {doc_meta['doc_number']}")
+        if doc_meta.get("doc_kind"):
+            prefix.append(f"문서 구분: {doc_meta['doc_kind']}")
 
         full_text = "\n".join(prefix + [chunk]).strip()
 
@@ -342,6 +427,7 @@ def _build_related_doc_records_from_text(
                 "title": doc_meta.get("title"),
                 "doc_number": doc_meta.get("doc_number"),
                 "detail_link": doc_meta.get("detail_link"),
+                "doc_kind": doc_meta.get("doc_kind"),
                 "chunk_index": chunk_index,
                 "source_file_path": source_file_path,
             }
@@ -358,7 +444,17 @@ def build_related_doc_records(
     base_dir = Path(raw_related_base_dir)
     records: list[dict[str, Any]] = []
 
-    # detail-supported targets: prec, detc, decc
+    detail_supported_targets = {
+        target
+        for target, config in TARGET_CONFIGS.items()
+        if config["detail_endpoint"] is not None
+    }
+    list_only_targets = {
+        target
+        for target, config in TARGET_CONFIGS.items()
+        if config["detail_endpoint"] is None
+    }
+
     for path in sorted(base_dir.rglob("*__detail.json")):
         if len(path.parts) < 5:
             continue
@@ -367,7 +463,7 @@ def build_related_doc_records(
         target = path.parent.parent.name
         root_law_name = _stem_to_name(path.parent.parent.parent.name)
 
-        if target not in {"prec", "detc", "decc"}:
+        if target not in detail_supported_targets:
             continue
 
         payload = _read_json(path)
@@ -391,7 +487,6 @@ def build_related_doc_records(
             )
         )
 
-    # expc: list-only
     for path in sorted(base_dir.rglob("*__list.json")):
         if len(path.parts) < 5:
             continue
@@ -400,7 +495,7 @@ def build_related_doc_records(
         target = path.parent.parent.name
         root_law_name = _stem_to_name(path.parent.parent.parent.name)
 
-        if target != "expc":
+        if target not in list_only_targets:
             continue
 
         payload = _read_json(path)
@@ -418,6 +513,7 @@ def build_related_doc_records(
                 "title": ref.get("title"),
                 "doc_number": ref.get("doc_number"),
                 "detail_link": ref.get("detail_link"),
+                "doc_kind": ref.get("doc_kind"),
             }
 
             records.extend(

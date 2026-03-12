@@ -1,20 +1,12 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from src.collector.legal_doc_collector import collect_related_docs_for_family_result
 from src.collector.related_doc_expander import collect_expanded_related_docs_for_family_result
+from src.common.io_utils import _write_json
 from src.pipeline.law_pipeline import collect_all_root_law_families
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
 
 
 def run_full_collection(
@@ -46,18 +38,21 @@ def run_full_collection(
             registry=related_registry,
             oc=oc,
             family_result=family_result,
+            scope=scope,
             targets=related_targets,
             max_pages_per_target=max_pages_per_target,
             detail_limit_per_target=detail_limit_per_target,
             base_dir=Path(base_dir) / "raw" / "02_related_legal_docs",
         )
 
+        effective_targets = list(related_result.get("targets", {}).keys())
+
         expanded_result = collect_expanded_related_docs_for_family_result(
             scope=scope,
             family_result=family_result,
             raw_related_base_dir=Path(base_dir) / "raw" / "02_related_legal_docs",
             save_dir=Path(base_dir) / "expanded" / "03_expanded_related_docs",
-            targets=related_targets,
+            targets=effective_targets,
             max_records_per_target=max_records_per_target,
         )
 

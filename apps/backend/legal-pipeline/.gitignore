@@ -10,3 +10,4 @@ data/
 # Virtual environments
 .venv
 .env
+uv.lock

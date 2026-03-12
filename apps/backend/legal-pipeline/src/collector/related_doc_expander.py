@@ -1,49 +1,21 @@
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from src.collector.legal_doc_collector import (
-    TARGET_CONFIGS,
-    ID_KEYS_BY_TARGET,
-    TITLE_KEYS_BY_TARGET,
-    NUMBER_KEYS_BY_TARGET,
     DETAIL_LINK_KEYS_BY_TARGET,
-    TEXT_KEYS_BY_TARGET,
-    _first_non_empty,
-    _safe_filename,
-    _walk_objects,
+    DOC_TYPE_LABELS,
+    ID_KEYS_BY_TARGET,
+    NUMBER_KEYS_BY_TARGET,
+    TARGET_CONFIGS,
+    TITLE_KEYS_BY_TARGET,
     build_doc_ref,
     extract_list_items,
 )
-
-
-DOC_TYPE_LABELS = {
-    "prec": "판례",
-    "detc": "헌재결정례",
-    "expc": "법령해석례",
-    "decc": "행정심판례",
-}
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as file:
-        data = json.load(file)
-
-    if not isinstance(data, dict):
-        raise ValueError(f"JSON root must be object: {path}")
-
-    return data
+from src.common.io_utils import _read_json, _safe_filename, _write_json
+from src.common.payload_utils import _first_non_empty, _walk_objects
 
 
 def _normalize_space(text: str) -> str:
@@ -54,7 +26,7 @@ def _normalize_name(text: str) -> str:
     return re.sub(r"\s+", "", text or "")
 
 
-def _walk_strings(node: Any):
+def _walk_strings(node: Any) -> Iterable[str]:
     if isinstance(node, dict):
         for value in node.values():
             yield from _walk_strings(value)
@@ -156,10 +128,7 @@ def _find_related_law_mentions(
 
 
 def _collect_preview_text(texts: list[str], limit: int = 3) -> str:
-    candidates = [
-        text for text in texts
-        if len(text) >= 20
-    ]
+    candidates = [text for text in texts if len(text) >= 20]
     if not candidates:
         candidates = texts[:limit]
 
@@ -186,7 +155,6 @@ def _infer_relation_types(
     if target == "expc" and "referenced_interpretation" in enabled_rules:
         relation_types.append("referenced_interpretation")
 
-    # dedup preserving order
     deduped: list[str] = []
     seen: set[str] = set()
     for item in relation_types:
@@ -248,7 +216,6 @@ def _make_expanded_record(
     matched_law_names = _find_related_law_mentions(texts, family_law_names)
     cited_cases = _extract_case_numbers(texts)
 
-    # detail에서 직접 매칭이 안 나와도, 02단계에서 이미 law_name 기준으로 모은 후보면 source_law_name은 유지
     if not matched_law_names and source_law_name:
         matched_law_names = [source_law_name]
 
@@ -350,7 +317,7 @@ def collect_expanded_related_docs_for_family_result(
     targets: list[str] | None = None,
     max_records_per_target: int = 50,
 ) -> dict[str, Any]:
-    selected_targets = targets or ["prec", "detc", "expc", "decc"]
+    selected_targets = targets or list(TARGET_CONFIGS.keys())
 
     root_law_name = str(family_result.get("root_law_name") or "").strip()
     if not root_law_name:
@@ -377,9 +344,18 @@ def collect_expanded_related_docs_for_family_result(
     seen_records: set[str] = set()
 
     for target in selected_targets:
+        if target not in TARGET_CONFIGS:
+            result["targets"][target] = {
+                "detail_supported": False,
+                "source_file_count": 0,
+                "expanded_count": 0,
+            }
+            continue
+
         target_dir = raw_root_dir / target
+        detail_supported = TARGET_CONFIGS[target]["detail_endpoint"] is not None
         target_summary = {
-            "detail_supported": TARGET_CONFIGS[target]["detail_endpoint"] is not None,
+            "detail_supported": detail_supported,
             "source_file_count": 0,
             "expanded_count": 0,
         }
@@ -390,7 +366,7 @@ def collect_expanded_related_docs_for_family_result(
 
         expanded_for_target = 0
 
-        if TARGET_CONFIGS[target]["detail_endpoint"] is not None:
+        if detail_supported:
             files = sorted(target_dir.rglob("*__detail.json"))
             target_summary["source_file_count"] = len(files)
 
@@ -504,7 +480,7 @@ def collect_expanded_related_docs_for_family_result(
 
                     doc_id = str(record.get("doc_id") or "")
                     doc_stem = f"{target}_{doc_id or expanded_for_target}"
-                    
+
                     _write_json(
                         save_root_dir / target / f"{doc_stem}__expanded.json",
                         record,

@@ -1,15 +1,9 @@
 from __future__ import annotations
 
-import json
-import re
 from pathlib import Path
 from typing import Any
 
-from src.collector.law_body_collector import (
-    build_law_ref_from_search_item,
-    fetch_law_body_by_ref,
-    get_law_items_from_search,
-)
+from src.collector.law_body_collector import fetch_law_body_by_ref
 from src.collector.law_sub_article_collector import (
     SubArticleMode,
     collect_sub_articles_for_parsed_law,
@@ -19,39 +13,13 @@ from src.collector.raw_law_collector import (
     get_output_config,
     get_root_law_names,
 )
+from src.common.io_utils import _safe_filename, _write_json
 from src.parser.law_parser import parse_law_body, save_parsed_law
-
-
-def _safe_filename(text: str) -> str:
-    text = text.strip()
-    text = re.sub(r"[^\w가-힣.-]+", "_", text)
-    text = re.sub(r"_+", "_", text)
-    return text.strip("_") or "unnamed"
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
-def _normalize_name(text: str) -> str:
-    return re.sub(r"\s+", "", text or "")
-
-
-def classify_law_level(kind_name: str | None) -> str:
-    text = str(kind_name or "").strip()
-
-    if "법률" in text or text == "법":
-        return "법"
-    if "대통령령" in text or "시행령" in text:
-        return "시행령"
-    if "부령" in text or "시행규칙" in text:
-        return "시행규칙"
-
-    return text or "기타"
+from src.scope.resolver import (
+    classify_law_level,
+    is_allowed_level,
+    select_family_law_refs_from_search,
+)
 
 
 def get_allowed_law_levels(
@@ -67,56 +35,31 @@ def get_allowed_law_levels(
     return {str(level).strip() for level in include_law_levels if str(level).strip()}
 
 
-def is_allowed_level(classified_level: str, allowed_levels: set[str]) -> bool:
-    if classified_level in allowed_levels:
-        return True
+def get_part_policy(
+    scope: dict[str, Any],
+    file_id: str = "01_current_law",
+) -> dict[str, list[str]]:
+    output = get_output_config(scope, file_id=file_id)
+    include_parts = output.get("include_parts", [])
+    exclude_parts = output.get("exclude_parts", [])
 
-    if (
-        "직속하위법령" in allowed_levels
-        and classified_level in {"시행령", "시행규칙"}
-    ):
-        return True
+    if not isinstance(include_parts, list):
+        raise ValueError("include_parts must be a list")
+    if not isinstance(exclude_parts, list):
+        raise ValueError("exclude_parts must be a list")
 
-    return False
+    return {
+        "include_parts": [str(item).strip() for item in include_parts if str(item).strip()],
+        "exclude_parts": [str(item).strip() for item in exclude_parts if str(item).strip()],
+    }
 
 
-def select_family_law_refs_from_search(
-    current_law_list_payload: dict[str, Any],
-    root_law_name: str,
-    allowed_levels: set[str],
-) -> list[dict[str, Any]]:
-    items = get_law_items_from_search(current_law_list_payload)
-
-    normalized_root = _normalize_name(root_law_name)
-    refs: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
-
-    for item in items:
-        ref = build_law_ref_from_search_item(item)
-        law_name = str(ref.get("law_name") or "")
-        kind_name = str(ref.get("kind_name") or "")
-
-        if normalized_root not in _normalize_name(law_name):
-            continue
-
-        classified_level = classify_law_level(kind_name)
-        if not is_allowed_level(classified_level, allowed_levels):
-            continue
-
-        ref["classified_level"] = classified_level
-
-        dedup_key = (
-            str(ref.get("law_id") or ""),
-            str(ref.get("mst") or ""),
-            str(ref.get("ef_yd") or ""),
-        )
-        if dedup_key in seen:
-            continue
-
-        seen.add(dedup_key)
-        refs.append(ref)
-
-    return refs
+def should_include_descendants_from_system_diagram(
+    scope: dict[str, Any],
+    file_id: str = "01_current_law",
+) -> bool:
+    output = get_output_config(scope, file_id=file_id)
+    return bool(output.get("include_descendants_from_system_diagram", False))
 
 
 def _save_law_body_payload(
@@ -155,10 +98,15 @@ def collect_root_law_family(
     )
 
     allowed_levels = get_allowed_law_levels(scope)
+    part_policy = get_part_policy(scope)
+    include_descendants = should_include_descendants_from_system_diagram(scope)
+
     family_refs = select_family_law_refs_from_search(
         raw_record["current_law_list"],
         root_law_name=root_law_name,
         allowed_levels=allowed_levels,
+        system_diagram_detail=raw_record.get("system_diagram_detail"),
+        include_descendants_from_system_diagram=include_descendants,
     )
 
     collected_laws: list[dict[str, Any]] = []
@@ -167,7 +115,12 @@ def collect_root_law_family(
         law_body = fetch_law_body_by_ref(registry, oc, law_ref)
         raw_body_path = _save_law_body_payload(law_ref, law_body, raw_body_dir)
 
-        parsed_law = parse_law_body(law_body, law_ref=law_ref)
+        parsed_law = parse_law_body(
+            law_body,
+            law_ref=law_ref,
+            include_parts=part_policy["include_parts"],
+            exclude_parts=part_policy["exclude_parts"],
+        )
         parsed_path = save_parsed_law(parsed_law, normalized_dir)
 
         sub_records = collect_sub_articles_for_parsed_law(
@@ -185,8 +138,12 @@ def collect_root_law_family(
                 "law_id": law_ref.get("law_id"),
                 "mst": law_ref.get("mst"),
                 "ef_yd": law_ref.get("ef_yd"),
+                "kind_name": law_ref.get("kind_name"),
                 "classified_level": law_ref.get("classified_level"),
+                "scope_source": law_ref.get("scope_source"),
                 "parsed_articles_count": parsed_law.get("articles_count"),
+                "parsed_supplementary_count": parsed_law.get("supplementary_count"),
+                "parsed_appendices_count": parsed_law.get("appendices_count"),
                 "raw_body_path": str(raw_body_path),
                 "parsed_path": str(parsed_path),
                 "sub_article_count": len(sub_records),
@@ -198,6 +155,11 @@ def collect_root_law_family(
         "family_count": len(collected_laws),
         "laws": collected_laws,
         "system_diagram_ref": raw_record.get("system_diagram_ref"),
+        "scope_resolution": {
+            "include_descendants_from_system_diagram": include_descendants,
+            "source": "system_diagram" if include_descendants else "search_name_match",
+        },
+        "part_policy": part_policy,
     }
 
     _write_json(
@@ -221,7 +183,6 @@ def collect_all_root_law_families(
         root_law_names = root_law_names[:max_roots]
 
     results: list[dict[str, Any]] = []
-
     for root_law_name in root_law_names:
         result = collect_root_law_family(
             scope=scope,
