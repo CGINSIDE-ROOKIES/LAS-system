@@ -57,13 +57,58 @@ def _as_list(value: Any) -> list[Any]:
     return []
 
 
-def _normalize_text(value: Any) -> str | None:
+def _coerce_text(value: Any) -> str | None:
     if value in (None, ""):
         return None
-    text = str(value).strip()
+
+    text = str(value).replace("\r\n", "\n").replace("\r", "\n").strip()
     if not text:
         return None
-    return re.sub(r"\s+", " ", text)
+
+    return text
+
+
+def _normalize_text_preserve_structure(value: Any) -> str | None:
+    text = _coerce_text(value)
+    if text is None:
+        return None
+
+    normalized_lines: list[str] = []
+    prev_blank = False
+
+    for raw_line in text.split("\n"):
+        line = re.sub(r"[\t\f\v ]+", " ", raw_line).strip()
+        if not line:
+            if not prev_blank:
+                normalized_lines.append("")
+            prev_blank = True
+            continue
+
+        normalized_lines.append(line)
+        prev_blank = False
+
+    while normalized_lines and normalized_lines[0] == "":
+        normalized_lines.pop(0)
+    while normalized_lines and normalized_lines[-1] == "":
+        normalized_lines.pop()
+
+    normalized = "\n".join(normalized_lines).strip()
+    return normalized or None
+
+
+def _normalize_text_flat(value: Any) -> str | None:
+    text = _coerce_text(value)
+    if text is None:
+        return None
+
+    normalized = re.sub(r"\s+", " ", text).strip()
+    return normalized or None
+
+
+# backward-compatible helper for code that still expects the previous flat normalizer
+
+def _normalize_text(value: Any) -> str | None:
+    return _normalize_text_flat(value)
 
 
 def _dedup_texts(values: Iterable[str]) -> list[str]:
@@ -71,11 +116,16 @@ def _dedup_texts(values: Iterable[str]) -> list[str]:
     seen: set[str] = set()
 
     for value in values:
-        text = _normalize_text(value)
-        if text is None or text in seen:
+        dedup_key = _normalize_text_flat(value)
+        if dedup_key is None or dedup_key in seen:
             continue
-        seen.add(text)
-        results.append(text)
+
+        structured = _normalize_text_preserve_structure(value)
+        if structured is None:
+            continue
+
+        seen.add(dedup_key)
+        results.append(structured)
 
     return results
 
@@ -88,17 +138,39 @@ def _walk_strings(node: Any) -> Iterable[str]:
         for item in node:
             yield from _walk_strings(item)
     elif isinstance(node, str):
-        text = _normalize_text(node)
+        text = _coerce_text(node)
         if text:
             yield text
 
 
 def _join_nested_text(node: Any, *, exclude_strings: Iterable[str] = ()) -> str | None:
-    excluded = {_normalize_text(value) for value in exclude_strings if _normalize_text(value)}
-    texts = [text for text in _dedup_texts(_walk_strings(node)) if text not in excluded]
+    excluded = {
+        normalized
+        for value in exclude_strings
+        for normalized in [_normalize_text_flat(value)]
+        if normalized
+    }
+    texts = [text for text in _dedup_texts(_walk_strings(node)) if _normalize_text_flat(text) not in excluded]
     if not texts:
         return None
     return "\n".join(texts)
+
+
+def _extract_text_pair(
+    mapping: dict[str, Any],
+    keys: tuple[str, ...],
+    *,
+    fallback_to_nested: bool = False,
+    exclude_strings: Iterable[str] = (),
+) -> tuple[str | None, str | None]:
+    raw = _coerce_text(_first_non_empty(mapping, *keys))
+    if raw is None and fallback_to_nested:
+        raw = _join_nested_text(mapping, exclude_strings=exclude_strings)
+
+    if raw is None:
+        return None, None
+
+    return raw, _normalize_text_preserve_structure(raw)
 
 
 def get_law_root(payload: dict[str, Any]) -> dict[str, Any]:
@@ -256,13 +328,13 @@ def parse_subitem_unit(item_unit: dict[str, Any]) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
 
     for unit in get_subitem_units(item_unit):
+        raw_text, normalized_text = _extract_text_pair(unit, SUBITEM_TEXT_KEYS)
         results.append(
             {
                 "mok_code": _first_non_empty(unit, *SUBITEM_CODE_KEYS),
                 "subitem_no": _first_non_empty(unit, *SUBITEM_NO_KEYS),
-                "subitem_text": _normalize_text(
-                    _first_non_empty(unit, *SUBITEM_TEXT_KEYS)
-                ),
+                "subitem_text_raw": raw_text,
+                "subitem_text": normalized_text,
             }
         )
 
@@ -273,13 +345,13 @@ def parse_item_unit(paragraph_unit: dict[str, Any]) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
 
     for unit in get_item_units(paragraph_unit):
+        raw_text, normalized_text = _extract_text_pair(unit, ITEM_TEXT_KEYS)
         results.append(
             {
                 "ho_code": _first_non_empty(unit, *ITEM_CODE_KEYS),
                 "item_no": _first_non_empty(unit, *ITEM_NO_KEYS),
-                "item_text": _normalize_text(
-                    _first_non_empty(unit, *ITEM_TEXT_KEYS)
-                ),
+                "item_text_raw": raw_text,
+                "item_text": normalized_text,
                 "subitems": parse_subitem_unit(unit),
             }
         )
@@ -291,13 +363,13 @@ def parse_paragraph_unit(article_unit: dict[str, Any]) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
 
     for unit in get_paragraph_units(article_unit):
+        raw_text, normalized_text = _extract_text_pair(unit, PARAGRAPH_TEXT_KEYS)
         results.append(
             {
                 "hang_code": _first_non_empty(unit, *PARAGRAPH_CODE_KEYS),
                 "paragraph_no": _first_non_empty(unit, *PARAGRAPH_NO_KEYS),
-                "paragraph_text": _normalize_text(
-                    _first_non_empty(unit, *PARAGRAPH_TEXT_KEYS)
-                ),
+                "paragraph_text_raw": raw_text,
+                "paragraph_text": normalized_text,
                 "items": parse_item_unit(unit),
             }
         )
@@ -306,21 +378,16 @@ def parse_paragraph_unit(article_unit: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def parse_article_unit(article_unit: dict[str, Any]) -> dict[str, Any]:
+    article_title_raw, article_title = _extract_text_pair(article_unit, ARTICLE_TITLE_KEYS)
+    article_text_raw, article_text = _extract_text_pair(article_unit, ARTICLE_TEXT_KEYS)
+
     return {
-        "jo_code": _first_non_empty(
-            article_unit,
-            "JO",
-            "조문번호키",
-            "조문번호",
-            "jo_code",
-        ),
+        "jo_code": _first_non_empty(article_unit, *ARTICLE_CODE_KEYS),
         "article_no": _first_non_empty(article_unit, *ARTICLE_NO_KEYS),
-        "article_title": _normalize_text(
-            _first_non_empty(article_unit, *ARTICLE_TITLE_KEYS)
-        ),
-        "article_text": _normalize_text(
-            _first_non_empty(article_unit, *ARTICLE_TEXT_KEYS)
-        ),
+        "article_title_raw": article_title_raw,
+        "article_title": article_title,
+        "article_text_raw": article_text_raw,
+        "article_text": article_text,
         "paragraphs": parse_paragraph_unit(article_unit),
     }
 
@@ -358,14 +425,20 @@ def _extract_supplementary_units(law_root: dict[str, Any]) -> list[dict[str, Any
 
 
 def _parse_supplementary_unit(unit: dict[str, Any]) -> dict[str, Any]:
-    title = _normalize_text(_first_non_empty(unit, *SUPPLEMENTARY_TITLE_KEYS)) or "부칙"
-    text = _normalize_text(_first_non_empty(unit, *SUPPLEMENTARY_TEXT_KEYS))
-    if text is None:
-        text = _join_nested_text(unit, exclude_strings=[title])
+    title_raw = _coerce_text(_first_non_empty(unit, *SUPPLEMENTARY_TITLE_KEYS)) or "부칙"
+    title = _normalize_text_preserve_structure(title_raw) or "부칙"
+    text_raw, text = _extract_text_pair(
+        unit,
+        SUPPLEMENTARY_TEXT_KEYS,
+        fallback_to_nested=True,
+        exclude_strings=[title_raw],
+    )
 
     return {
         "supplementary_no": _first_non_empty(unit, *SUPPLEMENTARY_NO_KEYS),
+        "supplementary_title_raw": title_raw,
         "supplementary_title": title,
+        "supplementary_text_raw": text_raw,
         "supplementary_text": text,
     }
 
@@ -438,21 +511,26 @@ def parse_appendices(
     seen: set[tuple[str, str]] = set()
 
     for candidate in _iter_appendix_candidates(law_root):
-        title = _normalize_text(_first_non_empty(candidate, *APPENDIX_TITLE_KEYS))
-        if title is None:
-            title = _normalize_text(candidate.get("_synthetic_title"))
+        title_raw = _coerce_text(_first_non_empty(candidate, *APPENDIX_TITLE_KEYS))
+        if title_raw is None:
+            title_raw = _coerce_text(candidate.get("_synthetic_title"))
 
+        if title_raw is None:
+            continue
+
+        title = _normalize_text_preserve_structure(title_raw)
         if title is None:
             continue
 
         if not any(token in title for token in ("별표", "별지", "서식")):
             continue
 
-        text = _normalize_text(_first_non_empty(candidate, *APPENDIX_TEXT_KEYS))
-        if text is None:
-            text = _normalize_text(candidate.get("_synthetic_text"))
-        if text is None:
-            text = _join_nested_text(candidate, exclude_strings=[title])
+        text_raw, text = _extract_text_pair(
+            candidate,
+            APPENDIX_TEXT_KEYS,
+            fallback_to_nested=True,
+            exclude_strings=[title_raw],
+        )
         if text is None:
             continue
 
@@ -461,7 +539,9 @@ def parse_appendices(
             continue
 
         record = {
+            "appendix_title_raw": title_raw,
             "appendix_title": title,
+            "appendix_text_raw": text_raw,
             "appendix_text": text,
             "excluded": exclude_hit,
         }

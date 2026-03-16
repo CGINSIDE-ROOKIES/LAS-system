@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 
 from src.collector.legal_doc_collector import (
     DETAIL_LINK_KEYS_BY_TARGET,
@@ -19,9 +19,37 @@ from src.common.io_utils import _read_json, _write_json
 from src.common.payload_utils import _first_non_empty, _walk_objects
 from src.export.jsonl_builder import write_jsonl
 
+LawTextVariant = Literal["structure_preserved", "flat"]
+
 
 def _normalize_space(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _normalize_newlines(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _clean_structured_text(text: str) -> str:
+    text = _normalize_newlines(text).strip()
+    if not text:
+        return ""
+
+    lines: list[str] = []
+    prev_blank = False
+
+    for raw_line in text.split("\n"):
+        line = raw_line.rstrip()
+        if not line.strip():
+            if not prev_blank:
+                lines.append("")
+            prev_blank = True
+            continue
+
+        lines.append(line)
+        prev_blank = False
+
+    return "\n".join(lines).strip()
 
 
 def _stem_to_name(stem: str) -> str:
@@ -65,7 +93,7 @@ def _dedup_texts(texts: list[str]) -> list[str]:
     return results
 
 
-def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 150) -> list[str]:
+def _chunk_text_flat(text: str, max_chars: int = 1200, overlap: int = 150) -> list[str]:
     text = _normalize_space(text)
     if not text:
         return []
@@ -102,6 +130,102 @@ def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 150) -> list[st
     return chunks
 
 
+def _best_split_position(text: str, start: int, end: int) -> int | None:
+    candidates = [
+        ("\n\n", 2),
+        ("\n", 1),
+        (". ", 2),
+        ("。", 1),
+        (" ", 1),
+    ]
+
+    best_position: int | None = None
+    best_bonus = -1
+
+    for token, token_len in candidates:
+        position = text.rfind(token, start, end)
+        if position <= start + (end - start) // 2:
+            continue
+
+        adjusted = position + token_len
+        if adjusted > end:
+            adjusted = end
+
+        bonus = 2 if token == "\n\n" else 1 if token == "\n" else 0
+        if best_position is None or bonus > best_bonus or adjusted > best_position:
+            best_position = adjusted
+            best_bonus = bonus
+
+    return best_position
+
+
+def _chunk_text_preserve_structure(
+    text: str,
+    max_chars: int = 1200,
+    overlap: int = 150,
+) -> list[str]:
+    text = _clean_structured_text(text)
+    if not text:
+        return []
+
+    if len(text) <= max_chars:
+        return [text]
+
+    chunks: list[str] = []
+    start = 0
+
+    while start < len(text):
+        while start < len(text) and text[start].isspace():
+            start += 1
+        if start >= len(text):
+            break
+
+        end = min(len(text), start + max_chars)
+
+        if end < len(text):
+            split = _best_split_position(text, start, end)
+            if split is not None:
+                end = split
+
+        chunk = _clean_structured_text(text[start:end])
+        if chunk:
+            chunks.append(chunk)
+
+        if end >= len(text):
+            break
+
+        start = max(0, end - overlap)
+
+    return chunks
+
+
+def _choose_text(
+    node: dict[str, Any],
+    normalized_key: str,
+    raw_key: str,
+) -> str:
+    value = node.get(normalized_key)
+    if value not in (None, ""):
+        return str(value).strip()
+
+    raw_value = node.get(raw_key)
+    if raw_value not in (None, ""):
+        return str(raw_value).strip()
+
+    return ""
+
+
+def _combine_prefix(prefix: str, text: str) -> str:
+    prefix = str(prefix or "").strip()
+    text = str(text or "").strip()
+
+    if prefix and text:
+        return f"{prefix} {text}"
+    if text:
+        return text
+    return prefix
+
+
 def _format_subitems(subitems: list[dict[str, Any]]) -> list[str]:
     lines: list[str] = []
 
@@ -110,12 +234,10 @@ def _format_subitems(subitems: list[dict[str, Any]]) -> list[str]:
             continue
 
         prefix = str(subitem.get("subitem_no") or subitem.get("mok_code") or "").strip()
-        text = str(subitem.get("subitem_text") or "").strip()
-
-        if prefix and text:
-            lines.append(f"{prefix} {text}")
-        elif text:
-            lines.append(text)
+        text = _choose_text(subitem, "subitem_text", "subitem_text_raw")
+        line = _combine_prefix(prefix, text)
+        if line:
+            lines.append(line)
 
     return lines
 
@@ -128,12 +250,10 @@ def _format_items(items: list[dict[str, Any]]) -> list[str]:
             continue
 
         prefix = str(item.get("item_no") or item.get("ho_code") or "").strip()
-        text = str(item.get("item_text") or "").strip()
-
-        if prefix and text:
-            lines.append(f"{prefix} {text}")
-        elif text:
-            lines.append(text)
+        text = _choose_text(item, "item_text", "item_text_raw")
+        line = _combine_prefix(prefix, text)
+        if line:
+            lines.append(line)
 
         lines.extend(_format_subitems(item.get("subitems", [])))
 
@@ -148,12 +268,10 @@ def _format_paragraphs(paragraphs: list[dict[str, Any]]) -> list[str]:
             continue
 
         prefix = str(paragraph.get("paragraph_no") or paragraph.get("hang_code") or "").strip()
-        text = str(paragraph.get("paragraph_text") or "").strip()
-
-        if prefix and text:
-            lines.append(f"{prefix} {text}")
-        elif text:
-            lines.append(text)
+        text = _choose_text(paragraph, "paragraph_text", "paragraph_text_raw")
+        line = _combine_prefix(prefix, text)
+        if line:
+            lines.append(line)
 
         lines.extend(_format_items(paragraph.get("items", [])))
 
@@ -163,65 +281,98 @@ def _format_paragraphs(paragraphs: list[dict[str, Any]]) -> list[str]:
 def _build_law_article_text(parsed_law: dict[str, Any], article: dict[str, Any]) -> str:
     law_name = str(parsed_law.get("law_name") or "").strip()
     article_no = str(article.get("article_no") or article.get("jo_code") or "").strip()
-    article_title = str(article.get("article_title") or "").strip()
-    article_text = str(article.get("article_text") or "").strip()
+    article_title = _choose_text(article, "article_title", "article_title_raw")
+    article_text = _choose_text(article, "article_text", "article_text_raw")
 
-    lines = []
+    header_lines: list[str] = []
     if law_name:
-        lines.append(f"법령명: {law_name}")
+        header_lines.append(f"법령명: {law_name}")
     if article_no:
-        lines.append(f"조문번호: {article_no}")
+        header_lines.append(f"조문번호: {article_no}")
     if article_title:
-        lines.append(f"조문제목: {article_title}")
+        header_lines.append(f"조문제목: {article_title}")
+
+    body_lines: list[str] = []
     if article_text:
-        lines.append(article_text)
+        body_lines.append(article_text)
+    body_lines.extend(_format_paragraphs(article.get("paragraphs", [])))
 
-    lines.extend(_format_paragraphs(article.get("paragraphs", [])))
+    sections: list[str] = []
+    if header_lines:
+        sections.append("\n".join(header_lines))
+    if body_lines:
+        sections.append("\n".join(line for line in body_lines if line))
 
-    return "\n".join(line for line in lines if line).strip()
+    return _clean_structured_text("\n\n".join(section for section in sections if section))
 
 
 def _build_supplementary_text(parsed_law: dict[str, Any], supplementary: dict[str, Any]) -> str:
     law_name = str(parsed_law.get("law_name") or "").strip()
-    title = str(supplementary.get("supplementary_title") or "부칙").strip()
+    title = _choose_text(supplementary, "supplementary_title", "supplementary_title_raw") or "부칙"
     number = str(supplementary.get("supplementary_no") or "").strip()
-    text = str(supplementary.get("supplementary_text") or "").strip()
+    text = _choose_text(supplementary, "supplementary_text", "supplementary_text_raw")
 
-    lines = []
+    header_lines: list[str] = []
     if law_name:
-        lines.append(f"법령명: {law_name}")
-    lines.append("구성요소: 부칙")
+        header_lines.append(f"법령명: {law_name}")
+    header_lines.append("구성요소: 부칙")
     if title:
-        lines.append(f"부칙제목: {title}")
+        header_lines.append(f"부칙제목: {title}")
     if number:
-        lines.append(f"부칙번호: {number}")
-    if text:
-        lines.append(text)
+        header_lines.append(f"부칙번호: {number}")
 
-    return "\n".join(line for line in lines if line).strip()
+    sections = ["\n".join(header_lines)]
+    if text:
+        sections.append(text)
+
+    return _clean_structured_text("\n\n".join(section for section in sections if section))
 
 
 def _build_appendix_text(parsed_law: dict[str, Any], appendix: dict[str, Any]) -> str:
     law_name = str(parsed_law.get("law_name") or "").strip()
-    title = str(appendix.get("appendix_title") or "별표").strip()
-    text = str(appendix.get("appendix_text") or "").strip()
+    title = _choose_text(appendix, "appendix_title", "appendix_title_raw") or "별표"
+    text = _choose_text(appendix, "appendix_text", "appendix_text_raw")
 
-    lines = []
+    header_lines: list[str] = []
     if law_name:
-        lines.append(f"법령명: {law_name}")
-    lines.append("구성요소: 별표")
+        header_lines.append(f"법령명: {law_name}")
+    header_lines.append("구성요소: 별표")
     if title:
-        lines.append(f"별표제목: {title}")
-    if text:
-        lines.append(text)
+        header_lines.append(f"별표제목: {title}")
 
-    return "\n".join(line for line in lines if line).strip()
+    sections = ["\n".join(header_lines)]
+    if text:
+        sections.append(text)
+
+    return _clean_structured_text("\n\n".join(section for section in sections if section))
+
+
+def _apply_law_text_variant(text: str, variant: LawTextVariant) -> str:
+    if variant == "structure_preserved":
+        return _clean_structured_text(text)
+    if variant == "flat":
+        return _normalize_space(text)
+    raise ValueError(f"Unsupported law_text_variant: {variant}")
+
+
+def _chunk_law_text(
+    text: str,
+    *,
+    variant: LawTextVariant,
+    max_chars: int,
+    overlap: int,
+) -> list[str]:
+    prepared = _apply_law_text_variant(text, variant)
+    if variant == "structure_preserved":
+        return _chunk_text_preserve_structure(prepared, max_chars=max_chars, overlap=overlap)
+    return _chunk_text_flat(prepared, max_chars=max_chars, overlap=overlap)
 
 
 def build_law_records(
     normalized_base_dir: str | Path = "data/normalized/01_current_law",
     max_chars: int = 1200,
     overlap: int = 150,
+    law_text_variant: LawTextVariant = "structure_preserved",
 ) -> list[dict[str, Any]]:
     base_dir = Path(normalized_base_dir)
     records: list[dict[str, Any]] = []
@@ -246,7 +397,12 @@ def build_law_records(
                 article_no = article.get("article_no")
                 jo_code = article.get("jo_code")
                 article_text = _build_law_article_text(parsed_law, article)
-                chunks = _chunk_text(article_text, max_chars=max_chars, overlap=overlap)
+                chunks = _chunk_law_text(
+                    article_text,
+                    variant=law_text_variant,
+                    max_chars=max_chars,
+                    overlap=overlap,
+                )
 
                 for chunk_index, chunk in enumerate(chunks):
                     record_id = "::".join(
@@ -275,6 +431,7 @@ def build_law_records(
                             "article_no": article_no,
                             "jo_code": jo_code,
                             "chunk_index": chunk_index,
+                            "text_variant": law_text_variant,
                             "source_file_path": str(path),
                         }
                     )
@@ -286,7 +443,12 @@ def build_law_records(
                     continue
 
                 text = _build_supplementary_text(parsed_law, supplementary)
-                chunks = _chunk_text(text, max_chars=max_chars, overlap=overlap)
+                chunks = _chunk_law_text(
+                    text,
+                    variant=law_text_variant,
+                    max_chars=max_chars,
+                    overlap=overlap,
+                )
 
                 for chunk_index, chunk in enumerate(chunks):
                     record_id = "::".join(
@@ -315,6 +477,7 @@ def build_law_records(
                             "supplementary_no": supplementary.get("supplementary_no"),
                             "supplementary_title": supplementary.get("supplementary_title"),
                             "chunk_index": chunk_index,
+                            "text_variant": law_text_variant,
                             "source_file_path": str(path),
                         }
                     )
@@ -326,7 +489,12 @@ def build_law_records(
                     continue
 
                 text = _build_appendix_text(parsed_law, appendix)
-                chunks = _chunk_text(text, max_chars=max_chars, overlap=overlap)
+                chunks = _chunk_law_text(
+                    text,
+                    variant=law_text_variant,
+                    max_chars=max_chars,
+                    overlap=overlap,
+                )
 
                 for chunk_index, chunk in enumerate(chunks):
                     record_id = "::".join(
@@ -354,6 +522,7 @@ def build_law_records(
                             "scope_source": scope_source,
                             "appendix_title": appendix.get("appendix_title"),
                             "chunk_index": chunk_index,
+                            "text_variant": law_text_variant,
                             "source_file_path": str(path),
                         }
                     )
@@ -388,7 +557,7 @@ def _build_related_doc_records_from_text(
     max_chars: int,
     overlap: int,
 ) -> list[dict[str, Any]]:
-    chunks = _chunk_text(text, max_chars=max_chars, overlap=overlap)
+    chunks = _chunk_text_flat(text, max_chars=max_chars, overlap=overlap)
     records: list[dict[str, Any]] = []
 
     for chunk_index, chunk in enumerate(chunks):
@@ -582,6 +751,7 @@ def build_and_write_datasets(
     output_dir: str | Path = "data/dataset",
     max_chars: int = 1200,
     overlap: int = 150,
+    law_text_variant: LawTextVariant = "structure_preserved",
 ) -> dict[str, Any]:
     output_dir = Path(output_dir)
 
@@ -589,6 +759,7 @@ def build_and_write_datasets(
         normalized_base_dir=normalized_base_dir,
         max_chars=max_chars,
         overlap=overlap,
+        law_text_variant=law_text_variant,
     )
     related_records = build_related_doc_records(
         raw_related_base_dir=raw_related_base_dir,
@@ -611,6 +782,7 @@ def build_and_write_datasets(
         "related_doc_record_count": len(related_records),
         "max_chars": max_chars,
         "overlap": overlap,
+        "law_text_variant": law_text_variant,
     }
 
     _write_json(output_dir / "dataset_manifest.json", manifest)

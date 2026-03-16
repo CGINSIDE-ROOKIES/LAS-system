@@ -1,0 +1,35 @@
+{
+  "project": "law-corpus-collector-labor-experiment",
+  "outputs": [
+    {
+      "file_id": "01_current_law",
+      "file_name": "01_current_law.json",
+      "unit_type": "article",
+      "roots": {
+        "labor_only": [
+          "근로기준법"
+        ]
+      },
+      "include_descendants_from_system_diagram": true,
+      "include_law_levels": [
+        "법",
+        "시행령",
+        "시행규칙",
+        "직속하위법령"
+      ],
+      "include_parts": [
+        "별표"
+      ],
+      "exclude_parts": [
+        "별지서식"
+      ]
+    }
+  ],
+  "storage": {
+    "format": "JSON",
+    "later_transform": "JSONL"
+  },
+  "schedule": {
+    "law_delta_daily": true
+  }
+}

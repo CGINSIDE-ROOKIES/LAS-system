@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -8,34 +7,8 @@ from typing import Any
 from src.collector.raw_law_collector import fetch_current_law_list
 from src.common.io_utils import _safe_filename, _write_json
 from src.common.payload_utils import _ensure_success_payload
-from src.core.http_client import execute_json_request
+from src.core.http_client import execute_api_request
 from src.core.request_builder import build_request
-
-def _safe_filename(text: str) -> str:
-    text = text.strip()
-    text = re.sub(r"[^\w가-힣.-]+", "_", text)
-    text = re.sub(r"_+", "_", text)
-    return text.strip("_") or "unnamed"
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
-def _is_generic_error_payload(payload: dict[str, Any]) -> bool:
-    keys = set(payload.keys())
-    return keys.issubset({"result", "msg"}) and "msg" in payload
-
-
-def _ensure_success_payload(endpoint_key: str, payload: dict[str, Any]) -> None:
-    if _is_generic_error_payload(payload):
-        raise RuntimeError(
-            f"{endpoint_key} returned error payload: {payload}"
-        )
 
 
 def _normalize_name(text: str) -> str:
@@ -127,9 +100,23 @@ def fetch_law_body_by_ref(
         "law_current_detail",
         runtime_params,
     )
-    payload = execute_json_request(request)
+    result = execute_api_request(request)
+    payload = result["parsed"]
+
+    if not isinstance(payload, dict):
+        raise RuntimeError("law_current_detail parsed payload must be dict")
+
     _ensure_success_payload("law_current_detail", payload)
-    return payload
+    return {
+        "response_meta": {
+            "format": result["format"],
+            "content_type": result["content_type"],
+            "status_code": result["status_code"],
+            "url": result["url"],
+        },
+        "raw_text": result["text"],
+        "parsed": payload,
+    }
 
 
 def collect_root_law_body(
@@ -138,19 +125,23 @@ def collect_root_law_body(
     law_name: str,
     save_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    current_law_list = fetch_current_law_list(registry, oc, law_name)
+    current_law_list_result = fetch_current_law_list(registry, oc, law_name)
+    current_law_list = current_law_list_result["parsed"]
 
     law_ref = select_best_law_ref_from_search(current_law_list, law_name)
     if law_ref is None:
         raise RuntimeError(f"No law candidate found for '{law_name}'")
 
-    law_body = fetch_law_body_by_ref(registry, oc, law_ref)
+    law_body_result = fetch_law_body_by_ref(registry, oc, law_ref)
+    law_body = law_body_result["parsed"]
 
     record = {
         "law_name": law_name,
         "law_ref": law_ref,
         "current_law_list": current_law_list,
+        "current_law_list_response": current_law_list_result,
         "law_body": law_body,
+        "law_body_response": law_body_result,
     }
 
     if save_dir is not None:
@@ -158,12 +149,20 @@ def collect_root_law_body(
         stem = _safe_filename(law_name)
 
         _write_json(
-            base_dir / f"{stem}__law_current_list.json",
+            base_dir / f"{stem}__law_current_list.parsed.json",
             current_law_list,
         )
         _write_json(
-            base_dir / f"{stem}__law_current_detail.json",
+            base_dir / f"{stem}__law_current_list.response.json",
+            current_law_list_result,
+        )
+        _write_json(
+            base_dir / f"{stem}__law_current_detail.parsed.json",
             law_body,
+        )
+        _write_json(
+            base_dir / f"{stem}__law_current_detail.response.json",
+            law_body_result,
         )
         _write_json(
             base_dir / f"{stem}__law_body_bundle.json",
@@ -183,23 +182,40 @@ def collect_root_law_body_from_raw_record(
     if not law_name:
         raise ValueError("raw_record must contain 'law_name'")
 
-    current_law_list = raw_record.get("current_law_list")
-    if not isinstance(current_law_list, dict):
+    current_law_list_obj = raw_record.get("current_law_list")
+    if not isinstance(current_law_list_obj, dict):
         raise ValueError("raw_record must contain 'current_law_list' as dict")
+
+    if "parsed" in current_law_list_obj and isinstance(current_law_list_obj["parsed"], dict):
+        current_law_list_result = current_law_list_obj
+        current_law_list = current_law_list_obj["parsed"]
+    else:
+        current_law_list_result = {
+            "response_meta": None,
+            "raw_text": None,
+            "parsed": current_law_list_obj,
+        }
+        current_law_list = current_law_list_obj
 
     law_ref = select_best_law_ref_from_search(current_law_list, law_name)
     if law_ref is None:
         raise RuntimeError(f"No law candidate found for '{law_name}'")
 
-    law_body = fetch_law_body_by_ref(registry, oc, law_ref)
+    law_body_result = fetch_law_body_by_ref(registry, oc, law_ref)
+    law_body = law_body_result["parsed"]
 
     record = {
         "law_name": law_name,
         "law_ref": law_ref,
         "source_raw_record": {
-            "system_diagram_ref": raw_record.get("system_diagram_ref"),
+            "law_ref": raw_record.get("law_ref"),
+            "system_diagram_detail": raw_record.get("system_diagram_detail"),
+            "system_diagram_detail_response": raw_record.get("system_diagram_detail_response"),
         },
+        "current_law_list": current_law_list,
+        "current_law_list_response": current_law_list_result,
         "law_body": law_body,
+        "law_body_response": law_body_result,
     }
 
     if save_dir is not None:
@@ -207,8 +223,20 @@ def collect_root_law_body_from_raw_record(
         stem = _safe_filename(law_name)
 
         _write_json(
-            base_dir / f"{stem}__law_current_detail.json",
+            base_dir / f"{stem}__law_current_list.parsed.json",
+            current_law_list,
+        )
+        _write_json(
+            base_dir / f"{stem}__law_current_list.response.json",
+            current_law_list_result,
+        )
+        _write_json(
+            base_dir / f"{stem}__law_current_detail.parsed.json",
             law_body,
+        )
+        _write_json(
+            base_dir / f"{stem}__law_current_detail.response.json",
+            law_body_result,
         )
         _write_json(
             base_dir / f"{stem}__law_body_bundle.json",

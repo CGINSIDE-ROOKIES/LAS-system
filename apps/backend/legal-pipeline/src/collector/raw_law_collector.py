@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -11,8 +10,9 @@ from src.common.payload_utils import (
     _first_non_empty,
     _walk_objects,
 )
-from src.core.http_client import execute_json_request
+from src.core.http_client import execute_api_request
 from src.core.request_builder import build_request
+
 
 def get_output_config(
     scope: dict[str, Any],
@@ -56,51 +56,6 @@ def get_root_law_names(
             names.append(normalized)
 
     return names
-
-
-def _safe_filename(text: str) -> str:
-    text = text.strip()
-    text = re.sub(r"[^\w가-힣.-]+", "_", text)
-    text = re.sub(r"_+", "_", text)
-    return text.strip("_") or "unnamed"
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
-def _is_generic_error_payload(payload: dict[str, Any]) -> bool:
-    keys = set(payload.keys())
-    return keys.issubset({"result", "msg"}) and "msg" in payload
-
-
-def _ensure_success_payload(endpoint_key: str, payload: dict[str, Any]) -> None:
-    if _is_generic_error_payload(payload):
-        raise RuntimeError(
-            f"{endpoint_key} returned error payload: {payload}"
-        )
-
-
-def _walk_objects(node: Any):
-    if isinstance(node, dict):
-        yield node
-        for value in node.values():
-            yield from _walk_objects(value)
-    elif isinstance(node, list):
-        for item in node:
-            yield from _walk_objects(item)
-
-
-def _first_non_empty(mapping: dict[str, Any], *keys: str) -> Any:
-    for key in keys:
-        value = mapping.get(key)
-        if value not in (None, "", []):
-            return value
-    return None
 
 
 def _normalize_name(text: str) -> str:
@@ -207,9 +162,23 @@ def fetch_current_law_list(
             "nw": "3",
         },
     )
-    payload = execute_json_request(request)
+    result = execute_api_request(request)
+    payload = result["parsed"]
+
+    if not isinstance(payload, dict):
+        raise RuntimeError("law_current_list parsed payload must be dict")
+
     _ensure_success_payload("law_current_list", payload)
-    return payload
+    return {
+        "response_meta": {
+            "format": result["format"],
+            "content_type": result["content_type"],
+            "status_code": result["status_code"],
+            "url": result["url"],
+        },
+        "raw_text": result["text"],
+        "parsed": payload,
+    }
 
 
 def fetch_system_diagram_list(
@@ -225,9 +194,23 @@ def fetch_system_diagram_list(
             "query": query,
         },
     )
-    payload = execute_json_request(request)
+    result = execute_api_request(request)
+    payload = result["parsed"]
+
+    if not isinstance(payload, dict):
+        raise RuntimeError("law_system_diagram_list parsed payload must be dict")
+
     _ensure_success_payload("law_system_diagram_list", payload)
-    return payload
+    return {
+        "response_meta": {
+            "format": result["format"],
+            "content_type": result["content_type"],
+            "status_code": result["status_code"],
+            "url": result["url"],
+        },
+        "raw_text": result["text"],
+        "parsed": payload,
+    }
 
 
 def fetch_system_diagram_detail(
@@ -249,9 +232,23 @@ def fetch_system_diagram_detail(
         "law_system_diagram_detail",
         runtime_params,
     )
-    payload = execute_json_request(request)
+    result = execute_api_request(request)
+    payload = result["parsed"]
+
+    if not isinstance(payload, dict):
+        raise RuntimeError("law_system_diagram_detail parsed payload must be dict")
+
     _ensure_success_payload("law_system_diagram_detail", payload)
-    return payload
+    return {
+        "response_meta": {
+            "format": result["format"],
+            "content_type": result["content_type"],
+            "status_code": result["status_code"],
+            "url": result["url"],
+        },
+        "raw_text": result["text"],
+        "parsed": payload,
+    }
 
 
 def collect_root_law_raw(
@@ -260,26 +257,35 @@ def collect_root_law_raw(
     law_name: str,
     save_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    current_law_list = fetch_current_law_list(registry, oc, law_name)
-    system_diagram_list = fetch_system_diagram_list(registry, oc, law_name)
+    current_law_list_result = fetch_current_law_list(registry, oc, law_name)
+    system_diagram_list_result = fetch_system_diagram_list(registry, oc, law_name)
+
+    current_law_list = current_law_list_result["parsed"]
+    system_diagram_list = system_diagram_list_result["parsed"]
 
     refs = extract_system_diagram_refs(system_diagram_list)
     best_ref = select_best_system_diagram_ref(refs, law_name)
 
+    system_diagram_detail_result: dict[str, Any] | None = None
     system_diagram_detail: dict[str, Any] | None = None
+
     if best_ref is not None:
-        system_diagram_detail = fetch_system_diagram_detail(
+        system_diagram_detail_result = fetch_system_diagram_detail(
             registry,
             oc,
             best_ref,
         )
+        system_diagram_detail = system_diagram_detail_result["parsed"]
 
     record = {
         "law_name": law_name,
+        "law_ref": best_ref,
         "current_law_list": current_law_list,
+        "current_law_list_response": current_law_list_result,
         "system_diagram_list": system_diagram_list,
-        "system_diagram_ref": best_ref,
+        "system_diagram_list_response": system_diagram_list_result,
         "system_diagram_detail": system_diagram_detail,
+        "system_diagram_detail_response": system_diagram_detail_result,
     }
 
     if save_dir is not None:
@@ -287,18 +293,35 @@ def collect_root_law_raw(
         stem = _safe_filename(law_name)
 
         _write_json(
-            base_dir / f"{stem}__law_current_list.json",
+            base_dir / f"{stem}__law_current_list.parsed.json",
             current_law_list,
         )
         _write_json(
-            base_dir / f"{stem}__law_system_diagram_list.json",
+            base_dir / f"{stem}__law_current_list.response.json",
+            current_law_list_result,
+        )
+
+        _write_json(
+            base_dir / f"{stem}__law_system_diagram_list.parsed.json",
             system_diagram_list,
         )
+        _write_json(
+            base_dir / f"{stem}__law_system_diagram_list.response.json",
+            system_diagram_list_result,
+        )
+
         if system_diagram_detail is not None:
             _write_json(
-                base_dir / f"{stem}__law_system_diagram_detail.json",
+                base_dir / f"{stem}__law_system_diagram_detail.parsed.json",
                 system_diagram_detail,
             )
+
+        if system_diagram_detail_result is not None:
+            _write_json(
+                base_dir / f"{stem}__law_system_diagram_detail.response.json",
+                system_diagram_detail_result,
+            )
+
         _write_json(
             base_dir / f"{stem}__raw_bundle.json",
             record,
