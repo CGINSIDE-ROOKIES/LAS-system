@@ -5,6 +5,7 @@
   uv run python scripts/query_all_retrieval.py --question "연장근로 최대 시간은?" --top-k 5
   uv run python scripts/query_all_retrieval.py --interactive --top-k 5
   uv run python scripts/query_all_retrieval.py --question "..." --llm-context-json
+  uv run python scripts/query_all_retrieval.py --question "..." --prompt-text
 """
 
 from __future__ import annotations
@@ -22,6 +23,12 @@ from retrieval_common import (
     require_env_or_arg,
     search_bm25,
     search_qdrant,
+)
+
+DEFAULT_SYSTEM_PROMPT = (
+    "당신은 법률 Q&A 보조 시스템입니다.\n"
+    "반드시 제공된 법령 및 판례 문서를 근거로 답변하십시오.\n"
+    "근거가 없는 경우 추측하지 말고, 근거 부족을 명확히 말하십시오."
 )
 
 
@@ -152,21 +159,105 @@ def _build_llm_context_text(
     contexts: list[dict[str, object]],
     law_context_added: bool,
 ) -> str:
-    """LLM 프롬프트에 바로 삽입할 수 있는 텍스트 형식으로 컨텍스트를 포맷한다."""
-    lines: list[str] = [f"[질문]\n{question}", "", "[컨텍스트]"]
+    """LLM에 바로 전달 가능한 구조화 텍스트를 생성한다.
+
+    LLM이 기준/근거 문서를 빠르게 파악하도록 law 계열을 먼저 제시한다.
+    """
+    lines: list[str] = [f"[질문]\n{question}", "", "[메타]"]
+    lines.append(f"- law_context_added: {str(law_context_added).lower()}")
+    lines.append(f"- context_docs: {len(contexts)}")
+    lines.append("")
+    lines.append("[참고 법령 및 판례]")
+
     if not law_context_added:
-        lines.append("[주의] 이번 결과에는 요청한 수의 law 문서가 없어 law 컨텍스트를 추가하지 않았습니다.")
-        lines.append("")
-    if not contexts:
-        lines.append("(없음)")
-        return "\n".join(lines)
-    for i, ctx in enumerate(contexts, start=1):
         lines.append(
-            f"{i}. source_id={ctx.get('source_id', '')} law_name={ctx.get('law_name', '')} doc_type={ctx.get('doc_type', '')}"
+            "- 주의: 이번 결과에는 요청한 수의 법령(law) 문서가 포함되지 않았습니다."
         )
-        lines.append(str(ctx.get("content", "")))
+
+    if not contexts:
+        lines.append("(검색 결과 없음)")
+        return "\n".join(lines)
+
+    # LLM 답변 안정성을 위해 law 계열 문서를 먼저 제시.
+    type_order = {"law": 0, "expc": 1, "prec": 2, "decc": 3, "detc": 4}
+    ordered = sorted(
+        enumerate(contexts),
+        key=lambda item: (
+            type_order.get(str(item[1].get("doc_type", "") or ""), 9),
+            item[0],
+        ),
+    )
+
+    for i, (_, ctx) in enumerate(ordered, start=1):
+        source_id = str(ctx.get("source_id", "") or "")
+        doc_type = str(ctx.get("doc_type", "") or "")
+        law_name = str(ctx.get("law_name", "") or "")
+        content = str(ctx.get("content", "") or "")
+        law_name_disp = law_name if law_name else "-"
+        lines.append(
+            f"{i}. ({doc_type}) law_name={law_name_disp} | source_id={source_id}"
+        )
+        lines.append(content)
         lines.append("")
+
     return "\n".join(lines).strip()
+
+
+def _build_retrieved_context_text(
+    contexts: list[dict[str, object]],
+    law_context_added: bool,
+) -> str:
+    """최종 프롬프트에 삽입할 retrieved context 본문을 생성한다."""
+    lines: list[str] = []
+    lines.append(f"- law_context_added: {str(law_context_added).lower()}")
+    lines.append(f"- context_docs: {len(contexts)}")
+    if not law_context_added:
+        lines.append("- 주의: 요청한 수의 법령(law) 문서가 포함되지 않았습니다.")
+    lines.append("")
+
+    if not contexts:
+        lines.append("(검색 결과 없음)")
+        return "\n".join(lines)
+
+    type_order = {"law": 0, "expc": 1, "prec": 2, "decc": 3, "detc": 4}
+    ordered = sorted(
+        enumerate(contexts),
+        key=lambda item: (
+            type_order.get(str(item[1].get("doc_type", "") or ""), 9),
+            item[0],
+        ),
+    )
+
+    for i, (_, ctx) in enumerate(ordered, start=1):
+        source_id = str(ctx.get("source_id", "") or "")
+        doc_type = str(ctx.get("doc_type", "") or "")
+        law_name = str(ctx.get("law_name", "") or "")
+        content = str(ctx.get("content", "") or "")
+        law_name_disp = law_name if law_name else "-"
+        lines.append(
+            f"{i}. ({doc_type}) law_name={law_name_disp} | source_id={source_id}"
+        )
+        lines.append(content)
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+def _build_final_prompt_text(
+    *,
+    system_prompt: str,
+    retrieved_context_text: str,
+    user_question: str,
+) -> str:
+    """LLM 최종 입력 프롬프트를 텍스트로 생성한다."""
+    return (
+        "[System Prompt]\n"
+        f"{system_prompt.strip()}\n\n"
+        "[Retrieved Context]\n"
+        f"{retrieved_context_text.strip()}\n\n"
+        "[User Question]\n"
+        f"{user_question.strip()}"
+    )
 
 
 # ── 단일 질문 실행 ────────────────────────────────────────────────────────────
@@ -268,6 +359,34 @@ def run_single_query(args: argparse.Namespace, question: str) -> int:
         print(_build_llm_context_text(question, contexts, law_context_added))
         return 0
 
+    retrieved_context_text = _build_retrieved_context_text(
+        contexts, law_context_added
+    )
+
+    if args.prompt_json:
+        print(
+            json.dumps(
+                {
+                    "system_prompt": args.system_prompt,
+                    "retrieved_context": retrieved_context_text,
+                    "user_question": question,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
+    if args.prompt_text:
+        print(
+            _build_final_prompt_text(
+                system_prompt=args.system_prompt,
+                retrieved_context_text=retrieved_context_text,
+                user_question=question,
+            )
+        )
+        return 0
+
     if args.json:
         # 세 백엔드 결과를 모두 JSON으로 출력
         print(
@@ -332,6 +451,13 @@ def parse_args() -> argparse.Namespace:
     # LLM 컨텍스트 출력 옵션
     p.add_argument("--llm-context-json", action="store_true", help="RRF 결과를 LLM 입력용 JSON 컨텍스트로 출력")
     p.add_argument("--llm-context-text", action="store_true", help="RRF 결과를 LLM 프롬프트용 텍스트로 출력")
+    p.add_argument("--prompt-json", action="store_true", help="LLM 최종 프롬프트 구조를 JSON으로 출력")
+    p.add_argument("--prompt-text", action="store_true", help="LLM 최종 프롬프트 텍스트를 출력")
+    p.add_argument(
+        "--system-prompt",
+        default=DEFAULT_SYSTEM_PROMPT,
+        help="최종 프롬프트 생성 시 사용할 시스템 프롬프트",
+    )
     p.add_argument("--max-content-chars", type=int, default=1200, help="컨텍스트 문서당 최대 글자 수")
     p.add_argument("--max-total-chars", type=int, default=6000, help="컨텍스트 전체 최대 글자 수")
     p.add_argument("--min-law-contexts", type=int, default=1, help="LLM 컨텍스트에 포함할 최소 law 문서 수")
