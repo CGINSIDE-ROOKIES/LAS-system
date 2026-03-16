@@ -8,3 +8,6 @@
 
 # Windows ADS metadata files
 *:Zone.Identifier
+
+/docs/
+/docs/**

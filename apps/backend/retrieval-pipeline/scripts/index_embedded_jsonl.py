@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """Index pre-embedded JSONL into Qdrant and OpenSearch.
 
+[빠른 실행 방법]
+1) 환경변수 로드
+   cp .env.example .env
+   set -a && source .env && set +a
+2) 인덱싱 실행
+   python3 scripts/index_embedded_jsonl.py --batch-size 256
+3) 업로드 없이 입력 확인만
+   python3 scripts/index_embedded_jsonl.py --dry-run --limit 100
+
 Expected JSONL row (example):
 {
   "point_id": "law::...",

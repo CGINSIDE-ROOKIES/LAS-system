@@ -15,180 +15,15 @@ import argparse
 import json
 import os
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
-from typing import Any
+
+from retrieval_common import (
+    DEFAULT_EMBEDDING_MODEL,
+    require_env_or_arg,
+    search_qdrant,
+)
 
 
-DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-
-
-def qdrant_numeric_id(source_id: str) -> int:
-    import hashlib
-
-    digest = hashlib.sha1(source_id.encode("utf-8")).hexdigest()[:16]
-    return int(digest, 16)
-
-
-def require_env_or_arg(
-    value: str | None, env_name: str, fallback: str | None = None
-) -> str:
-    if value and value.strip():
-        return value.strip()
-    env_val = os.getenv(env_name, "").strip()
-    if env_val:
-        return env_val
-    if fallback is not None:
-        return fallback
-    raise SystemExit(
-        f"Missing required setting: --{env_name.lower().replace('_', '-')} or {env_name}"
-    )
-
-
-def http_json(
-    method: str,
-    url: str,
-    payload: dict[str, Any],
-    headers: dict[str, str],
-    timeout: int,
-) -> dict[str, Any]:
-    req = urllib.request.Request(
-        url=url,
-        method=method,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-    )
-    for k, v in headers.items():
-        req.add_header(k, v)
-
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-            return json.loads(raw) if raw.strip() else {}
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise SystemExit(f"HTTP {exc.code} {method} {url}\n{body}") from exc
-    except urllib.error.URLError as exc:
-        raise SystemExit(f"Network error {method} {url}: {exc}") from exc
-
-
-def embed_query(text: str, model_name: str) -> list[float]:
-    try:
-        from sentence_transformers import SentenceTransformer
-    except Exception as exc:  # pragma: no cover
-        raise SystemExit(
-            "sentence-transformers가 필요합니다.\n"
-            "설치: uv add sentence-transformers 또는 pip install sentence-transformers"
-        ) from exc
-
-    model = SentenceTransformer(model_name)
-    vec = model.encode(text, normalize_embeddings=True)
-    return vec.tolist() if hasattr(vec, "tolist") else list(vec)
-
-
-def build_filter(
-    doc_types: list[str] | None, law_names: list[str] | None
-) -> dict[str, Any] | None:
-    must: list[dict[str, Any]] = []
-    if doc_types:
-        must.append(
-            {
-                "key": "doc_type",
-                "match": {"any": doc_types},
-            }
-        )
-    if law_names:
-        must.append(
-            {
-                "key": "law_name",
-                "match": {"any": law_names},
-            }
-        )
-
-    if not must:
-        return None
-    return {"must": must}
-
-
-def _dedup_by_source_id(rows: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
-    """source_id 기준 중복 제거 후 top_k 반환 (score 내림차순 유지)."""
-    seen: set[str] = set()
-    deduped: list[dict[str, Any]] = []
-    for row in rows:
-        sid = (row.get("payload") or {}).get("source_id", "")
-        key = sid if sid else f"__id_{row.get('id')}"
-        if key not in seen:
-            seen.add(key)
-            deduped.append(row)
-        if len(deduped) >= top_k:
-            break
-    return deduped
-
-
-def qdrant_search(
-    *,
-    qdrant_url: str,
-    collection: str,
-    api_key: str | None,
-    vector: list[float],
-    top_k: int,
-    timeout: int,
-    query_source_id: str | None,
-    doc_types: list[str] | None,
-    law_names: list[str] | None,
-) -> list[dict[str, Any]]:
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["api-key"] = api_key
-
-    must_not: list[dict[str, Any]] = []
-    if query_source_id:
-        must_not.append({"has_id": [qdrant_numeric_id(query_source_id)]})
-
-    # 중복 제거 후 top_k를 맞추기 위해 여유분(x2) 요청
-    fetch_limit = max(1, top_k * 2)
-
-    payload: dict[str, Any] = {
-        "vector": vector,
-        "limit": fetch_limit,
-        "with_payload": True,
-        "with_vector": False,
-    }
-
-    filt = build_filter(doc_types, law_names)
-    if filt or must_not:
-        filter_obj = filt or {}
-        if must_not:
-            filter_obj["must_not"] = must_not
-        payload["filter"] = filter_obj
-
-    url = f"{qdrant_url.rstrip('/')}/collections/{urllib.parse.quote(collection)}/points/search"
-    res = http_json("POST", url, payload, headers, timeout)
-    result = res.get("result", [])
-    rows = result if isinstance(result, list) else []
-    return _dedup_by_source_id(rows, top_k)
-
-
-def normalize_results(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    normalized: list[dict[str, Any]] = []
-    for i, row in enumerate(rows, start=1):
-        payload = row.get("payload") or {}
-        text = str(payload.get("text", "") or "")
-        normalized.append(
-            {
-                "rank": i,
-                "score": row.get("score"),
-                "source_id": payload.get("source_id", ""),
-                "doc_type": payload.get("doc_type", ""),
-                "law_name": payload.get("law_name", ""),
-                "text": text,
-                "snippet": text.replace("\n", " ")[:180],
-            }
-        )
-    return normalized
-
-
-def print_results(question: str, rows: list[dict[str, Any]]) -> None:
+def print_results(question: str, rows: list[dict[str, object]]) -> None:
     print(f"\n[Q] {question}")
     if not rows:
         print("[INFO] 검색 결과 없음")
@@ -196,10 +31,10 @@ def print_results(question: str, rows: list[dict[str, Any]]) -> None:
 
     for row in rows:
         print(f"\n#{row['rank']} score={row['score']}")
-        source_id = row.get("source_id", "")
-        doc_type = row.get("doc_type", "")
-        law_name = row.get("law_name", "")
-        snippet = row.get("snippet", "")
+        source_id = str(row.get("source_id", "") or "")
+        doc_type = str(row.get("doc_type", "") or "")
+        law_name = str(row.get("law_name", "") or "")
+        snippet = str(row.get("snippet", "") or "")
         if source_id:
             print(f"source_id: {source_id}")
         if doc_type or law_name:
@@ -218,19 +53,19 @@ def run_single_query(args: argparse.Namespace, question: str) -> int:
     )
     api_key = args.qdrant_api_key or os.getenv("QDRANT_API_KEY", "").strip() or None
 
-    vector = embed_query(question, model_name)
-    rows = qdrant_search(
+    rows = search_qdrant(
+        question,
+        args.top_k,
         qdrant_url=qdrant_url,
         collection=collection,
-        api_key=api_key,
-        vector=vector,
-        top_k=args.top_k,
         timeout=args.timeout,
-        query_source_id=None,
+        embedding_model=model_name,
+        api_key=api_key,
         doc_types=args.doc_type or None,
         law_names=args.law_name or None,
+        dedup=True,
+        fetch_multiplier=2,
     )
-    normalized = normalize_results(rows)
 
     if args.json:
         print(
@@ -239,14 +74,14 @@ def run_single_query(args: argparse.Namespace, question: str) -> int:
                     "backend": "qdrant",
                     "question": question,
                     "top_k": args.top_k,
-                    "results": normalized,
+                    "results": rows,
                 },
                 ensure_ascii=False,
                 indent=2,
             )
         )
     else:
-        print_results(question, normalized)
+        print_results(question, rows)
     return 0
 
 
