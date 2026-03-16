@@ -206,7 +206,7 @@ def table_formatter(irs: dict[str, IRChunk]) -> str:
 
 def _export_article_to_markdown(article: IRGroup) -> str:
     """Build ``article.formatted_str`` from its IRChunks and return it."""
-    if not article.IRchunks or not article.IRchunk_ids:
+    if not article.ir_chunks or not article.ir_chunk_ids:
         return _normalize_enclosed_numbers(article.formatted_str)
 
     parts: list[str] = []
@@ -215,7 +215,7 @@ def _export_article_to_markdown(article: IRGroup) -> str:
     join_points: list[int] = []             # one entry per IRchunk_ids element
     raw_spans: list[tuple[int, int, str]] = []  # per-emitted-part spans (pre-strip)
 
-    for id, ir in zip(article.IRchunk_ids, article.IRchunks):
+    for id, ir in zip(article.ir_chunk_ids, article.ir_chunks):
         pos = sum(len(p) for p in parts)
 
         if ".tbl" in id:
@@ -231,7 +231,7 @@ def _export_article_to_markdown(article: IRGroup) -> str:
             join_points.append(pos)
             table_subset = {
                 cid: cir
-                for cid, cir in zip(article.IRchunk_ids, article.IRchunks)
+                for cid, cir in zip(article.ir_chunk_ids, article.ir_chunks)
                 if cid.startswith(root)
             }
             rendered = "\n" + table_formatter(table_subset) + "\n"
@@ -248,7 +248,7 @@ def _export_article_to_markdown(article: IRGroup) -> str:
     stripped_len = len(combined.strip())
 
     # Adjust IRjoin for strip offset
-    article.IRjoin = [max(0, p - strip_offset) for p in join_points]
+    article.ir_join = [max(0, p - strip_offset) for p in join_points]
 
     # Build category_spans: adjust positions, cap at stripped_len, merge consecutive same-category
     adjusted: list[tuple[int, int, str]] = []
@@ -282,8 +282,8 @@ def ir_grouper(irs: dict[str, IRChunk]) -> list[IRGroup]:
             current = IRGroup(article_n=article_n)
             articles.append(current)
 
-        current.IRchunk_ids.append(id)
-        current.IRchunks.append(ir)
+        current.ir_chunk_ids.append(id)
+        current.ir_chunks.append(ir)
 
     for article in articles:
         article.formatted_str = _export_article_to_markdown(article)

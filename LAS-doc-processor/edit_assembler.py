@@ -231,10 +231,10 @@ def apply_edit(
 
     # Build a quick set of table span ranges so we can detect overlaps.
     table_spans: list[RunSpan] = []
-    for i, chunk_id in enumerate(article.IRchunk_ids):
+    for i, chunk_id in enumerate(article.ir_chunk_ids):
         if ".tbl" in chunk_id:
-            start = article.IRjoin[i] if i < len(article.IRjoin) else len(orig)
-            end = article.IRjoin[i + 1] if i + 1 < len(article.IRjoin) else len(orig)
+            start = article.ir_join[i] if i < len(article.ir_join) else len(orig)
+            end = article.ir_join[i + 1] if i + 1 < len(article.ir_join) else len(orig)
             table_spans.append(RunSpan(start=start, end=end, chunk_id=chunk_id))
 
     matcher = difflib.SequenceMatcher(None, orig, edited_text, autojunk=False)
