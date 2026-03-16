@@ -1,0 +1,24 @@
+query,intent,gold_law,gold_article,expected_doc_type,notes
+연장근로는 최대 몇 시간까지 가능한가요,normative,근로기준법,제53조,law,
+근로계약서는 반드시 서면으로 작성해야 하나요,normative,근로기준법,제17조,law,
+회사가 근로자를 해고하려면 미리 통보해야 하나요,normative,근로기준법,제26조,law,
+최저임금은 어떤 기준으로 정해지나요,normative,최저임금법,제4조,law,
+사용자가 임금을 지급하지 않으면 어떻게 되나요,normative,근로기준법,제36조,law,
+하도급 대금은 언제까지 지급해야 하나요,normative,하도급거래 공정화에 관한 법률,제13조,law,
+사업장에서 발생한 산업재해의 보상 기준은 무엇인가요,normative,산업재해보상보험법,제37조,law,
+판례상 근로자성 판단 기준은 무엇인가요,case_law,,,prec,
+유족보상일시금 지급 관련 판례 기준은 무엇인가요,case_law,,,prec,
+근로계약이 형식상 도급계약이면 근로자가 아닌가요,case_law,,,prec,
+근로시간 판단 기준에 대한 판례는 어떤 것이 있나요,case_law,,,prec,
+연장근로 관련 판례에서는 어떤 기준을 적용하나요,mixed,근로기준법,제53조,mixed,allowed_doc_types=law|prec|decc
+근로자 해고 관련 판례와 법 규정은 무엇인가요,mixed,근로기준법,제26조,mixed,allowed_doc_types=law|prec|decc
+하도급 대금 미지급 관련 판례는 어떤 것이 있나요,mixed,하도급거래 공정화에 관한 법률,제13조,mixed,allowed_doc_types=law|prec|decc
+근로기준법에서 정한 휴게시간 규정은 무엇인가요,normative,근로기준법,제54조,law,
+휴일 근로를 하면 추가 수당을 받아야 하나요,normative,근로기준법,제56조,law,
+사용자가 근로자에게 임금을 언제까지 지급해야 하나요,normative,근로기준법,제36조,law,
+판례에서 근로자와 도급계약의 구분 기준은 무엇인가요,case_law,,,prec,
+근로시간 산정과 관련된 법 규정과 판례 기준은 무엇인가요,mixed,근로기준법,제50조,mixed,allowed_doc_types=law|prec|decc
+부당해고 판단 기준은 법 규정과 판례에서 어떻게 설명되나요,mixed,근로기준법,제23조,mixed,allowed_doc_types=law|prec|decc
+고용보험료 부과처분 관련 행정심판례의 판단 기준은 무엇인가요,case_law,,,decc,
+도산등사실인정 거부처분 관련 행정심판례 기준은 무엇인가요,case_law,,,decc,
+근로시간 휴게 관련 법령해석례의 판단 기준은 무엇인가요,case_law,,,expc,

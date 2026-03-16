@@ -5,6 +5,7 @@
 !/data/dropbox/.gitkeep
 !/data/dropbox/README.md
 !/data/staging/.gitkeep
+!/data/staging/eval_set.csv
 
 # Windows ADS metadata files
 *:Zone.Identifier

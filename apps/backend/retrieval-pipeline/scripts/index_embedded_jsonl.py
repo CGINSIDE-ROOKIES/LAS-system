@@ -6,9 +6,9 @@
    cp .env.example .env
    set -a && source .env && set +a
 2) 인덱싱 실행
-   python3 scripts/index_embedded_jsonl.py --batch-size 256
+   uv run python scripts/index_embedded_jsonl.py --batch-size 256
 3) 업로드 없이 입력 확인만
-   python3 scripts/index_embedded_jsonl.py --dry-run --limit 100
+   uv run python scripts/index_embedded_jsonl.py --dry-run --limit 100
 
 Expected JSONL row (example):
 {
@@ -302,9 +302,9 @@ def opensearch_bulk(
     for d in docs:
         meta = {"index": {"_index": index_name, "_id": opensearch_doc_id(d.point_id)}}
         src: dict[str, Any] = {
+            **d.payload,
             "id": d.point_id,
             "text": d.text,
-            **d.payload,
             "embedding_model": d.embedding_model,
             "embedding_dim": d.embedding_dim,
         }
@@ -339,6 +339,70 @@ def opensearch_bulk(
     return ok, fail
 
 
+def opensearch_create_index_if_missing(
+    *,
+    opensearch_url: str,
+    index_name: str,
+    vector_field: str | None,
+    vector_dim: int,
+    timeout: int,
+) -> None:
+    if vector_dim <= 0:
+        raise SystemExit("Invalid vector dimension for OpenSearch mapping creation")
+
+    headers = {
+        "Content-Type": "application/json",
+        **opensearch_auth_headers(),
+    }
+
+    properties: dict[str, Any] = {
+        "id": {"type": "keyword"},
+        "text": {"type": "text"},
+        "doc_type": {"type": "keyword"},
+        "law_name": {"type": "keyword"},
+        "source_group": {"type": "keyword"},
+        "source_file_path": {"type": "keyword"},
+        "embedding_model": {"type": "keyword"},
+        "embedding_dim": {"type": "integer"},
+        "article_no": {"type": "keyword"},
+        "jo_code": {"type": "keyword"},
+        "doc_id": {"type": "keyword"},
+        "title": {"type": "text"},
+        "doc_number": {"type": "keyword"},
+    }
+    if vector_field:
+        # Store vectors as numeric arrays for inspection/debug use.
+        properties[vector_field] = {"type": "float"}
+
+    payload: dict[str, Any] = {
+        "settings": {
+            "number_of_shards": 1,
+            "number_of_replicas": 0,
+        },
+        "mappings": {
+            "dynamic": True,
+            "properties": properties,
+        },
+    }
+    url = f"{opensearch_url.rstrip('/')}/{urllib.parse.quote(index_name)}"
+    req = urllib.request.Request(
+        url=url,
+        method="PUT",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+    )
+    for k, v in headers.items():
+        req.add_header(k, v)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout):
+            return
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        # Index already exists -> treat as success.
+        if exc.code == 400 and "resource_already_exists_exception" in body:
+            return
+        raise SystemExit(f"HTTP {exc.code} PUT {url}\n{body}") from exc
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Index pre-embedded JSONL into Qdrant/OpenSearch")
     p.add_argument("--input-glob", default="data/dropbox/*.embedded.jsonl")
@@ -361,6 +425,11 @@ def parse_args() -> argparse.Namespace:
         "--no-create-collection",
         action="store_true",
         help="Qdrant 컬렉션 자동 생성을 비활성화",
+    )
+    p.add_argument(
+        "--no-create-opensearch-index",
+        action="store_true",
+        help="OpenSearch 인덱스/매핑 자동 생성을 비활성화",
     )
     return p.parse_args()
 
@@ -392,6 +461,7 @@ def main() -> None:
     os_ok_total = 0
     os_fail_total = 0
     ensured_collection = False
+    ensured_opensearch_index = False
 
     print(f"[INFO] files={len(files)}")
     for f in files:
@@ -411,6 +481,15 @@ def main() -> None:
                     timeout=args.timeout,
                 )
                 ensured_collection = True
+            if not ensured_opensearch_index and not args.no_create_opensearch_index:
+                opensearch_create_index_if_missing(
+                    opensearch_url=opensearch_url,
+                    index_name=opensearch_index,
+                    vector_field=(args.opensearch_vector_field.strip() or None),
+                    vector_dim=len(batch[0].vector),
+                    timeout=args.timeout,
+                )
+                ensured_opensearch_index = True
             qdrant_upsert(
                 batch,
                 qdrant_url=qdrant_url,
