@@ -10,6 +10,9 @@ dependencies = [
     "pytest>=9.0.2",
     "python-dotenv>=1.2.2",
     "pyyaml>=6.0.3",
+    "qdrant-client>=1.17.1",
+    "sentence-transformers>=5.3.0",
+    "tqdm>=4.67.3",
     "xmltodict>=1.0.4",
 ]
 
