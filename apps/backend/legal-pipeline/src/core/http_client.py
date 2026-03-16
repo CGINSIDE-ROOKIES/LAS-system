@@ -1,18 +1,13 @@
 from __future__ import annotations
 
-import json
-import xml.etree.ElementTree as ET
 from typing import Any, Literal, TypedDict
+import json
 
 import httpx
+import xmltodict
 from bs4 import BeautifulSoup
 
 from src.models.registry_models import RequestSpec
-
-try:  # pragma: no cover - exercised indirectly when dependency exists
-    import xmltodict  # type: ignore
-except Exception:  # pragma: no cover - runtime fallback for lean environments
-    xmltodict = None
 
 
 ResponseFormat = Literal["json", "xml", "html", "text"]
@@ -109,46 +104,6 @@ def detect_response_format(response: httpx.Response) -> ResponseFormat:
     return "text"
 
 
-def _xml_element_to_dict(element: ET.Element) -> Any:
-    children = list(element)
-    attributes = dict(element.attrib)
-    text = (element.text or "").strip()
-
-    if not children:
-        if attributes:
-            result: dict[str, Any] = {"@attrs": attributes}
-            if text:
-                result["#text"] = text
-            return result
-        return text
-
-    result: dict[str, Any] = {}
-    if attributes:
-        result["@attrs"] = attributes
-    if text:
-        result["#text"] = text
-
-    for child in children:
-        child_value = _xml_element_to_dict(child)
-        existing = result.get(child.tag)
-        if existing is None:
-            result[child.tag] = child_value
-        elif isinstance(existing, list):
-            existing.append(child_value)
-        else:
-            result[child.tag] = [existing, child_value]
-
-    return result
-
-
-def _parse_xml_text(text: str) -> Any:
-    if xmltodict is not None:
-        return xmltodict.parse(text)
-
-    root = ET.fromstring(text)
-    return {root.tag: _xml_element_to_dict(root)}
-
-
 def parse_response_body(response: httpx.Response, fmt: ResponseFormat) -> Any:
     text = response.text
 
@@ -164,7 +119,7 @@ def parse_response_body(response: httpx.Response, fmt: ResponseFormat) -> Any:
 
     if fmt == "xml":
         try:
-            return _parse_xml_text(text)
+            return xmltodict.parse(text)
         except Exception as exc:
             preview = text[:300].replace("\n", " ")
             raise HttpClientError(

@@ -23,36 +23,6 @@ def normalize_jo_code(value: Any) -> str:
     return digits.zfill(6)
 
 
-def extract_jo_codes_from_parsed_law(parsed_law: dict[str, Any]) -> list[str]:
-    articles = parsed_law.get("articles", [])
-    if not isinstance(articles, list):
-        return []
-
-    results: list[str] = []
-    seen: set[str] = set()
-
-    for article in articles:
-        if not isinstance(article, dict):
-            continue
-
-        jo_code = article.get("jo_code")
-        if jo_code in (None, ""):
-            continue
-
-        try:
-            normalized = normalize_jo_code(jo_code)
-        except ValueError:
-            continue
-
-        if normalized in seen:
-            continue
-
-        seen.add(normalized)
-        results.append(normalized)
-
-    return results
-
-
 def fetch_sub_article_by_ref(
     registry: dict[str, Any],
     oc: str,
@@ -170,6 +140,36 @@ def collect_sub_articles_for_law(
     return results
 
 
+def extract_jo_codes_from_parsed_law(parsed_law: dict[str, Any]) -> list[str]:
+    articles = parsed_law.get("articles", [])
+    if not isinstance(articles, list):
+        return []
+
+    results: list[str] = []
+    seen: set[str] = set()
+
+    for article in articles:
+        if not isinstance(article, dict):
+            continue
+
+        jo_code = article.get("jo_code")
+        if jo_code in (None, ""):
+            continue
+
+        try:
+            normalized = normalize_jo_code(jo_code)
+        except ValueError:
+            continue
+
+        if normalized in seen:
+            continue
+
+        seen.add(normalized)
+        results.append(normalized)
+
+    return results
+
+
 def collect_sub_articles_for_parsed_law(
     registry: dict[str, Any],
     oc: str,
@@ -180,7 +180,6 @@ def collect_sub_articles_for_parsed_law(
 ) -> list[dict[str, Any]]:
     if mode == "none":
         return []
-
     if mode != "all":
         raise ValueError(f"Unsupported sub article mode: {mode}")
 

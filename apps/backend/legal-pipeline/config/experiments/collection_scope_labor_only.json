@@ -1,5 +1,5 @@
 {
-  "project": "law-corpus-collector-labor-experiment",
+  "project": "labor-standards-act-experiment",
   "outputs": [
     {
       "file_id": "01_current_law",
@@ -30,6 +30,6 @@
     "later_transform": "JSONL"
   },
   "schedule": {
-    "law_delta_daily": true
+    "manual_experiment": true
   }
 }
