@@ -12,7 +12,7 @@ import re
 
 
 from prompts import get_prompts
-from env_loader import load_env_SecretStr, load_env_str
+from core.env_loader import load_env_SecretStr, load_env_str
 
 prompts = get_prompts()
 

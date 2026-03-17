@@ -44,7 +44,7 @@ class DocumentState(BaseModel):  # Main graph state
     @classmethod
     def from_hwpx(cls, file_path: Path):
         from hwpx import HwpxDocument
-        from ir import create_ir_dict, ir_grouper
+        from core.ir import create_ir_dict, ir_grouper
         with HwpxDocument.open(file_path) as doc:
             ir_mappings = create_ir_dict(doc)
             ir_groups = ir_grouper(ir_mappings)
@@ -59,8 +59,8 @@ class DocumentState(BaseModel):  # Main graph state
         import jpype
         import tempfile
 
-        hwp2hwpx_jar = Path(__file__).resolve().parents[1] / "lib/hwp2hwpx/hwp2hwpx-1.0.0.jar"
-        deps_dir = Path(__file__).resolve().parents[1] / "lib/hwp2hwpx/dependency/*"
+        hwp2hwpx_jar = Path(__file__).resolve().parents[1] / "vendor/hwp2hwpx/hwp2hwpx-1.0.0.jar"
+        deps_dir = Path(__file__).resolve().parents[1] / "vendor/hwp2hwpx/dependency/*"
 
         if not jpype.isJVMStarted():
             jpype.startJVM(classpath=[str(hwp2hwpx_jar), str(deps_dir)])
