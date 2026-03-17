@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 from src.common.io_utils import _write_json
 from src.export.dataset_builder import build_and_write_datasets
+from src.pipeline.appendix_pipeline import run_appendix_asset_pipeline
 from src.pipeline.law_pipeline import collect_all_root_law_families
 from src.registry.load_registry import load_collection_scope, load_endpoint_registry
 from src.registry.validate_registry import validate_collection_scope, validate_endpoint_registry
@@ -14,6 +15,13 @@ from src.registry.validate_registry import validate_collection_scope, validate_e
 BASE_DIR = Path("data/experiments/labor_standards_act")
 SCOPE_PATH = "config/experiments/collection_scope_labor_only.json"
 SUB_ARTICLE_MODE = "all"
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "y", "yes", "on"}
 
 
 def _raise_if_invalid(name: str, result) -> None:
@@ -51,11 +59,33 @@ def main() -> None:
         sub_article_mode=SUB_ARTICLE_MODE,
     )
 
+    appendix_asset_result = None
+    appendix_asset_base_dir = BASE_DIR / "normalized" / "01_current_law_appendix_assets"
+    if _env_flag("ENABLE_APPENDIX_ASSET_PIPELINE", default=False):
+        appendix_asset_result = run_appendix_asset_pipeline(
+            normalized_appendix_base_dir=BASE_DIR / "normalized" / "01_current_law_appendix",
+            raw_asset_base_dir=BASE_DIR / "raw" / "01_current_law_appendix_assets",
+            normalized_asset_base_dir=appendix_asset_base_dir,
+            output_dir=BASE_DIR / "dataset",
+            manifest_path=BASE_DIR / "manifest" / "appendix_asset_pipeline_summary.json",
+            download_assets=_env_flag("APPENDIX_DOWNLOAD_ASSETS", default=False),
+            overwrite_assets=_env_flag("APPENDIX_OVERWRITE_ASSETS", default=False),
+            timeout_sec=int(os.environ.get("APPENDIX_DOWNLOAD_TIMEOUT_SEC", "60")),
+            download_base_url=os.environ.get("APPENDIX_DOWNLOAD_BASE_URL", "https://www.law.go.kr"),
+            max_chars=1200,
+            overlap=150,
+            build_dataset=False,
+        )
+
     dataset_manifest = build_and_write_datasets(
         normalized_base_dir=BASE_DIR / "normalized" / "01_current_law",
         raw_related_base_dir=BASE_DIR / "raw" / "02_related_legal_docs",
         expanded_base_dir=BASE_DIR / "expanded" / "03_expanded_related_docs",
         output_dir=BASE_DIR / "dataset",
+        normalized_appendix_base_dir=BASE_DIR / "normalized" / "01_current_law_appendix",
+        normalized_appendix_asset_base_dir=(
+            appendix_asset_base_dir if appendix_asset_result is not None else None
+        ),
         max_chars=1200,
         overlap=150,
         text_variant="best",
@@ -69,6 +99,7 @@ def main() -> None:
         "roots": family_results,
         "dataset_manifest": dataset_manifest,
         "sub_article_mode": SUB_ARTICLE_MODE,
+        "appendix_asset_pipeline": appendix_asset_result,
     }
 
     _write_json(BASE_DIR / "manifest" / "labor_experiment_summary.json", summary)

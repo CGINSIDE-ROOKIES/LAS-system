@@ -3,9 +3,20 @@ from __future__ import annotations
 from typing import Any, Literal, TypedDict
 import json
 
-import httpx
-import xmltodict
-from bs4 import BeautifulSoup
+try:
+    import httpx
+except ModuleNotFoundError:  # pragma: no cover - optional in offline test env
+    httpx = None  # type: ignore[assignment]
+
+try:
+    import xmltodict
+except ModuleNotFoundError:  # pragma: no cover - optional in offline test env
+    xmltodict = None  # type: ignore[assignment]
+
+try:
+    from bs4 import BeautifulSoup
+except ModuleNotFoundError:  # pragma: no cover - optional in offline test env
+    BeautifulSoup = None  # type: ignore[assignment]
 
 from src.models.registry_models import RequestSpec
 
@@ -27,6 +38,9 @@ class HttpClientError(RuntimeError):
 
 
 def send_request(request: RequestSpec) -> httpx.Response:
+    if httpx is None:
+        raise HttpClientError("httpx is required to send requests")
+
     method = request.method.upper()
 
     if method != "GET":
@@ -118,6 +132,8 @@ def parse_response_body(response: httpx.Response, fmt: ResponseFormat) -> Any:
             ) from exc
 
     if fmt == "xml":
+        if xmltodict is None:
+            raise HttpClientError("xmltodict is required to parse XML responses")
         try:
             return xmltodict.parse(text)
         except Exception as exc:
@@ -128,6 +144,8 @@ def parse_response_body(response: httpx.Response, fmt: ResponseFormat) -> Any:
             ) from exc
 
     if fmt == "html":
+        if BeautifulSoup is None:
+            raise HttpClientError("beautifulsoup4 is required to parse HTML responses")
         # HTML은 우선 raw HTML + text 추출 둘 다 활용 가능하게 soup 반환
         try:
             soup = BeautifulSoup(text, "html.parser")

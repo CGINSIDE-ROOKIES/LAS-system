@@ -983,6 +983,8 @@ def build_and_write_datasets(
     text_variant: TextVariant = "best",
     preserve_structure: bool = True,
     include_non_searchable_law_parts: bool = False,
+    normalized_appendix_base_dir: str | Path | None = None,
+    normalized_appendix_asset_base_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     output_dir = Path(output_dir)
 
@@ -992,6 +994,7 @@ def build_and_write_datasets(
         overlap=overlap,
         text_variant=text_variant,
         preserve_structure=preserve_structure,
+        include_non_searchable_law_parts=include_non_searchable_law_parts,
     )
     related_records = build_related_doc_records(
         raw_related_base_dir=raw_related_base_dir,
@@ -1001,6 +1004,18 @@ def build_and_write_datasets(
     relation_records = build_relation_records(
         expanded_base_dir=expanded_base_dir,
     )
+
+    appendix_manifest: dict[str, Any] | None = None
+    if normalized_appendix_base_dir is not None:
+        from src.export.appendix_dataset_builder import build_and_write_appendix_datasets
+
+        appendix_manifest = build_and_write_appendix_datasets(
+            normalized_appendix_base_dir=normalized_appendix_base_dir,
+            output_dir=output_dir,
+            max_chars=max_chars,
+            overlap=overlap,
+            normalized_appendix_asset_base_dir=normalized_appendix_asset_base_dir,
+        )
 
     legal_corpus_records = law_records + related_records
 
@@ -1012,6 +1027,7 @@ def build_and_write_datasets(
         "legal_relations_count": len(relation_records),
         "law_record_count": len(law_records),
         "related_doc_record_count": len(related_records),
+        "appendix_dataset_manifest": appendix_manifest,
         "max_chars": max_chars,
         "overlap": overlap,
         "text_variant": text_variant,

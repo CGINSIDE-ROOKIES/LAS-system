@@ -14,6 +14,7 @@ from src.collector.raw_law_collector import (
     get_root_law_names,
 )
 from src.common.io_utils import _safe_filename, _write_json
+from src.parser.appendix_parser import parse_appendix_bundle, save_parsed_appendix_bundle
 from src.parser.law_parser import parse_law_body, save_parsed_law
 from src.scope.resolver import select_family_law_refs_from_search
 
@@ -100,6 +101,7 @@ def collect_root_law_family(
     raw_body_dir = base_dir / "raw" / "01_current_law_body" / root_stem
     raw_sub_dir = base_dir / "raw" / "01_current_sub_article" / root_stem
     normalized_dir = base_dir / "normalized" / "01_current_law" / root_stem
+    normalized_appendix_dir = base_dir / "normalized" / "01_current_law_appendix" / root_stem
     manifest_dir = base_dir / "manifest" / "01_current_law" / root_stem
 
     raw_record = collect_root_law_raw(
@@ -141,6 +143,12 @@ def collect_root_law_family(
         )
         parsed_path = save_parsed_law(parsed_law, normalized_dir)
 
+        appendix_bundle = parse_appendix_bundle(law_body, law_ref=law_ref)
+        parsed_appendix_path = save_parsed_appendix_bundle(
+            appendix_bundle,
+            normalized_appendix_dir,
+        )
+
         sub_records = collect_sub_articles_for_parsed_law(
             registry=registry,
             oc=oc,
@@ -162,9 +170,12 @@ def collect_root_law_family(
                 "parsed_articles_count": parsed_law.get("articles_count"),
                 "parsed_supplementary_count": parsed_law.get("supplementary_count"),
                 "parsed_appendices_count": parsed_law.get("appendices_count"),
+                "appendix_bundle_count": appendix_bundle.get("appendix_count"),
+                "appendix_type_counts": appendix_bundle.get("appendix_type_counts", {}),
                 "raw_body_parsed_path": raw_body_paths["parsed_path"],
                 "raw_body_response_path": raw_body_paths["response_path"],
                 "parsed_path": str(parsed_path),
+                "parsed_appendix_path": str(parsed_appendix_path),
                 "sub_article_count": len(sub_records),
             }
         )
