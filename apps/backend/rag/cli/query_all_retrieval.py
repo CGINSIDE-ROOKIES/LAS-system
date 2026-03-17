@@ -68,6 +68,40 @@ def _clean_content(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _truncate_on_semantic_boundary(text: str, limit: int) -> str:
+    """문장/조문 경계를 우선 보존하며 limit 이내로 자른다.
+
+    - 1순위: 조문 경계(제N조/제N항/제N호/①②③...)
+    - 2순위: 문장 경계(. ? ! ; : 다.)
+    - 3순위: 공백 경계
+    """
+    if limit <= 0:
+        return ""
+    if len(text) <= limit:
+        return text
+
+    window = text[:limit]
+
+    article_matches = [
+        m.start()
+        for m in re.finditer(r"(제\s*\d+\s*[조항호]|[①②③④⑤⑥⑦⑧⑨⑩])", window)
+    ]
+    article_cut = max(article_matches) if article_matches else -1
+    if article_cut >= int(limit * 0.55):
+        return window[:article_cut].strip()
+
+    sent_matches = [m.end() for m in re.finditer(r"(다\.|[.!?;:])\s*", window)]
+    sent_cut = max(sent_matches) if sent_matches else -1
+    if sent_cut >= int(limit * 0.55):
+        return window[:sent_cut].strip()
+
+    ws_cut = window.rfind(" ")
+    if ws_cut >= int(limit * 0.55):
+        return window[:ws_cut].strip()
+
+    return window.strip()
+
+
 def _is_normative_query(question: str) -> bool:
     """기준·요건·의무 등 규범형 질의인지 판별한다."""
     keywords = (
@@ -147,12 +181,10 @@ def _build_llm_context_rows(
         if not content:
             continue
         if max_content_chars > 0:
-            content = content[:max_content_chars]
+            content = _truncate_on_semantic_boundary(content, max_content_chars)
+        # 마지막 문서를 중간에서 자르지 않기 위해, 전체 한도 초과 시 해당 문서는 스킵하고 종료.
         if max_total_chars > 0 and total + len(content) > max_total_chars:
-            remain = max_total_chars - total
-            if remain <= 0:
-                break
-            content = content[:remain]
+            break
         out.append(
             {
                 "source_id": str(row.get("source_id", "") or ""),

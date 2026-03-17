@@ -1,26 +1,5 @@
 #!/usr/bin/env python3
-"""Retrieval + Generator 통합 실행 스크립트.
-
-실행 예시:
-  uv run python apps/backend/rag/cli/generate_answer.py --question "연장근로 최대 시간은?"
-
-  기본(JSON):
-    uv run python cli/generate_answer.py --question "연장근로 최대 시간은?"
-  - 텍스트만 보고 싶으면:
-    uv run python cli/generate_answer.py --question "..." --text
-
-non-streaming :
-  uv run python cli/generate_answer.py --question "연장근로 최대 시간은?"
-
-streaming (프론트용 NDJSON) :
-  uv run python cli/generate_answer.py --question "연장근로 최대 시간은?" --stream
-
-텍스트 스트리밍 확인용 :
-  uv run python cli/generate_answer.py --question "연장근로 최대 시간은?" --stream --text
-
-길이 제한 + temperature 0.1 설정 :
-  uv run python cli/generate_answer.py --question "연장 근로 최대 시간은?" --stream --top-k 2 --max-content-chars 400 --max-total-chars 900 --llm-max-input-chars 1200 --llm-max-tokens 120 --llm-temperature 0.1
-"""
+"""Retrieval + Generator 통합 실행 스크립트."""
 
 from __future__ import annotations
 
@@ -38,13 +17,16 @@ if str(CLI_DIR) not in sys.path:
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from generator import DEFAULT_CHAT_COMPLETIONS_URL, DEFAULT_MODEL, generate_answer
+from generator import (
+    DEFAULT_CHAT_COMPLETIONS_URL,
+    DEFAULT_MODEL,
+    generate_answer,
+    stream_answer,
+)
 from query_all_retrieval import (
-    DEFAULT_SYSTEM_PROMPT,
     _apply_law_boost,
     _build_llm_context_rows,
     _build_llm_context_text,
-    _select_llm_rows,
 )
 from query_hybrid_rrf import fuse_rrf
 from retrieval_common import (
@@ -55,6 +37,85 @@ from retrieval_common import (
     search_qdrant,
 )
 
+DEFAULT_ANSWER_BASELINE_PROMPT = (
+    "당신은 법률 Q&A 보조 시스템입니다.\n"
+    "반드시 제공된 컨텍스트 안의 정보만 근거로 답변하세요.\n"
+    "컨텍스트에 없는 사실은 추측하거나 단정하지 마세요.\n"
+    "근거가 부족하면 반드시 '근거 부족'이라고 명시하세요.\n"
+    "상충되는 근거가 있으면 상충 사실을 먼저 밝히세요.\n\n"
+    "다음 형식을 반드시 지켜 답변하세요:\n"
+    "요약 답변: <1~3문장>\n"
+    "근거:\n"
+    "- <핵심 근거 1> (law_name=<...>, doc_type=<...>, source_id=<...>)\n"
+    "- <핵심 근거 2> (law_name=<...>, doc_type=<...>, source_id=<...>)\n"
+    "근거 부족/한계: <없음 또는 부족 사유 1문장>"
+)
+
+
+def _is_law_row(row: dict[str, object]) -> bool:
+    return str(row.get("doc_type", "") or "") == "law"
+
+
+def _rank_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    ranked = sorted(
+        (dict(r) for r in rows),
+        key=lambda r: (
+            -float(r.get("score", 0.0) or 0.0),
+            str(r.get("source_id", "") or ""),
+        ),
+    )
+    for i, row in enumerate(ranked, start=1):
+        row["rank"] = i
+    return ranked
+
+
+def _select_rows_with_law_policy(
+    *,
+    rows: list[dict[str, object]],
+    top_k: int,
+    min_law_contexts: int,
+    enforce_min_law_contexts: bool,
+) -> tuple[list[dict[str, object]], str, bool]:
+    selected = list(rows[: max(1, top_k)])
+    if min_law_contexts <= 0:
+        return _rank_rows(selected), "ok", True
+
+    law_count = sum(1 for r in selected if _is_law_row(r))
+    if law_count >= min_law_contexts:
+        return _rank_rows(selected), "ok", True
+
+    if not enforce_min_law_contexts:
+        return _rank_rows(selected), "missing", False
+
+    selected_ids = {str(r.get("source_id", "") or "") for r in selected}
+    extra_law_pool: list[dict[str, object]] = []
+    for row in rows[max(1, top_k) :]:
+        if not _is_law_row(row):
+            continue
+        source_id = str(row.get("source_id", "") or "")
+        if source_id and source_id in selected_ids:
+            continue
+        extra_law_pool.append(dict(row))
+
+    needed = max(0, min_law_contexts - law_count)
+    replacements = min(needed, len(extra_law_pool))
+    if replacements <= 0:
+        return _rank_rows(selected), "missing", False
+
+    non_law_indexes = [i for i, r in enumerate(selected) if not _is_law_row(r)]
+    if not non_law_indexes:
+        return _rank_rows(selected), "missing", False
+
+    replace_slots = list(reversed(non_law_indexes))[:replacements]
+    for slot, law_row in zip(replace_slots, extra_law_pool[:replacements]):
+        selected[slot] = law_row
+
+    selected_ranked = _rank_rows(selected)
+    final_law_count = sum(1 for r in selected_ranked if _is_law_row(r))
+    if final_law_count >= min_law_contexts:
+        return selected_ranked, "supplemented", True
+    return selected_ranked, "missing", False
+
 
 def _build_frontend_payload(
     *,
@@ -63,6 +124,8 @@ def _build_frontend_payload(
     retrieved_docs: list[dict[str, object]],
     snippet_max_chars: int,
     include_question: bool,
+    law_context_status: str,
+    law_context_added: bool,
 ) -> dict[str, object]:
     def _clip(text: str, limit: int) -> str:
         if limit <= 0:
@@ -103,6 +166,8 @@ def _build_frontend_payload(
         "answer": answer,
         "sources": sources,
         "retrieved_docs": docs_out,
+        "law_context_status": law_context_status,
+        "law_context_added": law_context_added,
     }
     if include_question:
         payload["question"] = question
@@ -115,9 +180,20 @@ def _build_prompt_with_limit(
     retrieved_context_text: str,
     question: str,
     max_input_chars: int,
+    law_context_status: str,
 ) -> str:
+    status_line = ""
+    if law_context_status == "missing":
+        status_line = (
+            "중요: 현재 검색 결과에서 법령(law) 근거가 충분하지 않습니다.\n"
+            "확정적 결론 대신 근거 부족을 명시하고, 확인 가능한 범위만 답변하세요.\n\n"
+        )
+    elif law_context_status == "supplemented":
+        status_line = "참고: 법령(law) 문서를 보강한 컨텍스트로 답변합니다.\n\n"
+
     prefix = (
         f"{system_prompt}\n\n"
+        f"{status_line}"
         "아래 검색 컨텍스트를 근거로만 답변하세요.\n"
         "근거가 부족하면 부족하다고 명시하세요.\n\n"
     )
@@ -132,7 +208,6 @@ def _build_prompt_with_limit(
 
     context = retrieved_context_text
     if len(context) > keep:
-        # 토큰 초과를 피하기 위한 문자 기반 안전 절단
         context = context[:keep]
     return f"{prefix}{context}{suffix}"
 
@@ -177,6 +252,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--min-law-contexts", type=int, default=1, help="최소 law 문서 수")
     p.add_argument(
+        "--enforce-min-law-contexts",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="min_law_contexts 미충족 시 law 문서를 강제 보강 (기본: on)",
+    )
+    p.add_argument(
         "--auto-law-boost",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -187,7 +268,9 @@ def parse_args() -> argparse.Namespace:
     )
 
     p.add_argument(
-        "--system-prompt", default=DEFAULT_SYSTEM_PROMPT, help="생성용 시스템 프롬프트"
+        "--system-prompt",
+        default=DEFAULT_ANSWER_BASELINE_PROMPT,
+        help="생성용 시스템 프롬프트",
     )
     p.add_argument(
         "--llm-url", default="", help=f"기본: {DEFAULT_CHAT_COMPLETIONS_URL}"
@@ -204,6 +287,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--llm-max-tokens", type=int, default=256, help="LLM 최대 생성 토큰")
     p.add_argument("--llm-temperature", type=float, default=0.2, help="LLM 생성 온도")
+
     p.add_argument(
         "--snippet-max-chars",
         type=int,
@@ -216,12 +300,8 @@ def parse_args() -> argparse.Namespace:
         dest="include_question",
         help="JSON 출력에서 question 필드 제외",
     )
-
-    p.add_argument(
-        "--text",
-        action="store_true",
-        help="디버그용 텍스트 출력 (기본은 JSON)",
-    )
+    p.add_argument("--text", action="store_true", help="디버그용 텍스트 출력")
+    p.add_argument("--stream", action="store_true", help="LLM 답변을 스트리밍으로 출력")
     return p.parse_args()
 
 
@@ -287,19 +367,21 @@ def main() -> int:
     except RetrievalError as exc:
         raise SystemExit(f"[ERROR] 검색 실패: {exc}") from exc
 
-    rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=args.rrf_k, top_k=args.top_k)
-    rrf_rows = _apply_law_boost(
-        rrf_rows,
+    rrf_rows_all = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=args.rrf_k, top_k=candidate_k)
+    rrf_rows_all = _apply_law_boost(
+        rrf_rows_all,
         question=question,
         enabled=args.auto_law_boost,
         law_boost_score=args.law_boost_score,
-    )[: max(1, args.top_k)]
+    )
 
-    llm_rows, law_context_added = _select_llm_rows(
-        rrf_rows,
+    llm_rows, law_context_status, law_context_added = _select_rows_with_law_policy(
+        rows=rrf_rows_all,
         top_k=args.top_k,
         min_law_contexts=args.min_law_contexts,
+        enforce_min_law_contexts=args.enforce_min_law_contexts,
     )
+
     contexts = _build_llm_context_rows(
         llm_rows,
         max_content_chars=args.max_content_chars,
@@ -314,32 +396,72 @@ def main() -> int:
         retrieved_context_text=retrieved_context_text,
         question=question,
         max_input_chars=args.llm_max_input_chars,
+        law_context_status=law_context_status,
     )
 
-    try:
-        answer = generate_answer(
-            llm_prompt,
-            url=args.llm_url or None,
-            model=args.llm_model or None,
-            api_key=args.llm_api_key or None,
-            timeout=args.timeout,
-            max_tokens=args.llm_max_tokens,
-            temperature=args.llm_temperature,
-        )
-    except RetrievalError as exc:
-        raise SystemExit(f"[ERROR] LLM 생성 실패: {exc}") from exc
+    answer = ""
+    if args.stream:
+        chunks: list[str] = []
+        try:
+            for chunk in stream_answer(
+                llm_prompt,
+                url=args.llm_url or None,
+                model=args.llm_model or None,
+                api_key=args.llm_api_key or None,
+                timeout=args.timeout,
+                max_tokens=args.llm_max_tokens,
+                temperature=args.llm_temperature,
+            ):
+                chunks.append(chunk)
+                if args.text:
+                    print(chunk, end="", flush=True)
+                else:
+                    print(
+                        json.dumps(
+                            {"type": "answer_delta", "delta": chunk}, ensure_ascii=False
+                        ),
+                        flush=True,
+                    )
+        except RetrievalError as exc:
+            raise SystemExit(f"[ERROR] LLM 생성 실패: {exc}") from exc
+        answer = "".join(chunks).strip()
+        if args.text:
+            print()
+    else:
+        try:
+            answer = generate_answer(
+                llm_prompt,
+                url=args.llm_url or None,
+                model=args.llm_model or None,
+                api_key=args.llm_api_key or None,
+                timeout=args.timeout,
+                max_tokens=args.llm_max_tokens,
+                temperature=args.llm_temperature,
+            )
+        except RetrievalError as exc:
+            raise SystemExit(f"[ERROR] LLM 생성 실패: {exc}") from exc
 
     payload = _build_frontend_payload(
         question=question,
         answer=answer,
-        retrieved_docs=rrf_rows,
+        retrieved_docs=llm_rows,
         snippet_max_chars=args.snippet_max_chars,
         include_question=args.include_question,
+        law_context_status=law_context_status,
+        law_context_added=law_context_added,
     )
 
     if args.text:
-        print("[ANSWER]")
-        print(answer)
+        if not args.stream:
+            print("[ANSWER]")
+            print(answer)
+        return 0
+
+    if args.stream:
+        print(
+            json.dumps({"type": "final", "data": payload}, ensure_ascii=False),
+            flush=True,
+        )
         return 0
 
     print(json.dumps(payload, ensure_ascii=False, indent=2))
