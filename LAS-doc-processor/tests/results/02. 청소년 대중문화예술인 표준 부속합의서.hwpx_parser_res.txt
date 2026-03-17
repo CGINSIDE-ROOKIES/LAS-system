@@ -1,552 +1,552 @@
-category: 제목
+category: 제목 - [].[]
 chunk: [별표1]
 ==========
-category: 제목
+category: 제목 - [].[]
 chunk: 청소년 대중문화예술인(또는 연습생) 표준 부속합의서
 ==========
-category: 제목
+category: 제목 - [].[]
 chunk: 문화체육관광부고시 
 ==========
-category: 제목
+category: 제목 - [].[]
 chunk: 제2025-0070호
 ==========
-category: 제목
+category: 제목 - [].[]
 chunk: (2026. 01. 01. 개정)
 ==========
-category: 기타
+category: 제목 - [].[]
 chunk: [대중문화예술기획업자]
 ==========
-category: 기타
+category: 기타 - [].[]
 chunk: [와, 과]
 ==========
-category: 전문
+category: 제목 - [].[]
 chunk: [대중문화예술인(또는 연습생)]
 ==========
-category: 입력란
+category: 입력란 - [].[]
 chunk: (본명 :           )
 ==========
-category: 기타
+category: 기타 - [].[]
 chunk: [는, 은]
 ==========
-category: 전문
+category: 전문 - [].[]
 chunk: 다음과 같이 합의서를 체결함에 있어 상호 신의성실로써 이를 이행한다.
 ==========
-category: 조문
+category: 조문 - ['1'].[]
 chunk: 제1조 (목적) 
 ==========
-category: 조문
+category: 조문 - ['1'].[]
 chunk: 이 부속합의서의 목적은 
 ==========
-category: 조문
+category: 조문 - ['1'].[]
 chunk: 대중문화예술기획업자(이하 ‘기획업자’라 한다)와 청소년 대중문화예술인(또는 청소년 연습생, 이하 ‘대중문화예술인’이라 한다)
 ==========
-category: 조문
+category: 조문 - ['1'].[]
 chunk:  사이에 
 ==========
-category: 조문
+category: 조문 - ['1'].[]
 chunk: ________________________________ 
 ==========
-category: 조문
+category: 조문 - ['1'].[]
 chunk: (이하 ‘주계약’ 이라 한다)을 체결함에 있어서 청소년의 
 ==========
-category: 조문
+category: 조문 - ['1'].[]
 chunk: 권익을 보다 명확하게 보호
 ==========
-category: 조문
+category: 조문 - ['1'].[]
 chunk: 하고 청소년이 
 ==========
-category: 조문
+category: 조문 - ['1'].[]
 chunk: 건전한 인격체로 성장할 수 있도록 지원하는데 
 ==========
-category: 조문
+category: 조문 - ['1'].[]
 chunk: 필요한 사항을 정하는 것에
 ==========
-category: 조문
+category: 조문 - ['1'].[]
 chunk:  있다.
 ==========
-category: 조문
+category: 조문 - ['1'].[]
 chunk:  
 ==========
-category: 조문
+category: 조문 - ['1'].[]
 chunk: ※ 위 빈칸에 기획업자와 대중문화예술인 사이에 체결한 주계약의 정확한 명칭을 기재하십시오.
 ==========
-category: 조문
+category: 조문 - ['1'].[]
 chunk:  
 ==========
-category: 조문
+category: 조문 - ['2'].[]
 chunk: 제2조 (적용) 
 ==========
-category: 조문
+category: 조문 - ['2'].[]
 chunk: 이 부속 합의서는 별도의 계약을 구성하고 있으며, 주계약 보다 우선
 ==========
-category: 조문
+category: 조문 - ['2'].[]
 chunk:  적용된다.
 ==========
-category: 조문
+category: 조문 - ['3'].[]
 chunk: 제3조 (청소년의 자유선택권 보장) 
 ==========
-category: 조문
+category: 조문 - ['3'].[]
 chunk: 대중문화예술인은 기획업자에 대하여 자기 의
 ==========
-category: 조문
+category: 조문 - ['3'].[]
 chunk: 사를 자유롭게 밝히고 스스로 결정할 권리를 가지며, 기획업자는 대중문화예술인의
 ==========
-category: 조문
+category: 조문 - ['3'].[]
 chunk:  자유 선택권을 침해하지 않아야 한다. 
 ==========
-category: 조문
+category: 조문 - ['4'].[]
 chunk: 제4조 (청소년의 학습권 보장) 
 ==========
-category: 조문
+category: 조문 - ['4'].['4.1']
 chunk: ① 기획업자는 
 ==========
-category: 조문
+category: 조문 - ['4'].['4.1']
 chunk: 대중문화예술인
 ==========
-category: 조문
+category: 조문 - ['4'].['4.1']
 chunk: 이 「교육기본법」 제8조에 따른
 ==========
-category: 조문
+category: 조문 - ['4'].['4.1']
 chunk:  의무교육을 받을 권리를 보장하여야 한다.
 ==========
-category: 조문
+category: 조문 - ['4'].['4.2']
 chunk: ② 기획업자는 대중문화예술인이 의무교육 외의 「초ㆍ중등교육법」 에 따른 학교교육을 받을 것을 원할 경우 이에 협조하여야 한다.
 ==========
-category: 조문
+category: 조문 - ['4'].['4.3']
 chunk: ③ 기획업자는 대중문화예술인에게 학교의 결석이나 자퇴 등을 강요하여 학습권을 침해하는 행위를 하여서는 아니 된다.
 ==========
-category: 조문
+category: 조문 - ['5'].[]
 chunk: 제5조 (청소년의 인격권 보장) 
 ==========
-category: 조문
+category: 조문 - ['5'].['5.1']
 chunk: ① 기획업자는 대중문화예술인이 안전하고 쾌적한 환경에서 
 ==========
-category: 조문
+category: 조문 - ['5'].['5.1']
 chunk: 자기발전을 추구하고 올바른 가치관을 확립하여 건전한 인격체로 성장할 수 있도록
 ==========
-category: 조문
+category: 조문 - ['5'].['5.1']
 chunk:  노력하여야 한다. 
 ==========
-category: 조문
+category: 조문 - ['5'].['5.2']
 chunk: ② 기획업자는 대중문화예술인에게 폭행, 폭언, 강요, 협박, 성희롱·성폭력 등 신체적·정신적 위해를 가해서는 아니 된다. 
 ==========
-category: 조문
+category: 조문 - ['5'].['5.3']
 chunk: ③ 
 ==========
-category: 조문
+category: 조문 - ['5'].['5.3']
 chunk: 기획업자 또는 기획업자 소속 임직원(임원은 등기임원을 말하며 직원은 고용형
 ==========
-category: 조문
+category: 조문 - ['5'].['5.3']
 chunk: 태를 불문한다)이 
 ==========
-category: 조문
+category: 조문 - ['5'].['5.3']
 chunk: 대중문화예술인
 ==========
-category: 조문
+category: 조문 - ['5'].['5.3']
 chunk: 에 대하여 사회
 ==========
-category: 조문
+category: 조문 - ['5'].['5.3']
 chunk:  상규에 위배되는 폭력 또는 성폭력을 행사
 ==========
-category: 조문
+category: 조문 - ['5'].['5.3']
 chunk: 하거나 학대를 한 경우, 대중문화예술인은 계약을 해지할 수 있다.
 ==========
-category: 조문
+category: 조문 - ['6'].[]
 chunk: 제6조 (청소년의 신체적ㆍ정신적 건강 보장) 
 ==========
-category: 조문
+category: 조문 - ['6'].['6.1']
 chunk: ① 
 ==========
-category: 조문
+category: 조문 - ['6'].['6.1']
 chunk: 기획업자는 대중문화예술인이「학교보건법」제7조의 건강검사에 참여할 수 있도록 협조하여야 한다. 다만, 대중문화예술인이 대중문화예술용역의 제공 등 부득이한 사유로 건강검사에 참석하지 못할 경우, 기획업자는 대중문화예술인이 이에 상응하는 건강검사를 받도록 조치하여야 한다.
 ==========
-category: 조문
+category: 조문 - ['6'].['6.2']
 chunk: ② 
 ==========
-category: 조문
+category: 조문 - ['6'].['6.2']
 chunk: 기획업자는 필요 시 대중문화예술인이 심리 건강에 관한 상담 또는 검사 등을 받도록 조치하는 등 대중문화예술인의 정신적 건강을 보호하기 위해 노력하여야 한다.
 ==========
-category: 조문
+category: 조문 - ['6'].['6.3']
 chunk: ③ 기획업자는 대중문화예술인에게 보건·안전상 위험이 있음에도 대중문화예술용역 제공을 강요하여서는 아니 된다.
 ==========
-category: 조문
+category: 조문 - ['7'].[]
 chunk: 제7조 (청소년의 수면권 및 휴식권 보장) 
 ==========
-category: 조문
+category: 조문 - ['7'].[]
 chunk: 기획업자는 
 ==========
-category: 조문
+category: 조문 - ['7'].[]
 chunk: 대중문화예술인
 ==========
-category: 조문
+category: 조문 - ['7'].[]
 chunk: 이 적절한 휴
 ==========
-category: 조문
+category: 조문 - ['7'].[]
 chunk: 식과 수면
 ==========
-category: 조문
+category: 조문 - ['7'].[]
 chunk: 시간을 보장받을 수 있도록 대중문화예술제작업자와 협의하는 등 제반
 ==========
-category: 조문
+category: 조문 - ['7'].[]
 chunk: 조치를 하는데
 ==========
-category: 조문
+category: 조문 - ['7'].[]
 chunk:  
 ==========
-category: 조문
+category: 조문 - ['7'].[]
 chunk: 노력하여야 한다.
 ==========
-category: 조문
+category: 조문 - ['8'].[]
 chunk: 제8조 (청소년의 대중문화예술용역 제공시간) 
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: ① 기획업자는 아래 <표>에 규정
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 된 바에 따라 대중문화예술인이 대중문화예술용역을 제공할 수 있도록 대중문화예술
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 제작업자와 협의하는 등 제반 조치를 하는데 노력하여야 한다.
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: <표> 청소년의 대중문화예술용역 제공시간 제한
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk:   
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 구 분
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 대중문화예술용역 제공시간 제한
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 대중문화예술용역 제공시간 제한
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 15세 
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 미만의 
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 청소년
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: ㆍ 주당 
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 35시간 
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 이내
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: ㆍ 오후 10시에서 오전 6시까지 금지
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk:  *
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk:  단, 용역 제공일의 다음 날이 학교의
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk:  
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 휴일인 경우에는 청소년과 
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 법정대
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 리인의 동의 하에 자정까지 제공
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk:  가능
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 15세 
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 이상의 
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 청소년
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: ㆍ 주당 
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 40시간 
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 이내
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk:  *
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk:  단, 청소년이 합의할 경우에는 1일
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk:  
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: 1시간, 1주일 6시간 한도 연장 가능
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: ㆍ 오후 10시부터 오전 6시까지 금지
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk:  *
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk:  단, 청소년과 법정대리인이
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk:  동의하는 경우에는 오후 10시에서 오전 6시 사이에도 제공 가능
 ==========
-category: 조문
+category: 조문 - ['8'].['8.1']
 chunk: ※「대중문화예술산업발전법」의 청소년 대중문화예술용역 제공시간 제한에 관한 규정이 개정 될 경우 위 <표>는 개정 내용에 따른다.
 ==========
-category: 조문
+category: 조문 - ['8'].['8.2']
 chunk: ② 국외 활동을 위한 이동, 장거리 이동 등 정당한 사유가 있는 경우에는 제1항의 <표>에 따른 대중문화예술용역 제공시간에 관한 제한을 적용하지 않는다. 다만, 
 ==========
-category: 조문
+category: 조문 - ['8'].['8.2']
 chunk: 이 경우에도 기획업자는 제4조 및 제7조에 의한 
 ==========
-category: 조문
+category: 조문 - ['8'].['8.2']
 chunk: 대중문화예술인
 ==========
-category: 조문
+category: 조문 - ['8'].['8.2']
 chunk: 의 학습권, 휴식권, 수면권이
 ==========
-category: 조문
+category: 조문 - ['8'].['8.2']
 chunk:  
 ==========
-category: 조문
+category: 조문 - ['8'].['8.2']
 chunk: 보장될 
 ==========
-category: 조문
+category: 조문 - ['8'].['8.2']
 chunk: 수 있도록 노력
 ==========
-category: 조문
+category: 조문 - ['8'].['8.2']
 chunk: 하여야 한다.
 ==========
-category: 조문
+category: 조문 - ['9'].[]
 chunk: 제9조 (청소년에게 금지된 행위 및 청소년 출입금지 장소) 
 ==========
-category: 조문
+category: 조문 - ['9'].[]
 chunk: 대중문화예술인은 「청소년 보호법」에 따라 음주ㆍ흡연 등 청소년에게 금지된 행위를 해서는 아니 되며, 청소년의 출입이 금지되는 장소에 출입해서는 아니 된다.
 ==========
-category: 조문
+category: 조문 - ['10'].[]
 chunk: 제10조 (청소년 대중문화예술용역 제공 알선의 제한) 
 ==========
-category: 조문
+category: 조문 - ['10'].['10.1']
 chunk: ① 기획업자는「청소년 보호법」에
 ==========
-category: 조문
+category: 조문 - ['10'].['10.1']
 chunk:  
 ==========
-category: 조문
+category: 조문 - ['10'].['10.1']
 chunk: 따라 청소년의 고용이나 출입이 금지되는 업종에 대하여 대중문화예술인의 대중
 ==========
-category: 조문
+category: 조문 - ['10'].['10.1']
 chunk: 문화예술용역 제공을 알선해서는 아니 된다.
 ==========
-category: 조문
+category: 조문 - ['10'].['10.2']
 chunk: ② 기획업자는 대중문화예술인에게 과다한 노출 및 지나치게 선정적으로 표현하는 행위를 요구할 수 없다.
 ==========
-category: 조문
+category: 조문 - ['11'].[]
 chunk: 제11조 (청소년 유해행위의 금지) 
 ==========
-category: 조문
+category: 조문 - ['11'].[]
 chunk: 기획업자는 「청소년 보호법」에 따른 청소년유해
 ==========
-category: 조문
+category: 조문 - ['11'].[]
 chunk: 행위를 하여서는 아니 되며, 
 ==========
-category: 조문
+category: 조문 - ['11'].[]
 chunk: 대중문화예술인이 대중문화예술용역과 관련하여 제3자로부터 
 ==========
-category: 조문
+category: 조문 - ['11'].[]
 chunk: 이러한 유해행위를 요구받은 경우
 ==========
-category: 조문
+category: 조문 - ['11'].[]
 chunk:  
 ==========
-category: 조문
+category: 조문 - ['11'].[]
 chunk: 대중문화예술인
 ==========
-category: 조문
+category: 조문 - ['11'].[]
 chunk: 을 보호하기 위해 필요한 조치를 취하여야 한다.
 ==========
-category: 조문
+category: 조문 - ['12'].[]
 chunk: 제12조 (청소년 법정대리인의 권한 등) 
 ==========
-category: 조문
+category: 조문 - ['12'].['12.1']
 chunk: ① 대중문화예술인의 법정대리인은 기획업
 ==========
-category: 조문
+category: 조문 - ['12'].['12.1']
 chunk: 자가 대중문화예술인을 대리하여 체결한 대중문화예술용역 제공계약의 내용 및 관련
 ==========
-category: 조문
+category: 조문 - ['12'].['12.1']
 chunk:  일정을 요청할 
 ==========
-category: 조문
+category: 조문 - ['12'].['12.1']
 chunk: 수 있으며, 이 경우 기획업자는 대중문화예술인의 법정대리인에게 이를 지체 없이 제공하여야 한다.
 ==========
-category: 조문
+category: 조문 - ['12'].['12.2']
 chunk: ② 
 ==========
-category: 조문
+category: 조문 - ['12'].['12.2']
 chunk: 대중문화예술인
 ==========
-category: 조문
+category: 조문 - ['12'].['12.2']
 chunk: 의 법정대리인은 주계약에 따른 기획업자의 활동(교육활동을 포함
 ==========
-category: 조문
+category: 조문 - ['12'].['12.2']
 chunk: 한다)에
 ==========
-category: 조문
+category: 조문 - ['12'].['12.2']
 chunk:  대하여 자신의 의견을 언제든지 제시할 수 있다. 이 경우 대중문화예술인의
 ==========
-category: 조문
+category: 조문 - ['12'].['12.2']
 chunk:  법정대리인은 미리 대중문화예술인과 협의하여야 한다.
 ==========
-category: 조문
+category: 조문 - ['12'].['12.3']
 chunk: ③ 대중문화예술인의 법정대리인은 기획업자에게 대중문화예술인의 
 ==========
-category: 조문
+category: 조문 - ['12'].['12.3']
 chunk: 정산자료를 비
 ==========
-category: 조문
+category: 조문 - ['12'].['12.3']
 chunk: 롯한 관련 정산내역을 요청할 수 있으며, 이 경우 기획업자는 대중문화예술인의 법정
 ==========
-category: 조문
+category: 조문 - ['12'].['12.3']
 chunk: 대리인에게 이를 지체 없이 제공하여야 한다.
 ==========
-category: 조문
+category: 조문 - ['12'].['12.4']
 chunk: ④ 기획업자가 
 ==========
-category: 조문
+category: 조문 - ['12'].['12.4']
 chunk: 대중문화예술인
 ==========
-category: 조문
+category: 조문 - ['12'].['12.4']
 chunk: 에게 주계약 및 이 부속합의서의 위반사항 시정 요구 및 계약
 ==========
-category: 조문
+category: 조문 - ['12'].['12.4']
 chunk:  해제 또는 해지,
 ==========
-category: 조문
+category: 조문 - ['12'].['12.4']
 chunk:  손해배상의 청구를 할 경우에는 대중문화예술인의 법정대리인에게도 통보하여야 한다. 
 ==========
-category: 조문
+category: 조문 - ['13'].[]
 chunk: 제13조 (청소년보호책임자 지정 등) 
 ==========
-category: 조문
+category: 조문 - ['13'].[]
 chunk: 기획업자는 대중문화예술인이 대중문화예술용역을 제공하는 경우 기본적 인권을 보장받을 수 있도록 그 종사자 중에서 청소년보호책임자를 지정하고, 대중문화예술인과 친권자 등 보호자에게 청소년보호책임자와 관련된 사항을 고지하여야 한다.
 ==========
-category: 조문
+category: 조문 - ['14'].[]
 chunk: 제14조 (청소년의 정산금액 지급) 
 ==========
-category: 조문
+category: 조문 - ['14'].[]
 chunk: 대중문화예술인이 기획업자에게 정산금액의 지
 ==========
-category: 조문
+category: 조문 - ['14'].[]
 chunk: 급을 청구하는 경우, 대중문화예술용역에 대한 보수청구권이 
 ==========
-category: 조문
+category: 조문 - ['14'].[]
 chunk: 법정대리인에게 있다는
 ==========
-category: 조문
+category: 조문 - ['14'].[]
 chunk:  계약이 있더라도, 기획업자는 대중문화예술인에게 정산금액을
 ==========
-category: 조문
+category: 조문 - ['14'].[]
 chunk:  지급하여야 한다.
 ==========
-category: 조문
+category: 조문 - ['15'].[]
 chunk: 제15조 (확인 및 보증)
 ==========
-category: 조문
+category: 조문 - ['15'].[]
 chunk:  
 ==========
-category: 조문
+category: 조문 - ['15'].[]
 chunk: 기획업자는 대중문화예술인에 대하여「대중문화예술산업발전법」에 따라 대중문화예술기획업자로 등록한 것을 확인하고 보증한다.
 ==========
-category: 조문
+category: 조문 - ['15'].[]
 chunk: 대중문화예술기획업 등록번호: ____________________ 
 ==========
-category: 조문
+category: 조문 - ['16'].[]
 chunk: 제16조 (계약의 실효) 
 ==========
-category: 조문
+category: 조문 - ['16'].[]
 chunk: 이 합의서는 
 ==========
-category: 조문
+category: 조문 - ['16'].[]
 chunk: 대중문화예술인
 ==========
-category: 조문
+category: 조문 - ['16'].[]
 chunk: 이 만 19세가 되는 해의 1월 1일이 되는
 ==========
-category: 조문
+category: 조문 - ['16'].[]
 chunk:  날에 그 효력을 상실한다. 
 ==========
-category: 조문
+category: 입력란 - ['16'].[]
 chunk:                         계약체결 일시 :        년      월      일      
 ==========
-category: 조문
+category: 입력란 - ['16'].[]
 chunk:                         계약체결 장소 :
 ==========
-category: 조문
+category: 조문 - ['16'].[]
 chunk:   
 ==========
-category: 조문
+category: 조문 - ['16'].[]
 chunk: 기획업자
 ==========
-category: 조문
+category: 입력란 - ['16'].[]
 chunk: 주  소 : 
 ==========
-category: 조문
+category: 입력란 - ['16'].[]
 chunk: 회사명 :
 ==========
-category: 조문
+category: 입력란 - ['16'].[]
 chunk: 대표자 :                             인
 ==========
-category: 조문
+category: 기타 - ['16'].[]
 chunk: 대중문화예술인
 ==========
-category: 조문
+category: 입력란 - ['16'].[]
 chunk: 주  소 :
 ==========
-category: 조문
+category: 입력란 - ['16'].[]
 chunk: 생년월일 :
 ==========
-category: 조문
+category: 입력란 - ['16'].[]
 chunk: 성  명(실명) :                       인
 ==========
-category: 조문
+category: 기타 - ['16'].[]
 chunk:   
 ==========
-category: 조문
+category: 기타 - ['16'].[]
 chunk: 대중문화예술인의 법정대리인
 ==========
-category: 조문
+category: 기타 - ['16'].[]
 chunk:   
 ==========
-category: 조문
+category: 기타 - ['16'].[]
 chunk: 대중문화예술인과의 관계
 ==========
-category: 조문
+category: 기타 - ['16'].[]
 chunk:  : 
 ==========
-category: 조문
+category: 입력란 - ['16'].[]
 chunk:   주  소 :
 ==========
-category: 조문
+category: 입력란 - ['16'].[]
 chunk:   생년월일 :
 ==========
-category: 조문
+category: 입력란 - ['16'].[]
 chunk:   성  명 :                        인
 ==========

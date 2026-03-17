@@ -100,7 +100,7 @@ def create_ir_dict(doc: HwpxDocument) -> dict[str, IRChunk]:
         detected_article_nums: list[str] = []
         detected_paragraph_nums: list[str] = []
         splits: list[tuple[int, int]] = []
-        section = "unk-table" if "tbl" in id else "unk"
+        section = "uncategorized-table" if "tbl" in id else "uncategorized"
 
         ex_article = get_article_numbers(text)
         for match in ex_article:

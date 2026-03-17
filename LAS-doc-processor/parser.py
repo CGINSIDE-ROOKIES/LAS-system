@@ -1,21 +1,24 @@
-from pydantic import BaseModel, Field, ValidationError, computed_field
+from pydantic import BaseModel, Field, ValidationError
 
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 
-from hwpx import HwpxDocument
-from ir import create_ir_dict, ir_grouper
-from las_types import IRGroup
+from las_types import IRGroup, DocumentState, IRGroupState
 
 from pathlib import Path
-from typing import Literal, Annotated, cast
+from typing import Literal, cast
 import re
+
 
 from prompts import get_prompts
 from env_loader import load_env_SecretStr, load_env_str
 
 prompts = get_prompts()
+
+###################################################################################################
+# STRUCTURED OUTPUT FORMS
+###################################################################################################
 
 """
 Reasoning과 관련해서, 이 필드를 CoT간접 유도를 위해서 저걸 먼저 생성하도록 유도가 필요
@@ -41,8 +44,10 @@ class TextCategorization(BaseModel):
         description="이 텍스트의 분류, 하나만 고르세요."
     )
 
+###################################################################################################
+
 llm = ChatOpenAI(
-    # base_url=load_env_str("PARSER_LLM_URL"),
+    base_url=load_env_str("PARSER_LLM_URL"),
     api_key=load_env_SecretStr("PARSER_LLM_KEY"),
     model=load_env_str("PARSER_LLM_MODEL"),
 )
@@ -52,63 +57,14 @@ prelim_categorizer_llm = llm.with_structured_output(TextPrelimCategorization, me
 categorizer_llm = llm.with_structured_output(TextCategorization, method="json_mode") \
     .with_retry(retry_if_exception_type=(ValidationError, ValueError), stop_after_attempt=3)
 
-class DocumentState(BaseModel):  # Main graph state
-    target_file: Path = Field(default=Path())  # kind temp.
-    ir_groups: list[IRGroup] = Field(default=[])
-    
-    # doc may hold other doctype isntances, also due to serialization issues, not used
-    # doc: Any = Field(default=None)  # HwpxDocument
-    
-    # used as a collector (for concurrent workers) before re-indexing
-    # empty list [] acts as a clear signal (operator.add would silently keep old items)
-    ir_groups_temp: Annotated[list[tuple[int, IRGroup]],
-        lambda left, right: [] if right == [] else left + right] = \
-        Field(default=[])
-    
-    # used for preprocess routing / notifying state
-    preprocess_state: Literal["none", "prelim", "finished"] = Field(default="none")
-
-    @computed_field
-    def formatted_content(self) -> list[str]:
-        assert self.ir_groups, "ir_groups needs to be inserted/generated!"
-        return [grp.formatted_str for grp in self.ir_groups]
-    
-    @classmethod
-    def from_hwpx(cls, file_path: Path):
-        with HwpxDocument.open(file_path) as doc:
-            ir_mappings = create_ir_dict(doc)
-            ir_groups = ir_grouper(ir_mappings)
-            return cls(
-                target_file=file_path,
-                ir_groups=ir_groups,
-            )
-    
-    @classmethod
-    def from_hwp(cls, file_path: Path):
-        # convert hwp to hwpx and then invoke from_hwpx
-        ...
-    
-    @classmethod
-    def from_docx(cls, file_path: Path):
-        ...
-    
-    @classmethod
-    def from_pdf(cls, file_path: Path):
-        # exact mapping to OOXML Xpath (that the IR uses for ID) is not possible
-        # needs a custom translator to at least mimick the translation
-        ...
-
-
-class IRGroupState(BaseModel):
-    # IRGroup is put in a list and order should be maintained... 
-    # (needs design change for that or doesn't matter? 흠...)
-    group_idx: int
-    ir_group: IRGroup
-
+BYPASS_PRELIM = False
 
 def document_splitter(state: DocumentState):
     ps = state.preprocess_state
-    if ps == "none":
+    if ps == "uncategorized" and BYPASS_PRELIM:
+        ps = "prelim"
+    
+    if ps == "uncategorized":
         return [Send("prelim_categorization_workers", IRGroupState(group_idx=i, ir_group=ir_group))
                 for i, ir_group in enumerate(state.ir_groups)]
     elif ps == "prelim":
@@ -123,31 +79,43 @@ def document_splitter(state: DocumentState):
 def document_reducer(state: DocumentState):
     # ir_groups_temp needs to be cleared!!! (or it'll accumulate)
     sorted_ir_groups = sorted(state.ir_groups_temp, key=lambda x: x[0])
-    next_state = "prelim" if state.preprocess_state == "none" else "finished"
+    next_state = "prelim" if state.preprocess_state == "uncategorized" else "finished"
     return {"ir_groups": [group for _, group in sorted_ir_groups], "ir_groups_temp": [], "preprocess_state": next_state}
 
-#####################################################################
+###################################################################################################
 
 def prelim_categorization_node_worker(state: IRGroupState):
+    # Groups without a detected article number are very likely non-조문 (title, preamble, signature, etc.)
+    # Skip the LLM call and leave them as uncategorized for the detailed pass.
+    if state.ir_group.article_n == "-1":
+        print(f"\n--- PRELIM SKIP (group {state.group_idx}, article_n=-1) → uncategorized\n")
+        return {"ir_groups_temp": [(state.group_idx, state.ir_group)]}
+
+    # Skip groups with empty content
+    if not state.ir_group.formatted_str.strip():
+        print(f"\n--- PRELIM SKIP (group {state.group_idx}, empty) → uncategorized\n")
+        return {"ir_groups_temp": [(state.group_idx, state.ir_group)]}
+
     messages = [
         ("system", prompts["prelim_categorization"]),
         ("user", state.ir_group.formatted_str)
     ]
     print(f"\n--- LLM INPUT (group {state.group_idx})")
     reply = TextPrelimCategorization.model_validate(prelim_categorizer_llm.invoke(messages))
-    
+    print(f"\n--- LLM OUTPUT (group {state.group_idx}) ---\n{reply!r}\n")
+
+
     updated_chunks = []
     for chunk in state.ir_group.ir_chunks:
-        new_chunk = chunk.model_copy(update={"category": reply.category}) 
+        new_chunk = chunk.model_copy(update={"category": reply.category})
         updated_chunks.append(new_chunk)
-        
+
     new_ir_group = state.ir_group.model_copy(update={"ir_chunks": updated_chunks})
-    
+
     return {"ir_groups_temp": [(state.group_idx, new_ir_group)]}
 
 
 def categorization_node_worker(state: IRGroupState):
-    print("="*25, "\ncategorization worker start\n", "="*25)
 
     def para_key(chunk_id: str) -> str:
         return re.sub(r"\.r\d+$", "", chunk_id)
@@ -188,7 +156,7 @@ def categorization_node_worker(state: IRGroupState):
     new_ir_group = state.ir_group.model_copy(update={"ir_chunks": updated_chunks})
     return {"ir_groups_temp": [(state.group_idx, new_ir_group)]}
 
-#####################################################################
+###################################################################################################
 
 main_graph_builder = StateGraph(DocumentState)
 
@@ -197,7 +165,7 @@ main_graph_builder.add_node("categorization_workers", categorization_node_worker
 main_graph_builder.add_node("document_reducer", document_reducer)
 
 _splitter_targets = ["prelim_categorization_workers", "categorization_workers", END]
-main_graph_builder.add_conditional_edges(START, document_splitter, [_splitter_targets[0]])
+main_graph_builder.add_conditional_edges(START, document_splitter, _splitter_targets)
 main_graph_builder.add_edge("prelim_categorization_workers", "document_reducer")
 main_graph_builder.add_conditional_edges("document_reducer", document_splitter, _splitter_targets)
 main_graph_builder.add_edge("categorization_workers", "document_reducer")
@@ -206,28 +174,31 @@ main_graph = main_graph_builder.compile()
 
 
 if __name__ == "__main__":
-    graph_png = main_graph.get_graph().draw_mermaid_png()
-    with open("graph.png", "wb") as f:
-        f.write(graph_png)
-    print("Graph diagram saved to graph.png")
+    # graph_png = main_graph.get_graph().draw_mermaid_png()
+    # with open("tests/graph.png", "wb") as f:
+    #     f.write(graph_png)
+    # print("Graph diagram saved to graph.png")
 
-    file_dirs = list(Path("/home/maxjo/Work/python-hwpx/tests_new/input/").iterdir())
+    file_dirs_std_labor = list(Path("tests/doc_samples/표준계약서모음(hwp-hwpx)").iterdir())
+    file_dirs_std_contracts = list(Path("tests/doc_samples/(노동)표준근로계약서모음").iterdir())
+    file_dirs = file_dirs_std_labor + file_dirs_std_contracts
+    
     [print(f"{i}. {f.name}") for i, f in enumerate(file_dirs)]
     sel = int(input("select: "))
     file_path = file_dirs[sel]
 
     result = main_graph.invoke(
-        input=DocumentState.from_hwpx(Path(file_path)),
-        config={"max_concurrency": 1}
+        input=DocumentState.from_file(Path(file_path)),
+        config={"max_concurrency": 4}
     )
 
-    with open("tests/parser_test_res.txt", "w", encoding="utf-8") as f:
+    with open(f"tests/results/{file_path.name}_parser_res.txt", "w", encoding="utf-8") as f:
         for group in result["ir_groups"]:
             group = cast(IRGroup, group)
             for chunk in group.ir_chunks:
                 text = chunk.markdown_text
                 category = chunk.category
-                f.write(f"category: {category}\nchunk: {text}\n==========\n")
+                f.write(f"category: {category} - {chunk.article_n}.{chunk.paragraph_n}\nchunk: {text}\n==========\n")
             # text = group.formatted_str
             # category = group.ir_chunks[0].category
             # print(f"category: {category}\nchunk: {text}\n==========\n")
