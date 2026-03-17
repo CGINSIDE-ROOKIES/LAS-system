@@ -76,6 +76,7 @@ def _resolve_request_options(
 def generate_answer(
     prompt: str,
     *,
+    system_prompt: str | None = None,
     url: str | None = None,
     model: str | None = None,
     api_key: str | None = None,
@@ -108,9 +109,14 @@ def generate_answer(
     if resolved_api_key:
         headers["Authorization"] = f"Bearer {resolved_api_key}"
 
+    messages: list[dict[str, str]] = []
+    if system_prompt and system_prompt.strip():
+        messages.append({"role": "system", "content": system_prompt.strip()})
+    messages.append({"role": "user", "content": prompt_text})
+
     payload: dict[str, Any] = {
         "model": resolved_model,
-        "messages": [{"role": "user", "content": prompt_text}],
+        "messages": messages,
         "max_tokens": resolved_max_tokens,
         "temperature": resolved_temperature,
     }
@@ -136,6 +142,7 @@ def generate_answer(
 def stream_answer(
     prompt: str,
     *,
+    system_prompt: str | None = None,
     url: str | None = None,
     model: str | None = None,
     api_key: str | None = None,
@@ -164,9 +171,14 @@ def stream_answer(
         temperature=temperature,
     )
 
+    messages: list[dict[str, str]] = []
+    if system_prompt and system_prompt.strip():
+        messages.append({"role": "system", "content": system_prompt.strip()})
+    messages.append({"role": "user", "content": prompt_text})
+
     payload: dict[str, Any] = {
         "model": resolved_model,
-        "messages": [{"role": "user", "content": prompt_text}],
+        "messages": messages,
         "max_tokens": resolved_max_tokens,
         "temperature": resolved_temperature,
         "stream": True,
@@ -250,6 +262,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=120, help="요청 타임아웃(초)")
     parser.add_argument("--max-tokens", type=int, default=256, help="최대 생성 토큰")
     parser.add_argument("--temperature", type=float, default=0.2, help="생성 온도")
+    parser.add_argument("--system-prompt", default="", help="시스템 프롬프트 (system role)")
     parser.add_argument("--stream", action="store_true", help="스트리밍 출력 모드")
     parser.add_argument("--json", action="store_true", help="JSON 형식으로 출력")
     return parser.parse_args()
@@ -263,6 +276,7 @@ def main() -> int:
         try:
             for chunk in stream_answer(
                 args.prompt,
+                system_prompt=args.system_prompt or None,
                 url=args.url or None,
                 model=args.model or None,
                 api_key=args.api_key or None,
@@ -297,6 +311,7 @@ def main() -> int:
     try:
         answer = generate_answer(
             args.prompt,
+            system_prompt=args.system_prompt or None,
             url=args.url or None,
             model=args.model or None,
             api_key=args.api_key or None,

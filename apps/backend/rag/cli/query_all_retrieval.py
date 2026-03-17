@@ -5,7 +5,7 @@
   uv run python scripts/query_all_retrieval.py --question "연장근로 최대 시간은?" --top-k 5
   uv run python scripts/query_all_retrieval.py --interactive --top-k 5
   uv run python scripts/query_all_retrieval.py --question "..." --llm-context-json
-  uv run python scripts/query_all_retrieval.py --question "사용자는 연차 유급휴가를 어떤 기준으로 부여해야 하나요?" --top-k 5 --prompt-json
+  uv run python scripts/query_all_retrieval.py --question "사용자는 연차 유급휴가를 어떤 기준으로 부여해야 하나요?" --top-k 5 --llm-context-text
 """
 
 from __future__ import annotations
@@ -15,9 +15,18 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 
-from apps.backend.rag.cli.query_hybrid_rrf import fuse_rrf
-from apps.backend.rag.cli.retrieval_common import (
+# 실행 위치와 관계없이 로컬 cli 모듈 import 가능하도록 경로 고정
+_CLI_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
+if str(_CLI_DIR) not in sys.path:
+    sys.path.insert(0, str(_CLI_DIR))
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from query_hybrid_rrf import fuse_rrf
+from retrieval_common import (
     DEFAULT_EMBEDDING_MODEL,
     RetrievalError,
     require_env_or_arg,

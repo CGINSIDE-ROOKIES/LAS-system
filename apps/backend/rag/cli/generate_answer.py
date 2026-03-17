@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
-"""Retrieval + Generator 통합 실행 스크립트."""
+"""Retrieval + Generator 통합 실행 스크립트.
+
+실행 예시:
+  uv run python apps/backend/rag/cli/generate_answer.py --question "연장근로 최대 시간은?"
+
+기본(JSON):
+  uv run python cli/generate_answer.py --question "연장근로 최대 시간은?"
+
+스트리밍(NDJSON):
+  uv run python cli/generate_answer.py --question "연장근로 최대 시간은?" --stream
+
+텍스트 스트리밍 확인:
+  uv run python cli/generate_answer.py --question "연장근로 최대 시간은?" --stream --text
+
+길이 제한 + temperature 설정:
+  uv run python cli/generate_answer.py --question "연장 근로 최대 시간은?" --stream --top-k 2 --max-content-chars 400 --max-total-chars 900 --llm-max-input-chars 1200 --llm-max-tokens 120 --llm-temperature 0.1
+"""
 
 from __future__ import annotations
 
@@ -174,14 +190,14 @@ def _build_frontend_payload(
     return payload
 
 
-def _build_prompt_with_limit(
+def _build_user_prompt_with_limit(
     *,
-    system_prompt: str,
     retrieved_context_text: str,
     question: str,
     max_input_chars: int,
     law_context_status: str,
 ) -> str:
+    """system_prompt를 제외한 user 메시지 본문(컨텍스트 + 질문)을 조립한다."""
     status_line = ""
     if law_context_status == "missing":
         status_line = (
@@ -192,7 +208,6 @@ def _build_prompt_with_limit(
         status_line = "참고: 법령(law) 문서를 보강한 컨텍스트로 답변합니다.\n\n"
 
     prefix = (
-        f"{system_prompt}\n\n"
         f"{status_line}"
         "아래 검색 컨텍스트를 근거로만 답변하세요.\n"
         "근거가 부족하면 부족하다고 명시하세요.\n\n"
@@ -204,7 +219,7 @@ def _build_prompt_with_limit(
 
     keep = max_input_chars - len(prefix) - len(suffix)
     if keep <= 0:
-        return f"{system_prompt}\n\n[최종 질문]\n{question}"
+        return f"[최종 질문]\n{question}"
 
     context = retrieved_context_text
     if len(context) > keep:
@@ -391,8 +406,7 @@ def main() -> int:
         question, contexts, law_context_added
     )
 
-    llm_prompt = _build_prompt_with_limit(
-        system_prompt=args.system_prompt,
+    llm_prompt = _build_user_prompt_with_limit(
         retrieved_context_text=retrieved_context_text,
         question=question,
         max_input_chars=args.llm_max_input_chars,
@@ -405,6 +419,7 @@ def main() -> int:
         try:
             for chunk in stream_answer(
                 llm_prompt,
+                system_prompt=args.system_prompt or None,
                 url=args.llm_url or None,
                 model=args.llm_model or None,
                 api_key=args.llm_api_key or None,
@@ -431,6 +446,7 @@ def main() -> int:
         try:
             answer = generate_answer(
                 llm_prompt,
+                system_prompt=args.system_prompt or None,
                 url=args.llm_url or None,
                 model=args.llm_model or None,
                 api_key=args.llm_api_key or None,
