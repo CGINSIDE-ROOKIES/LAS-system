@@ -5,11 +5,12 @@ from pathlib import Path
 from typing import Any, Iterable, Literal
 import re
 
+from src.common.appendix_scope import appendix_exclusion_reason
+from src.parser.appendix_api_markdown import parse_api_appendix_text
 from src.common.io_utils import _safe_filename, _write_json
 from src.common.payload_utils import _first_non_empty
 from src.parser.law_parser import (
     _looks_metadata_like,
-    _looks_table_like,
     _normalize_text_flat,
     _normalize_text_preserve_structure,
     _normalize_title,
@@ -20,7 +21,6 @@ from src.parser.law_parser import (
 AppendixType = Literal[
     "appendix_document",
     "table_appendix",
-    "form_appendix",
     "metadata_only",
 ]
 
@@ -56,7 +56,23 @@ FORM_TEXT_TOKENS = (
     "대리인",
 )
 
-TABLE_STRUCTURE_TOKENS = "┌┐└┘├┤┬┴┼│─━┏┓┗┛"
+TABLE_STRUCTURE_TOKENS = "┌┐└┘├┤┬┴┼│─━┏┓┗┛┃"
+TABLE_TITLE_TOKENS = (
+    "표",
+    "분류",
+    "보상",
+    "기준",
+    "산정",
+    "일람",
+    "규격",
+    "양식",
+    "기재사항",
+    "직종",
+    "질환",
+    "업종",
+    "등급",
+    "금액",
+)
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -136,8 +152,10 @@ def _count_table_signals(text: str | None) -> int:
     if text in (None, ""):
         return 0
 
-    signal_count = sum(str(text).count(token) for token in TABLE_STRUCTURE_TOKENS)
-    signal_count += sum(1 for line in str(text).splitlines() if line.count("│") >= 2)
+    raw = str(text)
+    signal_count = sum(raw.count(token) for token in TABLE_STRUCTURE_TOKENS)
+    signal_count += sum(1 for line in raw.splitlines() if line.count("│") >= 2)
+    signal_count += sum(1 for line in raw.splitlines() if line.count("|") >= 2)
     return signal_count
 
 
@@ -150,22 +168,70 @@ def _count_form_signals(title: str | None, text: str | None) -> int:
     return score
 
 
-def _looks_form_like(
-    appendix_kind: str | None,
-    appendix_key: str | None,
-    title: str | None,
-    text: str | None,
-) -> bool:
-    kind_text = appendix_kind or ""
-    key_text = appendix_key or ""
+def _line_column_count(line: str) -> int:
+    stripped = str(line).strip()
+    if not stripped:
+        return 0
 
-    if "서식" in kind_text:
-        return True
-    if key_text.endswith("F"):
-        return True
+    if "│" in stripped:
+        cells = [cell.strip() for cell in re.split(r"\s*│\s*", stripped.strip("│ ")) if cell.strip()]
+        return len(cells)
 
-    form_signal_count = _count_form_signals(title, text)
-    if form_signal_count >= 2:
+    if stripped.count("|") >= 2:
+        cells = [cell.strip() for cell in re.split(r"\s*\|\s*", stripped.strip("| ")) if cell.strip()]
+        return len(cells)
+
+    cells = [cell.strip() for cell in re.split(r"\s{2,}", stripped) if cell.strip()]
+    return len(cells) if len(cells) >= 2 else 0
+
+
+def _stable_table_layout_score(text: str | None) -> dict[str, int]:
+    if text in (None, ""):
+        return {"common_columns": 0, "supporting_line_count": 0}
+
+    lines = [line for line in str(text).splitlines() if line.strip()]
+    column_counter: Counter[int] = Counter(
+        count for count in (_line_column_count(line) for line in lines) if count >= 2
+    )
+    if not column_counter:
+        return {"common_columns": 0, "supporting_line_count": 0}
+
+    common_columns, supporting_line_count = max(
+        column_counter.items(),
+        key=lambda item: (item[1], item[0]),
+    )
+    return {
+        "common_columns": int(common_columns),
+        "supporting_line_count": int(supporting_line_count),
+    }
+
+
+def _has_tableish_title(title: str | None) -> bool:
+    normalized = _normalize_text_flat(title) or ""
+    return any(token in normalized for token in TABLE_TITLE_TOKENS)
+
+
+def _looks_table_like_strict(title: str | None, text: str | None) -> bool:
+    if text in (None, ""):
+        return False
+
+    raw_text = str(text)
+    table_signal_count = _count_table_signals(raw_text)
+    lines = [line for line in raw_text.splitlines() if line.strip()]
+    boxed_lines = sum(1 for line in lines if line.count("│") >= 2 or line.count("|") >= 2)
+    layout_score = _stable_table_layout_score(raw_text)
+    common_columns = int(layout_score.get("common_columns") or 0)
+    supporting_line_count = int(layout_score.get("supporting_line_count") or 0)
+
+    if table_signal_count >= 8:
+        return True
+    if boxed_lines >= 2:
+        return True
+    if common_columns >= 3 and supporting_line_count >= 3:
+        return True
+    if common_columns >= 2 and supporting_line_count >= 3 and table_signal_count >= 2:
+        return True
+    if common_columns >= 2 and supporting_line_count >= 4 and _has_tableish_title(title):
         return True
 
     return False
@@ -176,7 +242,10 @@ def _classify_appendix_type(
     appendix_key: str | None,
     title: str | None,
     text_raw: str | None,
+    *,
+    api_table_count: int = 0,
 ) -> AppendixType:
+    del appendix_kind, appendix_key  # kept for future diagnostics
     title_text = title or ""
     if text_raw in (None, ""):
         return "metadata_only"
@@ -184,10 +253,10 @@ def _classify_appendix_type(
     if _looks_metadata_like(title_text, text_raw):
         return "metadata_only"
 
-    if _looks_form_like(appendix_kind, appendix_key, title_text, text_raw):
-        return "form_appendix"
+    if api_table_count > 0:
+        return "table_appendix"
 
-    if _looks_table_like(text_raw):
+    if _looks_table_like_strict(title_text, text_raw):
         return "table_appendix"
 
     return "appendix_document"
@@ -257,27 +326,31 @@ def _build_processing_policy(
     has_pdf_asset: bool,
     has_image_asset: bool,
     has_download_link: bool,
+    has_api_tables: bool,
 ) -> dict[str, Any]:
     pdf_fallback = has_pdf_asset or has_download_link
     ocr_fallback = has_image_asset or pdf_fallback
 
     if appendix_type == "metadata_only":
+        default_primary = "metadata_only"
         recommended = "metadata_only_keep_for_reference"
     elif appendix_type == "appendix_document":
+        default_primary = "api_document_markdown" if has_text else "pdf_text"
         recommended = (
-            "use_api_text_clean_as_primary"
+            "use_api_document_markdown_as_primary"
             if has_text
             else "reextract_pdf_text_if_available"
         )
     else:
+        default_primary = "api_table_markdown" if has_api_tables else "api_text_clean"
         recommended = (
-            "use_api_text_clean_then_reextract_pdf_if_layout_needed"
-            if has_text
-            else "reextract_pdf_text_if_available"
+            "use_api_table_markdown_as_primary_then_reextract_pdf_if_needed"
+            if has_api_tables
+            else "use_api_text_clean_then_reextract_pdf_if_layout_needed"
         )
 
     return {
-        "default_primary": "api_text_clean",
+        "default_primary": default_primary,
         "pdf_fallback": pdf_fallback,
         "ocr_fallback": ocr_fallback,
         "recommended_next_step": recommended,
@@ -292,6 +365,7 @@ def parse_appendix_bundle(
     law_meta = _extract_law_meta(payload, law_ref=law_ref)
 
     records: list[dict[str, Any]] = []
+    excluded_records: list[dict[str, Any]] = []
 
     for unit in _extract_appendix_units(law_root):
         appendix_key = _normalize_text_flat(_first_non_empty(unit, "별표키", "appendix_key"))
@@ -302,9 +376,32 @@ def parse_appendix_bundle(
             _first_non_empty(unit, "별표제목", "별표제목문자열", "appendix_title")
         )
         title = _normalize_title(title_raw) or title_raw or "별표"
+
+        exclusion_reason = appendix_exclusion_reason(
+            appendix_kind,
+            title,
+            appendix_key,
+        )
+        if exclusion_reason is not None:
+            excluded_records.append(
+                {
+                    **law_meta,
+                    "appendix_key": appendix_key,
+                    "appendix_kind": appendix_kind,
+                    "appendix_title_raw": title_raw,
+                    "appendix_title": title,
+                    "excluded_reason": exclusion_reason,
+                }
+            )
+            continue
+
         text_raw = _extract_text_raw(_first_non_empty(unit, "별표내용", "appendix_text"))
         text_clean = _normalize_text_flat(text_raw)
         text_lines = _extract_text_lines(_first_non_empty(unit, "별표내용", "appendix_text"))
+        api_markdown = parse_api_appendix_text(
+            text_raw,
+            title=title,
+        )
 
         file_download_link = _normalize_relative_link(
             _first_non_empty(unit, "별표서식파일링크", "appendix_download_link")
@@ -327,12 +424,14 @@ def parse_appendix_bundle(
             appendix_key=appendix_key,
             title=title,
             text_raw=text_raw,
+            api_table_count=int(api_markdown.get("table_count") or 0),
         )
 
         has_text = text_clean not in (None, "")
         has_pdf_asset = pdf_download_link is not None or pdf_file_name is not None
-        has_image_asset = bool(image_file_names)
+        has_image_asset = bool(image_file_names or api_markdown.get("image_urls"))
         has_download_link = file_download_link is not None
+        has_api_tables = bool(api_markdown.get("table_count"))
 
         processing_policy = _build_processing_policy(
             appendix_type=appendix_type,
@@ -340,6 +439,7 @@ def parse_appendix_bundle(
             has_pdf_asset=has_pdf_asset,
             has_image_asset=has_image_asset,
             has_download_link=has_download_link,
+            has_api_tables=has_api_tables,
         )
 
         record_id = "::".join(
@@ -364,7 +464,7 @@ def parse_appendix_bundle(
                 "appendix_effective_date": _normalize_text_flat(
                     _first_non_empty(unit, "별표시행일자", "appendix_effective_date")
                 ),
-                "appendix_kind": appendix_kind,
+                "appendix_kind": appendix_kind or "별표",
                 "appendix_type": appendix_type,
                 "appendix_title_raw": title_raw,
                 "appendix_title": title,
@@ -372,10 +472,18 @@ def parse_appendix_bundle(
                 "api_text": text_clean,
                 "api_text_lines": text_lines,
                 "api_text_line_count": len([line for line in text_lines if line.strip()]),
+                "api_image_urls": api_markdown.get("image_urls") or [],
+                "api_markdown_tables": api_markdown.get("markdown_tables") or [],
+                "api_table_markdown_text": api_markdown.get("table_markdown_text"),
+                "api_structured_tables": api_markdown.get("structured_tables") or [],
+                "api_table_count": int(api_markdown.get("table_count") or 0),
+                "api_narrative_markdown": api_markdown.get("narrative_markdown"),
+                "api_document_markdown": api_markdown.get("document_markdown"),
+                "api_document_markdown_flat": api_markdown.get("document_markdown_flat"),
                 "table_signal_count": _count_table_signals(text_raw),
                 "form_signal_count": _count_form_signals(title, text_raw),
                 "has_substantive_text": has_text,
-                "has_table_markup": _looks_table_like(text_raw),
+                "has_table_markup": appendix_type == "table_appendix" or bool(api_markdown.get("table_count")),
                 "is_default_serving_candidate": appendix_type == "appendix_document",
                 "download_assets": {
                     "file_download_link": file_download_link,
@@ -383,19 +491,25 @@ def parse_appendix_bundle(
                     "pdf_file_name": pdf_file_name,
                     "hwp_file_name": hwp_file_name,
                     "image_file_names": image_file_names,
+                    "api_image_urls": api_markdown.get("image_urls") or [],
                 },
                 "processing_policy": processing_policy,
             }
         )
 
     appendix_type_counts = Counter(record["appendix_type"] for record in records)
+    excluded_reason_counts = Counter(record["excluded_reason"] for record in excluded_records)
 
     return {
         **law_meta,
+        "appendix_scope": "별표_only",
         "appendix_count": len(records),
         "appendix_type_counts": dict(appendix_type_counts),
+        "excluded_appendix_count": len(excluded_records),
+        "excluded_reason_counts": dict(excluded_reason_counts),
+        "excluded_appendix_records": excluded_records,
         "processing_policy": {
-            "default_primary": "api_text_clean",
+            "default_primary": "api_markdown_or_clean",
             "secondary": "pdf_reextract_if_needed",
             "tertiary": "ocr_or_vision_if_needed",
         },

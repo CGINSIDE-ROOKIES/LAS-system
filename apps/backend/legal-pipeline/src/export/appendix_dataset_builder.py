@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from src.common.appendix_scope import is_target_appendix
 from src.common.io_utils import _read_json, _write_json
 from src.export.jsonl_builder import write_jsonl
 
@@ -11,7 +12,6 @@ from src.export.jsonl_builder import write_jsonl
 APPENDIX_TYPE_LABELS = {
     "appendix_document": "appendix_document",
     "table_appendix": "table_appendix",
-    "form_appendix": "form_appendix",
     "metadata_only": "metadata_only",
 }
 
@@ -40,6 +40,15 @@ def _normalize_structure(text: str) -> str:
     return "\n".join(normalized_lines).strip()
 
 
+def _record_default_text_source(record: dict[str, Any]) -> str:
+    structured_tables = record.get("api_structured_tables")
+    if isinstance(structured_tables, list) and structured_tables and record.get("api_table_markdown_text") not in (None, ""):
+        return "api_table_markdown"
+    if record.get("api_document_markdown") not in (None, ""):
+        return "api_markdown"
+    return "api_text"
+
+
 def _select_text(
     record: dict[str, Any],
     *,
@@ -48,7 +57,7 @@ def _select_text(
 ) -> str:
     candidate_values: list[Any] = []
 
-    if asset_record is not None and str(asset_record.get("best_text_source") or "") not in {"", "none", "api_text"}:
+    if asset_record is not None and str(asset_record.get("best_text_source") or "") not in {"", "none"}:
         candidate_values.extend(
             [
                 asset_record.get("best_text_raw") if preserve_structure else asset_record.get("best_text"),
@@ -58,6 +67,9 @@ def _select_text(
 
     candidate_values.extend(
         [
+            record.get("api_table_markdown_text") if preserve_structure else record.get("api_table_markdown_text"),
+            record.get("api_document_markdown") if preserve_structure else record.get("api_document_markdown_flat"),
+            record.get("api_document_markdown_flat") if preserve_structure else record.get("api_document_markdown"),
             record.get("api_text_raw") if preserve_structure else record.get("api_text"),
             record.get("api_text") if preserve_structure else record.get("api_text_raw"),
         ]
@@ -72,10 +84,20 @@ def _select_text(
     return ""
 
 
-def _resolve_text_source(asset_record: dict[str, Any] | None) -> str:
+def _resolve_text_source(asset_record: dict[str, Any] | None, *, record: dict[str, Any] | None = None) -> str:
+    record_default = _record_default_text_source(record or {})
     if asset_record is None:
-        return "api_text"
-    source = str(asset_record.get("best_text_source") or "api_text").strip() or "api_text"
+        return record_default
+
+    source = str(asset_record.get("best_text_source") or "").strip()
+    if source in {"", "none"}:
+        return record_default
+
+    if record_default == "api_table_markdown" and source not in {"api_table_markdown", "pdf_table_markdown"}:
+        return "api_table_markdown"
+    if record_default == "api_markdown" and source == "api_text":
+        return "api_markdown"
+
     return source
 
 
@@ -274,7 +296,11 @@ def _iter_appendix_records(normalized_appendix_base_dir: str | Path) -> Iterable
         if not isinstance(records, list):
             continue
         for record in records:
-            if isinstance(record, dict):
+            if isinstance(record, dict) and is_target_appendix(
+                record.get("appendix_kind"),
+                record.get("appendix_title"),
+                record.get("appendix_key"),
+            ):
                 yield path, bundle, record
 
 
@@ -309,17 +335,15 @@ def _load_appendix_asset_index(
     return index
 
 
-def _build_appendix_text(
+def _build_metadata_lines(
     record: dict[str, Any],
     *,
-    preserve_structure: bool,
-    asset_record: dict[str, Any] | None = None,
-) -> str:
+    text_source: str | None,
+    include_text_source: bool = False,
+) -> list[str]:
+    appendix_type = str(record.get("appendix_type") or "appendix_document").strip()
     appendix_title = str(record.get("appendix_title") or "별표").strip()
     appendix_kind = str(record.get("appendix_kind") or "").strip()
-    appendix_type = str(record.get("appendix_type") or "appendix_document").strip()
-    text = _select_text(record, preserve_structure=preserve_structure, asset_record=asset_record)
-    text_source = _resolve_text_source(asset_record)
 
     lines: list[str] = []
     if record.get("law_name"):
@@ -332,10 +356,79 @@ def _build_appendix_text(
     if record.get("appendix_no"):
         lines.append(f"별표번호: {record['appendix_no']}")
     lines.append(_render_prefixed_text("별표제목:", appendix_title))
-    if asset_record is not None and text_source != "api_text":
+    if include_text_source and text_source and text_source != "api_text":
         lines.append(f"텍스트소스: {text_source}")
+    return lines
+
+
+def _build_appendix_text(
+    record: dict[str, Any],
+    *,
+    preserve_structure: bool,
+    asset_record: dict[str, Any] | None = None,
+) -> str:
+    text = _select_text(record, preserve_structure=preserve_structure, asset_record=asset_record)
+    text_source = _resolve_text_source(asset_record, record=record)
+    lines = _build_metadata_lines(
+        record,
+        text_source=text_source,
+        include_text_source=asset_record is not None,
+    )
     if text:
         lines.append(text)
+
+    return "\n".join(line for line in lines if line).strip()
+
+
+def _structured_tables_from_asset(asset_record: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if asset_record is None:
+        return []
+
+    tables = asset_record.get("best_structured_tables")
+    if isinstance(tables, list):
+        return [table for table in tables if isinstance(table, dict)]
+    return []
+
+
+def _structured_tables_from_record(record: dict[str, Any]) -> list[dict[str, Any]]:
+    tables = record.get("api_structured_tables")
+    if isinstance(tables, list):
+        return [table for table in tables if isinstance(table, dict)]
+    return []
+
+
+def _structured_tables_for_record(
+    record: dict[str, Any],
+    asset_record: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    asset_tables = _structured_tables_from_asset(asset_record)
+    if asset_tables:
+        return asset_tables
+    return _structured_tables_from_record(record)
+
+
+def _build_structured_table_text(
+    record: dict[str, Any],
+    *,
+    asset_record: dict[str, Any] | None,
+    table: dict[str, Any],
+    table_number: int,
+) -> str:
+    text_source = _resolve_text_source(asset_record, record=record)
+    lines = _build_metadata_lines(
+        record,
+        text_source=text_source,
+        include_text_source=True,
+    )
+    lines.append(f"표번호: {table_number}")
+    if table.get("page_number") not in (None, ""):
+        lines.append(f"페이지: {table['page_number']}")
+    if table.get("row_count") not in (None, "") and table.get("column_count") not in (None, ""):
+        lines.append(f"표구조: {table['row_count']}행 {table['column_count']}열")
+
+    markdown = _normalize_structure(str(table.get("markdown") or ""))
+    if markdown:
+        lines.append(markdown)
 
     return "\n".join(line for line in lines if line).strip()
 
@@ -350,6 +443,7 @@ def build_appendix_raw_records(
 
     for path, bundle, record in _iter_appendix_records(normalized_appendix_base_dir):
         asset_record = asset_index.get(str(record.get("id") or ""))
+        structured_tables = _structured_tables_for_record(record, asset_record)
         raw_record = {
             "id": record.get("id"),
             "doc_type": "law_appendix_raw",
@@ -377,16 +471,87 @@ def build_appendix_raw_records(
             "is_default_serving_candidate": record.get("is_default_serving_candidate"),
             "download_assets": record.get("download_assets", {}),
             "processing_policy": record.get("processing_policy", {}),
-            "best_text_source": asset_record.get("best_text_source") if asset_record is not None else "api_text",
+            "best_text_source": _resolve_text_source(asset_record, record=record),
             "best_text_reason": asset_record.get("best_text_reason") if asset_record is not None else None,
-            "asset_text_available": bool(asset_record and asset_record.get("best_text_source") not in {None, "", "none"}),
+            "asset_text_available": bool((asset_record and asset_record.get("best_text_source") not in {None, "", "none"}) or _record_default_text_source(record) != "api_text"),
             "downloaded_asset_count": asset_record.get("downloaded_asset_count") if asset_record is not None else 0,
             "successful_extraction_count": asset_record.get("successful_extraction_count") if asset_record is not None else 0,
+            "has_structured_tables": bool(structured_tables),
+            "api_table_count": record.get("api_table_count") or 0,
+            "api_document_markdown": record.get("api_document_markdown"),
+            "api_table_markdown_text": record.get("api_table_markdown_text"),
+            "best_table_count": asset_record.get("best_table_count") if asset_record is not None else 0,
             "best_asset_local_path": asset_record.get("best_asset_local_path") if asset_record is not None else None,
             "normalized_asset_bundle_path": asset_record.get("normalized_asset_bundle_path") if asset_record is not None else None,
             "source_file_path": str(path),
         }
         records.append(raw_record)
+
+    return records
+
+
+def _build_default_chunk_records(
+    *,
+    record: dict[str, Any],
+    path: Path,
+    appendix_type: str,
+    text: str,
+    asset_record: dict[str, Any] | None,
+    max_chars: int,
+    overlap: int,
+    preserve_structure: bool,
+    record_prefix: str,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    chunks = _chunk_text(
+        text,
+        max_chars=max_chars,
+        overlap=overlap,
+        preserve_structure=preserve_structure,
+    )
+
+    for chunk_index, chunk in enumerate(chunks):
+        record_id = "::".join(
+            [
+                record_prefix,
+                str(record.get("law_name") or record.get("law_id") or "unknown"),
+                str(record.get("appendix_key") or record.get("appendix_title") or "unknown"),
+                str(chunk_index),
+            ]
+        )
+        records.append(
+            {
+                "id": record_id,
+                "text": chunk,
+                "doc_type": "law_appendix",
+                "section_type": appendix_type,
+                "source_group": "01_current_law_appendix",
+                "law_name": record.get("law_name"),
+                "law_id": record.get("law_id"),
+                "mst": record.get("mst"),
+                "ef_yd": record.get("ef_yd"),
+                "kind_name": record.get("kind_name"),
+                "appendix_key": record.get("appendix_key"),
+                "appendix_no": record.get("appendix_no"),
+                "appendix_kind": record.get("appendix_kind"),
+                "appendix_type": appendix_type,
+                "appendix_title": record.get("appendix_title"),
+                "processing_policy": record.get("processing_policy", {}),
+                "text_source": _resolve_text_source(asset_record, record=record),
+                "best_text_reason": asset_record.get("best_text_reason") if asset_record is not None else None,
+                "has_structured_table": False,
+                "table_index": None,
+                "table_page_number": None,
+                "table_row_count": None,
+                "table_column_count": None,
+                "table_markdown": None,
+                "best_asset_local_path": asset_record.get("best_asset_local_path") if asset_record is not None else None,
+                "normalized_asset_bundle_path": asset_record.get("normalized_asset_bundle_path") if asset_record is not None else None,
+                "chunk_index": chunk_index,
+                "structure_preserved": preserve_structure,
+                "source_file_path": str(path),
+            }
+        )
 
     return records
 
@@ -423,49 +588,19 @@ def build_appendix_clean_records(
             preserve_structure=preserve_structure,
             asset_record=asset_record,
         )
-        chunks = _chunk_text(
-            text,
-            max_chars=max_chars,
-            overlap=overlap,
-            preserve_structure=preserve_structure,
+        records.extend(
+            _build_default_chunk_records(
+                record=record,
+                path=path,
+                appendix_type=appendix_type,
+                text=text,
+                asset_record=asset_record,
+                max_chars=max_chars,
+                overlap=overlap,
+                preserve_structure=preserve_structure,
+                record_prefix="appendix_clean",
+            )
         )
-
-        for chunk_index, chunk in enumerate(chunks):
-            record_id = "::".join(
-                [
-                    "appendix_clean",
-                    str(record.get("law_name") or record.get("law_id") or "unknown"),
-                    str(record.get("appendix_key") or record.get("appendix_title") or "unknown"),
-                    str(chunk_index),
-                ]
-            )
-            records.append(
-                {
-                    "id": record_id,
-                    "text": chunk,
-                    "doc_type": "law_appendix",
-                    "section_type": appendix_type,
-                    "source_group": "01_current_law_appendix",
-                    "law_name": record.get("law_name"),
-                    "law_id": record.get("law_id"),
-                    "mst": record.get("mst"),
-                    "ef_yd": record.get("ef_yd"),
-                    "kind_name": record.get("kind_name"),
-                    "appendix_key": record.get("appendix_key"),
-                    "appendix_no": record.get("appendix_no"),
-                    "appendix_kind": record.get("appendix_kind"),
-                    "appendix_type": appendix_type,
-                    "appendix_title": record.get("appendix_title"),
-                    "processing_policy": record.get("processing_policy", {}),
-                    "text_source": _resolve_text_source(asset_record),
-                    "best_text_reason": asset_record.get("best_text_reason") if asset_record is not None else None,
-                    "best_asset_local_path": asset_record.get("best_asset_local_path") if asset_record is not None else None,
-                    "normalized_asset_bundle_path": asset_record.get("normalized_asset_bundle_path") if asset_record is not None else None,
-                    "chunk_index": chunk_index,
-                    "structure_preserved": preserve_structure,
-                    "source_file_path": str(path),
-                }
-            )
 
     return records
 
@@ -475,17 +610,106 @@ def build_appendix_table_records(
     max_chars: int = 1200,
     overlap: int = 150,
     *,
-    include_types: Sequence[str] = ("table_appendix", "form_appendix"),
+    include_types: Sequence[str] = ("table_appendix",),
     normalized_appendix_asset_base_dir: str | Path | None = None,
 ) -> list[dict[str, Any]]:
-    return build_appendix_clean_records(
-        normalized_appendix_base_dir=normalized_appendix_base_dir,
-        max_chars=max_chars,
-        overlap=overlap,
-        include_types=include_types,
-        preserve_structure=True,
-        normalized_appendix_asset_base_dir=normalized_appendix_asset_base_dir,
-    )
+    records: list[dict[str, Any]] = []
+    allowed_types = set(include_types)
+    asset_index = _load_appendix_asset_index(normalized_appendix_asset_base_dir)
+
+    for path, bundle, record in _iter_appendix_records(normalized_appendix_base_dir):
+        appendix_type = str(record.get("appendix_type") or "")
+        if appendix_type not in allowed_types:
+            continue
+
+        asset_record = asset_index.get(str(record.get("id") or ""))
+        text_source = _resolve_text_source(asset_record, record=record)
+        structured_tables = _structured_tables_for_record(record, asset_record)
+
+        if text_source in {"pdf_table_markdown", "api_table_markdown"} and structured_tables:
+            for table_number, table in enumerate(structured_tables, start=1):
+                table_markdown = _normalize_structure(str(table.get("markdown") or ""))
+                if not table_markdown:
+                    continue
+
+                table_text = _build_structured_table_text(
+                    record,
+                    asset_record=asset_record,
+                    table=table,
+                    table_number=table_number,
+                )
+                record_id = "::".join(
+                    [
+                        "appendix_table",
+                        str(record.get("law_name") or record.get("law_id") or "unknown"),
+                        str(record.get("appendix_key") or record.get("appendix_title") or "unknown"),
+                        f"table{table_number}",
+                        "0",
+                    ]
+                )
+                records.append(
+                    {
+                        "id": record_id,
+                        "text": table_text,
+                        "doc_type": "law_appendix",
+                        "section_type": appendix_type,
+                        "source_group": "01_current_law_appendix",
+                        "law_name": record.get("law_name"),
+                        "law_id": record.get("law_id"),
+                        "mst": record.get("mst"),
+                        "ef_yd": record.get("ef_yd"),
+                        "kind_name": record.get("kind_name"),
+                        "appendix_key": record.get("appendix_key"),
+                        "appendix_no": record.get("appendix_no"),
+                        "appendix_kind": record.get("appendix_kind"),
+                        "appendix_type": appendix_type,
+                        "appendix_title": record.get("appendix_title"),
+                        "processing_policy": record.get("processing_policy", {}),
+                        "text_source": text_source,
+                        "best_text_reason": asset_record.get("best_text_reason") if asset_record is not None else None,
+                        "has_structured_table": True,
+                        "table_index": table_number - 1,
+                        "table_page_number": table.get("page_number"),
+                        "table_row_count": table.get("row_count"),
+                        "table_column_count": table.get("column_count"),
+                        "table_markdown": table_markdown,
+                        "best_asset_local_path": asset_record.get("best_asset_local_path") if asset_record is not None else None,
+                        "normalized_asset_bundle_path": asset_record.get("normalized_asset_bundle_path") if asset_record is not None else None,
+                        "chunk_index": 0,
+                        "structure_preserved": True,
+                        "source_file_path": str(path),
+                    }
+                )
+            continue
+
+        selected_text = _select_text(
+            record,
+            preserve_structure=True,
+            asset_record=asset_record,
+        )
+        if not selected_text:
+            continue
+
+        fallback_text = _build_appendix_text(
+            record,
+            preserve_structure=True,
+            asset_record=asset_record,
+        )
+        records.extend(
+            _build_default_chunk_records(
+                record=record,
+                path=path,
+                appendix_type=appendix_type,
+                text=fallback_text,
+                asset_record=asset_record,
+                max_chars=max_chars,
+                overlap=overlap,
+                preserve_structure=True,
+                record_prefix="appendix_table",
+            )
+        )
+
+    return records
 
 
 def build_and_write_appendix_datasets(
@@ -532,6 +756,7 @@ def build_and_write_appendix_datasets(
         "appendix_table_count": len(table_records),
         "appendix_type_counts": appendix_type_counts,
         "asset_enriched": normalized_appendix_asset_base_dir is not None,
+        "structured_table_record_count": sum(1 for record in table_records if record.get("has_structured_table")),
         "max_chars": max_chars,
         "overlap": overlap,
     }

@@ -1,10 +1,27 @@
 from pathlib import Path
 
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
 from src.collector.appendix_asset_collector import collect_appendix_asset_bundles
 from src.common.io_utils import _read_json, _write_json
 from src.parser.appendix_asset_parser import normalize_appendix_asset_bundles
+
+
+API_TABLE_MARKDOWN = "| A | B |\n| --- | --- |\n| C | D |"
+API_TABLE_MARKDOWN_TEXT = f"### 표 1\n{API_TABLE_MARKDOWN}"
+API_TABLE_STRUCTURED = [
+    {
+        "table_index": 0,
+        "page_number": None,
+        "row_count": 2,
+        "column_count": 2,
+        "markdown": API_TABLE_MARKDOWN,
+        "rows": [["A", "B"], ["C", "D"]],
+    }
+]
 
 
 def _make_pdf(path: Path, lines: list[str]) -> None:
@@ -14,6 +31,20 @@ def _make_pdf(path: Path, lines: list[str]) -> None:
         pdf.drawString(72, y, line)
         y -= 18
     pdf.save()
+
+
+def _make_table_pdf(path: Path, rows: list[list[str]]) -> None:
+    doc = SimpleDocTemplate(str(path), pagesize=letter)
+    table = Table(rows, colWidths=[180 for _ in rows[0]])
+    table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+            ]
+        )
+    )
+    doc.build([table])
 
 
 def test_collect_appendix_asset_bundles_downloads_local_assets_and_writes_manifest(tmp_path):
@@ -84,14 +115,21 @@ def test_collect_appendix_asset_bundles_downloads_local_assets_and_writes_manife
     assert all(path.exists() for path in local_paths)
 
 
-def test_normalize_appendix_asset_bundles_extracts_pdf_text_and_selects_pdf_for_tables(tmp_path):
+def test_normalize_appendix_asset_bundles_prefers_api_markdown_when_api_table_is_available(tmp_path):
     normalized_appendix_dir = tmp_path / "normalized" / "01_current_law_appendix" / "근로기준법"
     bundle_path = normalized_appendix_dir / "근로기준법__parsed_appendix.json"
 
     source_dir = tmp_path / "source_assets"
     source_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = source_dir / "sample_table.pdf"
-    _make_pdf(pdf_path, ["Disease Table", "Disease Code", "Cold J00"])
+    _make_table_pdf(
+        pdf_path,
+        [
+            ["Disease", "Code"],
+            ["Cold", "J00"],
+            ["Flu", "J10"],
+        ],
+    )
 
     _write_json(
         bundle_path,
@@ -107,8 +145,13 @@ def test_normalize_appendix_asset_bundles_extracts_pdf_text_and_selects_pdf_for_
                     "appendix_no": "0002",
                     "appendix_type": "table_appendix",
                     "appendix_title": "질환 분류표",
-                    "api_text_raw": "┌─┬─┐\n│A│B│\n└─┴─┘",
-                    "api_text": "┌─┬─┐ │A│B│ └─┴─┘",
+                    "api_text_raw": "┌─┬─┐\n│A│B│\n├─┼─┤\n│C│D│\n└─┴─┘",
+                    "api_text": "┌─┬─┐ │A│B│ ├─┼─┤ │C│D│ └─┴─┘",
+                    "api_document_markdown": f"# 질환 분류표\n\n{API_TABLE_MARKDOWN_TEXT}",
+                    "api_table_markdown_text": API_TABLE_MARKDOWN_TEXT,
+                    "api_markdown_tables": [API_TABLE_MARKDOWN],
+                    "api_structured_tables": API_TABLE_STRUCTURED,
+                    "api_table_count": 1,
                     "has_substantive_text": True,
                     "processing_policy": {},
                     "download_assets": {
@@ -135,6 +178,7 @@ def test_normalize_appendix_asset_bundles_extracts_pdf_text_and_selects_pdf_for_
 
     assert summary["bundle_count"] == 1
     assert summary["successful_extraction_count"] == 1
+    assert summary["structured_table_count"] >= 1
 
     parsed_bundle = _read_json(
         tmp_path
@@ -144,8 +188,14 @@ def test_normalize_appendix_asset_bundles_extracts_pdf_text_and_selects_pdf_for_
         / "근로기준법__appendix_assets.parsed.json"
     )
     record = parsed_bundle["appendix_asset_records"][0]
+    asset = record["assets"][0]
 
-    assert record["best_text_source"] == "pdf_text"
-    assert "Disease Table" in (record["best_text_raw"] or "")
+    assert record["best_text_source"] == "api_table_markdown"
+    assert record["best_text_reason"] == "api_box_table_markdown_extracted"
+    assert record["best_table_count"] == 1
+    assert record["has_structured_tables"] is True
     assert record["successful_extraction_count"] == 1
-    assert record["assets"][0]["extraction_status"] == "success"
+    assert asset["extraction_status"] == "success"
+    assert asset["has_structured_tables"] is True
+    assert asset["table_count"] >= 1
+    assert record["best_structured_tables"][0]["markdown"].startswith("| A | B |")

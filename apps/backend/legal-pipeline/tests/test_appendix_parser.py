@@ -1,7 +1,7 @@
 from src.parser.appendix_parser import parse_appendix_bundle
 
 
-def test_parse_appendix_bundle_classifies_appendix_types_and_processing_policy():
+def test_parse_appendix_bundle_keeps_annex_tables_and_excludes_forms():
     raw_detail = {
         "법령": {
             "기본정보": {
@@ -59,28 +59,33 @@ def test_parse_appendix_bundle_classifies_appendix_types_and_processing_policy()
     records = {record["appendix_key"]: record for record in bundle["appendix_records"]}
 
     assert bundle["law_name"] == "근로기준법 시행규칙"
-    assert bundle["appendix_count"] == 4
-    assert bundle["appendix_type_counts"]["appendix_document"] == 1
-    assert bundle["appendix_type_counts"]["table_appendix"] == 1
-    assert bundle["appendix_type_counts"]["form_appendix"] == 1
-    assert bundle["appendix_type_counts"]["metadata_only"] == 1
+    assert bundle["appendix_scope"] == "별표_only"
+    assert bundle["appendix_count"] == 3
+    assert bundle["appendix_type_counts"] == {
+        "appendix_document": 1,
+        "table_appendix": 1,
+        "metadata_only": 1,
+    }
+    assert bundle["excluded_appendix_count"] == 1
+    assert bundle["excluded_reason_counts"]["excluded_non_target_kind"] == 1
 
     assert records["000100E"]["appendix_type"] == "appendix_document"
     assert records["000100E"]["is_default_serving_candidate"] is True
-    assert records["000100E"]["processing_policy"]["recommended_next_step"] == "use_api_text_clean_as_primary"
+    assert records["000100E"]["processing_policy"]["recommended_next_step"] == "use_api_document_markdown_as_primary"
+    assert records["000100E"]["api_document_markdown"].startswith("# 해고 예고의 예외가 되는 근로자의 귀책사유")
 
     assert records["000200E"]["appendix_type"] == "table_appendix"
     assert records["000200E"]["processing_policy"]["pdf_fallback"] is True
-    assert "reextract_pdf" in records["000200E"]["processing_policy"]["recommended_next_step"]
-
-    assert records["000300F"]["appendix_type"] == "form_appendix"
-    assert records["000300F"]["download_assets"]["pdf_file_name"] == "form001.pdf"
+    assert records["000200E"]["processing_policy"]["recommended_next_step"] == "use_api_table_markdown_as_primary_then_reextract_pdf_if_needed"
+    assert records["000200E"]["api_table_count"] == 1
+    assert records["000200E"]["api_markdown_tables"]
 
     assert records["000400E"]["appendix_type"] == "metadata_only"
     assert records["000400E"]["has_substantive_text"] is False
+    assert "000300F" not in records
 
 
-def test_parse_appendix_bundle_preserves_api_text_lines():
+def test_parse_appendix_bundle_preserves_api_text_lines_for_text_annex():
     raw_detail = {
         "법령": {
             "기본정보": {
@@ -104,6 +109,7 @@ def test_parse_appendix_bundle_preserves_api_text_lines():
     bundle = parse_appendix_bundle(raw_detail)
     record = bundle["appendix_records"][0]
 
+    assert record["appendix_type"] == "appendix_document"
     assert record["api_text_raw"] == "1. 첫째 줄\n2. 둘째 줄"
     assert record["api_text"] == "1. 첫째 줄 2. 둘째 줄"
     assert record["api_text_lines"] == ["1. 첫째 줄", "2. 둘째 줄"]

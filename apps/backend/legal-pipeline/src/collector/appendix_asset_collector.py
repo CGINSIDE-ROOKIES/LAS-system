@@ -11,6 +11,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - optional in offline test env
     httpx = None  # type: ignore[assignment]
 
+from src.common.appendix_scope import is_target_appendix
 from src.common.io_utils import _read_json, _safe_filename, _write_json
 
 DEFAULT_APPENDIX_DOWNLOAD_BASE_URL = "https://www.law.go.kr"
@@ -311,6 +312,12 @@ def collect_appendix_assets_from_bundle(
     for appendix_record in appendix_records:
         if not isinstance(appendix_record, dict):
             continue
+        if not is_target_appendix(
+            appendix_record.get("appendix_kind"),
+            appendix_record.get("appendix_title"),
+            appendix_record.get("appendix_key"),
+        ):
+            continue
 
         appendix_key = _normalize_text(appendix_record.get("appendix_key")) or _normalize_text(appendix_record.get("appendix_title")) or "appendix"
         appendix_dir = law_dir / _safe_filename(appendix_key)
@@ -376,6 +383,12 @@ def collect_appendix_assets_from_bundle(
                 "kind_name": appendix_record.get("kind_name"),
                 "api_text_raw": appendix_record.get("api_text_raw"),
                 "api_text": appendix_record.get("api_text"),
+                "api_document_markdown": appendix_record.get("api_document_markdown"),
+                "api_document_markdown_flat": appendix_record.get("api_document_markdown_flat"),
+                "api_table_markdown_text": appendix_record.get("api_table_markdown_text"),
+                "api_markdown_tables": appendix_record.get("api_markdown_tables") or [],
+                "api_structured_tables": appendix_record.get("api_structured_tables") or [],
+                "api_table_count": appendix_record.get("api_table_count") or 0,
                 "has_substantive_text": appendix_record.get("has_substantive_text"),
                 "processing_policy": appendix_record.get("processing_policy", {}),
                 "asset_candidates": processed_candidates,

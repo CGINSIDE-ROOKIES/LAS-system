@@ -7,7 +7,22 @@ from src.export.appendix_dataset_builder import (
 )
 
 
-def test_build_appendix_datasets_separates_clean_and_table_records(tmp_path):
+API_DOC_MARKDOWN = "# 해고 예고의 예외가 되는 근로자의 귀책사유\n\n## 1. 첫째 줄\n## 2. 둘째 줄"
+API_TABLE_MARKDOWN = "| A | B |\n| --- | --- |\n| C | D |"
+API_TABLE_MARKDOWN_TEXT = f"### 표 1\n{API_TABLE_MARKDOWN}"
+API_TABLE_STRUCTURED = [
+    {
+        "table_index": 0,
+        "page_number": None,
+        "row_count": 2,
+        "column_count": 2,
+        "markdown": API_TABLE_MARKDOWN,
+        "rows": [["A", "B"], ["C", "D"]],
+    }
+]
+
+
+def test_build_appendix_datasets_keeps_annex_text_and_filters_non_target_forms(tmp_path):
     appendix_dir = tmp_path / "normalized" / "01_current_law_appendix" / "근로기준법"
     bundle_path = appendix_dir / "근로기준법__parsed_appendix.json"
 
@@ -20,7 +35,6 @@ def test_build_appendix_datasets_separates_clean_and_table_records(tmp_path):
             "appendix_type_counts": {
                 "appendix_document": 1,
                 "table_appendix": 1,
-                "form_appendix": 1,
                 "metadata_only": 1,
             },
             "appendix_records": [
@@ -37,6 +51,8 @@ def test_build_appendix_datasets_separates_clean_and_table_records(tmp_path):
                     "api_text_raw": "1. 첫째 줄\n2. 둘째 줄",
                     "api_text": "1. 첫째 줄 2. 둘째 줄",
                     "api_text_line_count": 2,
+                    "api_document_markdown": API_DOC_MARKDOWN,
+                    "api_document_markdown_flat": "해고 예고의 예외가 되는 근로자의 귀책사유 1. 첫째 줄 2. 둘째 줄",
                     "table_signal_count": 0,
                     "form_signal_count": 0,
                     "has_substantive_text": True,
@@ -44,7 +60,7 @@ def test_build_appendix_datasets_separates_clean_and_table_records(tmp_path):
                     "is_default_serving_candidate": True,
                     "download_assets": {},
                     "processing_policy": {
-                        "recommended_next_step": "use_api_text_clean_as_primary"
+                        "recommended_next_step": "use_api_document_markdown_as_primary"
                     },
                 },
                 {
@@ -57,9 +73,13 @@ def test_build_appendix_datasets_separates_clean_and_table_records(tmp_path):
                     "appendix_kind": "별표",
                     "appendix_type": "table_appendix",
                     "appendix_title": "질환 분류표",
-                    "api_text_raw": "┌─┬─┐\n│A│B│\n└─┴─┘",
-                    "api_text": "┌─┬─┐ │A│B│ └─┴─┘",
-                    "api_text_line_count": 3,
+                    "api_text_raw": "┌─┬─┐\n│A│B│\n├─┼─┤\n│C│D│\n└─┴─┘",
+                    "api_text": "┌─┬─┐ │A│B│ ├─┼─┤ │C│D│ └─┴─┘",
+                    "api_text_line_count": 5,
+                    "api_table_markdown_text": API_TABLE_MARKDOWN_TEXT,
+                    "api_structured_tables": API_TABLE_STRUCTURED,
+                    "api_table_count": 1,
+                    "api_document_markdown": f"# 질환 분류표\n\n{API_TABLE_MARKDOWN_TEXT}",
                     "table_signal_count": 9,
                     "form_signal_count": 0,
                     "has_substantive_text": True,
@@ -67,7 +87,7 @@ def test_build_appendix_datasets_separates_clean_and_table_records(tmp_path):
                     "is_default_serving_candidate": False,
                     "download_assets": {},
                     "processing_policy": {
-                        "recommended_next_step": "use_api_text_clean_then_reextract_pdf_if_layout_needed"
+                        "recommended_next_step": "use_api_table_markdown_as_primary_then_reextract_pdf_if_needed"
                     },
                 },
                 {
@@ -124,12 +144,17 @@ def test_build_appendix_datasets_separates_clean_and_table_records(tmp_path):
     clean_records = build_appendix_clean_records(tmp_path / "normalized" / "01_current_law_appendix")
     table_records = build_appendix_table_records(tmp_path / "normalized" / "01_current_law_appendix")
 
-    assert len(raw_records) == 4
+    assert len(raw_records) == 3
     assert len(clean_records) == 1
-    assert len(table_records) == 2
+    assert len(table_records) == 1
     assert clean_records[0]["appendix_type"] == "appendix_document"
+    assert clean_records[0]["text_source"] == "api_markdown"
     assert "법령명: 근로기준법" in clean_records[0]["text"]
     assert "별표제목: 해고 예고의 예외가 되는 근로자의 귀책사유" in clean_records[0]["text"]
+    assert "## 1. 첫째 줄" in clean_records[0]["text"]
+    assert table_records[0]["text_source"] == "api_table_markdown"
+    assert table_records[0]["table_markdown"] == API_TABLE_MARKDOWN
+    assert all(record["appendix_key"] != "000300F" for record in raw_records)
 
     manifest = build_and_write_appendix_datasets(
         normalized_appendix_base_dir=tmp_path / "normalized" / "01_current_law_appendix",
@@ -138,13 +163,18 @@ def test_build_appendix_datasets_separates_clean_and_table_records(tmp_path):
         overlap=50,
     )
 
-    assert manifest["appendix_raw_count"] == 4
+    assert manifest["appendix_raw_count"] == 3
     assert manifest["appendix_clean_count"] == 1
-    assert manifest["appendix_table_count"] == 2
-    assert _read_json(tmp_path / "dataset" / "appendix_dataset_manifest.json")["appendix_type_counts"]["form_appendix"] == 1
+    assert manifest["appendix_table_count"] == 1
+    assert manifest["structured_table_record_count"] == 1
+    assert _read_json(tmp_path / "dataset" / "appendix_dataset_manifest.json")["appendix_type_counts"] == {
+        "appendix_document": 1,
+        "table_appendix": 1,
+        "metadata_only": 1,
+    }
 
 
-def test_build_appendix_table_records_prefers_asset_text_when_available(tmp_path):
+def test_build_appendix_table_records_prefers_pdf_structured_tables_when_asset_bundle_exists(tmp_path):
     appendix_dir = tmp_path / "normalized" / "01_current_law_appendix" / "근로기준법"
     asset_dir = tmp_path / "normalized" / "01_current_law_appendix_assets" / "근로기준법"
     bundle_path = appendix_dir / "근로기준법__parsed_appendix.json"
@@ -168,9 +198,12 @@ def test_build_appendix_table_records_prefers_asset_text_when_available(tmp_path
                     "appendix_kind": "별표",
                     "appendix_type": "table_appendix",
                     "appendix_title": "질환 분류표",
-                    "api_text_raw": "┌─┬─┐\n│A│B│\n└─┴─┘",
-                    "api_text": "┌─┬─┐ │A│B│ └─┴─┘",
-                    "api_text_line_count": 3,
+                    "api_text_raw": "┌─┬─┐\n│A│B│\n├─┼─┤\n│C│D│\n└─┴─┘",
+                    "api_text": "┌─┬─┐ │A│B│ ├─┼─┤ │C│D│ └─┴─┘",
+                    "api_text_line_count": 5,
+                    "api_table_markdown_text": API_TABLE_MARKDOWN_TEXT,
+                    "api_structured_tables": API_TABLE_STRUCTURED,
+                    "api_table_count": 1,
                     "table_signal_count": 9,
                     "form_signal_count": 0,
                     "has_substantive_text": True,
@@ -178,7 +211,7 @@ def test_build_appendix_table_records_prefers_asset_text_when_available(tmp_path
                     "is_default_serving_candidate": False,
                     "download_assets": {},
                     "processing_policy": {
-                        "recommended_next_step": "use_api_text_clean_then_reextract_pdf_if_layout_needed"
+                        "recommended_next_step": "use_api_table_markdown_as_primary_then_reextract_pdf_if_needed"
                     },
                 }
             ],
@@ -197,10 +230,21 @@ def test_build_appendix_table_records_prefers_asset_text_when_available(tmp_path
                     "appendix_title": "질환 분류표",
                     "downloaded_asset_count": 1,
                     "successful_extraction_count": 1,
-                    "best_text_source": "pdf_text",
-                    "best_text_reason": "table_or_form_prefers_pdf_when_available",
-                    "best_text_raw": "PDF 표 본문\n질환명 질병코드\n감기 J00",
-                    "best_text": "PDF 표 본문 질환명 질병코드 감기 J00",
+                    "best_text_source": "pdf_table_markdown",
+                    "best_text_reason": "structured_pdf_tables_extracted",
+                    "best_text_raw": "### 표 1 (페이지 1)\n| Disease | Code |\n| --- | --- |\n| Cold | J00 |",
+                    "best_text": "표 1 페이지 1 Disease Code Cold J00",
+                    "best_table_count": 1,
+                    "has_structured_tables": True,
+                    "best_structured_tables": [
+                        {
+                            "table_index": 0,
+                            "page_number": 1,
+                            "row_count": 2,
+                            "column_count": 2,
+                            "markdown": "| Disease | Code |\n| --- | --- |\n| Cold | J00 |",
+                        }
+                    ],
                     "best_asset_local_path": "/tmp/sample_table.pdf",
                     "assets": [],
                 }
@@ -214,6 +258,12 @@ def test_build_appendix_table_records_prefers_asset_text_when_available(tmp_path
     )
 
     assert len(table_records) == 1
-    assert table_records[0]["text_source"] == "pdf_text"
-    assert "텍스트소스: pdf_text" in table_records[0]["text"]
-    assert "PDF 표 본문" in table_records[0]["text"]
+    assert table_records[0]["text_source"] == "pdf_table_markdown"
+    assert table_records[0]["has_structured_table"] is True
+    assert table_records[0]["table_index"] == 0
+    assert table_records[0]["table_page_number"] == 1
+    assert table_records[0]["table_row_count"] == 2
+    assert table_records[0]["table_column_count"] == 2
+    assert "텍스트소스: pdf_table_markdown" in table_records[0]["text"]
+    assert "| Disease | Code |" in table_records[0]["text"]
+    assert table_records[0]["table_markdown"].startswith("| Disease | Code |")
