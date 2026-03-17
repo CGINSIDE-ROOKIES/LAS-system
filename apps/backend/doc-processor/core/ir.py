@@ -92,6 +92,15 @@ def get_paragraph_numbers(text: str) -> list[NumberMatch]:
 def create_ir_dict(doc: HwpxDocument) -> dict[str, IRChunk]:
     """Parse *doc* and return a flat dict of chunk-id → IRChunk."""
     parsed = export_markdown_structured(doc)
+    return create_ir_dict_from_mapping(parsed)
+
+
+def create_ir_dict_from_mapping(parsed: dict[str, str]) -> dict[str, IRChunk]:
+    """Build a flat dict of chunk-id → IRChunk from a structured text mapping.
+
+    *parsed* must follow the same ID convention produced by
+    ``export_markdown_structured`` (HWPX) or ``export_docx_structured`` (DOCX).
+    """
     irs: dict[str, IRChunk] = {}
     active_article_num: str = "-1"
     active_paragraph_num: str | None = None
@@ -131,8 +140,7 @@ def create_ir_dict(doc: HwpxDocument) -> dict[str, IRChunk]:
                 paragraph_nums = [active_paragraph_num]
 
         irs[id] = IRChunk(
-            raw_text=text,
-            markdown_text=text,
+            text=text,
             category=section,
             article_n=article_nums,
             paragraph_n=paragraph_nums,
@@ -182,7 +190,7 @@ def table_formatter(irs: dict[str, IRChunk]) -> str:
         col_num = int(match.group(2))
         para_num = int(match.group(3))
         run_num = int(match.group(4) or 1)
-        cell_runs[(row_num, col_num, para_num)].append((run_num, ir.raw_text))
+        cell_runs[(row_num, col_num, para_num)].append((run_num, ir.text))
 
     rows: dict[int, dict[int, str]] = defaultdict(dict)
     for (row_num, col_num, para_num), runs in sorted(cell_runs.items()):
@@ -213,7 +221,6 @@ def _export_article_to_markdown(article: IRGroup) -> str:
     table_roots_emitted: set[str] = set()
     table_root_start: dict[str, int] = {}   # root → pre-strip char position
     join_points: list[int] = []             # one entry per IRchunk_ids element
-    raw_spans: list[tuple[int, int, str]] = []  # per-emitted-part spans (pre-strip)
 
     for id, ir in zip(article.ir_chunk_ids, article.ir_chunks):
         pos = sum(len(p) for p in parts)
@@ -236,36 +243,16 @@ def _export_article_to_markdown(article: IRGroup) -> str:
             }
             rendered = "\n" + table_formatter(table_subset) + "\n"
             parts.append(rendered)
-            raw_spans.append((pos, pos + len(rendered), ir.category))
             table_roots_emitted.add(root)
         else:
             join_points.append(pos)
-            parts.append(ir.raw_text)
-            raw_spans.append((pos, pos + len(ir.raw_text), ir.category))
+            parts.append(ir.text)
 
     combined = "".join(parts)
     strip_offset = len(combined) - len(combined.lstrip())
-    stripped_len = len(combined.strip())
 
     # Adjust IRjoin for strip offset
     article.ir_join = [max(0, p - strip_offset) for p in join_points]
-
-    # Build category_spans: adjust positions, cap at stripped_len, merge consecutive same-category
-    adjusted: list[tuple[int, int, str]] = []
-    for start, end, sec in raw_spans:
-        s = max(0, start - strip_offset)
-        e = min(stripped_len, end - strip_offset)
-        if s >= e:
-            continue
-        adjusted.append((s, e, sec))
-
-    merged: list[list] = []
-    for span in adjusted:
-        if merged and merged[-1][2] == span[2] and merged[-1][1] == span[0]:
-            merged[-1][1] = span[1]
-        else:
-            merged.append(list(span))
-    article.category_spans = [tuple(s) for s in merged]
 
     article.formatted_str = combined.strip()
     return _normalize_enclosed_numbers(article.formatted_str)

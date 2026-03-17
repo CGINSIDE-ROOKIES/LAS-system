@@ -120,14 +120,14 @@ def categorization_node_worker(state: IRGroupState):
     def para_key(chunk_id: str) -> str:
         return re.sub(r"\.r\d+$", "", chunk_id)
 
-    # Group chunk indices and accumulate raw_text by paragraph key
+    # Group chunk indices and accumulate text by paragraph key
     para_indices: dict[str, list[int]] = {}
     para_texts: dict[str, str] = {}
 
     for i, (chunk_id, chunk) in enumerate(zip(state.ir_group.ir_chunk_ids, state.ir_group.ir_chunks)):
         key = para_key(chunk_id)
         para_indices.setdefault(key, []).append(i)
-        para_texts[key] = para_texts.get(key, "") + chunk.raw_text
+        para_texts[key] = para_texts.get(key, "") + chunk.text
 
     # Classify paragraphs that contain at least one uncategorized chunk
     para_categories: dict[str, str] = {}
@@ -196,7 +196,7 @@ if __name__ == "__main__":
         for group in result["ir_groups"]:
             group = cast(IRGroup, group)
             for chunk in group.ir_chunks:
-                text = chunk.markdown_text
+                text = chunk.text
                 category = chunk.category
                 f.write(f"category: {category} - {chunk.article_n}.{chunk.paragraph_n}\nchunk: {text}\n==========\n")
             # text = group.formatted_str
