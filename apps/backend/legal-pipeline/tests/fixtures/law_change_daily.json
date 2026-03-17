@@ -1,0 +1,9 @@
+{
+  "changed_laws": [
+    {
+      "law_id": "001",
+      "law_name": "근로기준법",
+      "change_type": "update"
+    }
+  ]
+}
