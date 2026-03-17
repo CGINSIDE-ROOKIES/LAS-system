@@ -88,6 +88,16 @@ uv run python cli/query_hybrid_rrf.py --question "건설업 등록 기준은?" -
 uv run python cli/query_all_retrieval.py --question "건설업 등록 기준은?" --top-k 5 --llm-context-text
 ```
 
+LLM Generator 단독 호출:
+```bash
+uv run python cli/generator.py --prompt "안녕"
+```
+
+Retrieval + Generator 통합 호출:
+```bash
+uv run python cli/generate_answer.py --question "연장근로 최대 시간은?" --top-k 5
+```
+
 ### Hybrid 결과의 source_id 필드 기준
 - `source_id`: 호환용 기본 식별자(정규화 기준, `__dupN` 제거 반영)
 - `source_id_raw`: 원본 source id
@@ -106,4 +116,6 @@ uv run python cli/evaluate_retrieval_gold.py --top-k 5 --out-csv cli/retrieval_e
 - `cli/query_opensearch_bm25.py`: OpenSearch BM25 Top-K 테스트
 - `cli/query_hybrid_rrf.py`: Qdrant + BM25 RRF 병합
 - `cli/query_all_retrieval.py`: Qdrant/BM25/RRF 통합 실행 + LLM 컨텍스트 출력
+- `cli/generator.py`: `generate_answer(prompt)` 기반 LLM 호출 유틸
+- `cli/generate_answer.py`: retrieval 결과를 바탕으로 generator까지 한 번에 실행
 - `cli/evaluate_retrieval_gold.py`: 골드셋 기반 Hit@k 평가
