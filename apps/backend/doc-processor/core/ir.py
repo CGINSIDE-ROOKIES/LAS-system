@@ -91,7 +91,7 @@ def get_paragraph_numbers(text: str) -> list[NumberMatch]:
 
 def create_ir_dict(doc: HwpxDocument) -> dict[str, IRChunk]:
     """Parse *doc* and return a flat dict of chunk-id → IRChunk."""
-    parsed = export_markdown_structured(doc)
+    parsed = export_markdown_structured(doc, skip_empty=False)
     return create_ir_dict_from_mapping(parsed)
 
 
@@ -140,6 +140,7 @@ def create_ir_dict_from_mapping(parsed: dict[str, str]) -> dict[str, IRChunk]:
                 paragraph_nums = [active_paragraph_num]
 
         irs[id] = IRChunk(
+            raw_text=text,
             text=text,
             category=section,
             article_n=article_nums,

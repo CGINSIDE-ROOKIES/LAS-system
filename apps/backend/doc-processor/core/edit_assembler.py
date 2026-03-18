@@ -70,24 +70,36 @@ Usage example (future LangGraph integration)
 from __future__ import annotations
 
 import difflib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
 from hwpx import HwpxDocument
-from hwpx.oxml import HwpxOxmlRun
+from docx.document import Document as DocxDocument
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 from las_types import IRGroup, RunSpan
 
 
-def get_run_by_id(doc: HwpxDocument, chunk_id: str) -> HwpxOxmlRun:
-    """
-    Resolve a chunk ID like ``'s1.p44.r2'`` to its :class:`HwpxOxmlRun`.
+# ---------------------------------------------------------------------------
+# Run protocol — both HwpxOxmlRun and docx Run satisfy this
+# ---------------------------------------------------------------------------
 
-    IDs use 1-based indexing; indices are converted to 0-based internally.
+@runtime_checkable
+class EditableRun(Protocol):
+    """Minimal interface for a run that can be text-edited."""
+    @property
+    def text(self) -> str: ...
+    @text.setter
+    def text(self, value: str) -> None: ...
 
-    Raises:
-        ValueError: For table chunk IDs (not supported) or out-of-range indices.
-    """
+
+# ---------------------------------------------------------------------------
+# Run resolvers — format-specific chunk_id → run mapping
+# ---------------------------------------------------------------------------
+
+def _get_hwpx_run(doc: HwpxDocument, chunk_id: str) -> EditableRun:
+    """Resolve ``'s1.p44.r2'`` to an HWPX run."""
     if ".tbl" in chunk_id:
         raise ValueError(f"Table run IDs not supported yet: {chunk_id}")
 
@@ -97,6 +109,49 @@ def get_run_by_id(doc: HwpxDocument, chunk_id: str) -> HwpxOxmlRun:
     r = int(parts[2][1:]) - 1
 
     return doc.sections[s].paragraphs[p].runs[r]
+
+
+def _get_docx_run(doc: DocxDocument, chunk_id: str) -> EditableRun:
+    """Resolve ``'s1.p44.r2'`` to a python-docx run.
+
+    The paragraph index in the chunk ID counts content blocks (paragraphs
+    and tables) in document order — matching how ``docx_ir.py`` assigns
+    IDs during parsing.
+    """
+    if ".tbl" in chunk_id:
+        raise ValueError(f"Table run IDs not supported yet: {chunk_id}")
+
+    parts = chunk_id.split(".")
+    p = int(parts[1][1:])   # 1-based target
+    r = int(parts[2][1:]) - 1
+
+    # Walk content blocks in the same order as docx_ir.export_docx_structured
+    block_idx = 0
+    for block in doc.iter_inner_content():
+        block_idx += 1
+        if block_idx == p:
+            if isinstance(block, Paragraph):
+                return block.runs[r]
+            else:
+                raise ValueError(
+                    f"Block at position {p} is a Table, not a Paragraph: {chunk_id}"
+                )
+
+    raise ValueError(f"Paragraph index {p} out of range for document: {chunk_id}")
+
+
+def get_run_by_id(doc: HwpxDocument | DocxDocument, chunk_id: str) -> EditableRun:
+    """Resolve a chunk ID to its run object in either document format.
+
+    IDs use 1-based indexing (``'s1.p44.r2'``).
+
+    Raises:
+        ValueError: For table chunk IDs (not supported) or out-of-range indices.
+    """
+    if isinstance(doc, HwpxDocument):
+        return _get_hwpx_run(doc, chunk_id)
+    else:
+        return _get_docx_run(doc, chunk_id)
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +207,7 @@ def _apply_multi_run(
     orig_sub: str,
     new_sub: str,
     spans: list[RunSpan],
-    doc: HwpxDocument,
+    doc: HwpxDocument | DocxDocument,
     result: EditResult,
     *,
     _depth: int = 0,
@@ -217,7 +272,7 @@ def _apply_multi_run(
 def apply_edit(
     article: IRGroup,
     edited_text: str,
-    doc: HwpxDocument,
+    doc: HwpxDocument | DocxDocument,
 ) -> EditResult:
     """
     Apply an LLM-produced edit to the HWPX document in-place.

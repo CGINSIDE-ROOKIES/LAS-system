@@ -9,7 +9,8 @@ class RunSpan(BaseModel):
 
 
 class IRChunk(BaseModel):
-    text: str = ""
+    raw_text: str = ""            # original text preserving whitespace/tabs
+    text: str = ""                # cleaned text for LLM markdown export
     category: str = "uncategorized"
     article_n: list[str] = Field(default_factory=list)
     paragraph_n: list[str] = Field(default_factory=list)

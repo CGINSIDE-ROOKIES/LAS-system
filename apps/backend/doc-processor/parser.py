@@ -158,19 +158,19 @@ def categorization_node_worker(state: IRGroupState):
 
 ###################################################################################################
 
-main_graph_builder = StateGraph(DocumentState)
+parser_graph_builder = StateGraph(DocumentState)
 
-main_graph_builder.add_node("prelim_categorization_workers", prelim_categorization_node_worker)
-main_graph_builder.add_node("categorization_workers", categorization_node_worker)
-main_graph_builder.add_node("document_reducer", document_reducer)
+parser_graph_builder.add_node("prelim_categorization_workers", prelim_categorization_node_worker)
+parser_graph_builder.add_node("categorization_workers", categorization_node_worker)
+parser_graph_builder.add_node("document_reducer", document_reducer)
 
 _splitter_targets = ["prelim_categorization_workers", "categorization_workers", END]
-main_graph_builder.add_conditional_edges(START, document_splitter, _splitter_targets)
-main_graph_builder.add_edge("prelim_categorization_workers", "document_reducer")
-main_graph_builder.add_conditional_edges("document_reducer", document_splitter, _splitter_targets)
-main_graph_builder.add_edge("categorization_workers", "document_reducer")
+parser_graph_builder.add_conditional_edges(START, document_splitter, _splitter_targets)
+parser_graph_builder.add_edge("prelim_categorization_workers", "document_reducer")
+parser_graph_builder.add_conditional_edges("document_reducer", document_splitter, _splitter_targets)
+parser_graph_builder.add_edge("categorization_workers", "document_reducer")
 
-main_graph = main_graph_builder.compile()
+parser_graph = parser_graph_builder.compile()
 
 
 if __name__ == "__main__":
@@ -187,7 +187,7 @@ if __name__ == "__main__":
     sel = int(input("select: "))
     file_path = file_dirs[sel]
 
-    result = main_graph.invoke(
+    result = parser_graph.invoke(
         input=DocumentState.from_file(Path(file_path)),
         config={"max_concurrency": 4}
     )

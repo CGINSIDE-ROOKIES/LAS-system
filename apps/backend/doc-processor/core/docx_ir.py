@@ -27,7 +27,7 @@ def export_docx_structured(
     source: str | Path,
     *,
     include_tables: bool = True,
-    skip_empty: bool = True,
+    skip_empty: bool = False,
 ) -> dict[str, str]:
     """Export DOCX text fragments keyed by structural IDs.
 
