@@ -143,16 +143,35 @@ def embed_query(text: str, model_name: str) -> list[float]:
     # 캐시에 없으면 모델 로드 후 저장
     model = _MODEL_CACHE.get(model_name)
     if model is None:
-        model = SentenceTransformer(model_name)
+        try:
+            model = SentenceTransformer(model_name)
+        except Exception as exc:
+            raise RetrievalError(
+                "임베딩 모델 로드 실패: EMBEDDING_MODEL/네트워크 상태를 확인하세요.\n"
+                f"현재 EMBEDDING_MODEL={model_name}\n"
+                f"원인: {type(exc).__name__}: {exc}"
+            ) from exc
         _MODEL_CACHE[model_name] = model
 
+    query_text = str(query_text)
     try:
         vec = model.encode([query_text], normalize_embeddings=True)
-    except TypeError as exc:
-        raise RetrievalError(
-            "임베딩 모델 토크나이징 실패: EMBEDDING_MODEL이 문장 임베딩용 모델인지 확인하세요.\n"
-            f"현재 EMBEDDING_MODEL={model_name}"
-        ) from exc
+    except TypeError:
+        # 간헐적 tokenizer 타입 오류 대응: 모델 재로딩 후 1회 재시도
+        _MODEL_CACHE.pop(model_name, None)
+        try:
+            model = SentenceTransformer(model_name)
+            _MODEL_CACHE[model_name] = model
+            vec = model.encode(
+                [query_text.replace("\x00", " ").strip()],
+                normalize_embeddings=True,
+            )
+        except Exception as retry_exc:
+            raise RetrievalError(
+                "임베딩 모델 토크나이징 실패: EMBEDDING_MODEL이 문장 임베딩용 모델인지 확인하세요.\n"
+                f"현재 EMBEDDING_MODEL={model_name}\n"
+                f"원인: {type(retry_exc).__name__}: {retry_exc}"
+            ) from retry_exc
 
     # numpy 배열 또는 중첩 list 모두 1차원 float list로 평탄화
     if hasattr(vec, "tolist"):
