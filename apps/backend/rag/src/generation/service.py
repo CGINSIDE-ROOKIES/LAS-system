@@ -10,7 +10,7 @@ from .llm_client import SUPPORTED_PROVIDERS, generate_answer, stream_answer
 from ..retrieval.common import RetrievalError
 
 DEFAULT_PROVIDER = "openai_compat"
-DEFAULT_MODEL = "gemini-1.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-1.5-flash"
 
 
 @dataclass
@@ -35,7 +35,7 @@ class GenerationConfig:
         provider = os.getenv("LLM_PROVIDER", DEFAULT_PROVIDER).strip()
 
         if provider == "gemini":
-            model = os.getenv("GEMINI_MODEL", DEFAULT_MODEL).strip()
+            model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
             url = (
                 os.getenv("GEMINI_API_URL", "").strip()
                 or f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
