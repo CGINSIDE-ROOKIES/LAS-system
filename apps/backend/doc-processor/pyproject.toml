@@ -1,0 +1,18 @@
+[project]
+name = "doc-processor"
+version = "0.1.0"
+description = "HWPX document parsing and IR construction pipeline"
+readme = "README.md"
+requires-python = "==3.12.*"
+dependencies = [
+    "jpype1>=1.6.0",
+    "langchain-openai>=0.3.0",
+    "langgraph>=0.3.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "python-hwpx",
+    "tabulate>=0.9.0",
+]
+
+[tool.uv.sources]
+python-hwpx = { git = "https://github.com/maxjo0418/python-hwpx.git" }
