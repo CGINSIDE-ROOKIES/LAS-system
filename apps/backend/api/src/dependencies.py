@@ -11,14 +11,14 @@
       ...
 """
 
-# TODO: rag/src/retrieval/service.py 구현 후 import 연결
+# TODO: rag 패키지를 설치하거나 경로를 추가한 뒤 아래 주석을 해제한다.
 # from rag.src.retrieval.service import RetrievalService
 # from rag.src.generation.service import GenerationService
 
 
 def get_retrieval_service():
     """RetrievalService 인스턴스를 반환한다."""
-    # TODO: 환경변수 기반으로 초기화
+    # return RetrievalService.from_env()
     raise NotImplementedError
 
 
