@@ -1,13 +1,12 @@
 [project]
-name = "api-parser"
+name = "legal-pipeline"
 version = "0.1.0"
-description = "Add your description here"
+description = "Legal document collection and parsing pipeline"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = "==3.12.*"
 dependencies = [
     "beautifulsoup4>=4.14.3",
     "httpx>=0.28.1",
-    "pytest>=9.0.2",
     "python-dotenv>=1.2.2",
     "pdfplumber>=0.11.7",
     "pypdf>=6.0.0",
