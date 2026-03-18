@@ -15,6 +15,11 @@ from src.collector.legal_doc_collector import (
     build_doc_ref,
     extract_list_items,
 )
+from src.common.law_meta import (
+    build_record_id,
+    normalize_classified_level,
+    normalize_kind_name,
+)
 from src.common.io_utils import _read_json, _write_json
 from src.common.payload_utils import _first_non_empty, _walk_objects
 from src.export.jsonl_builder import write_jsonl
@@ -102,10 +107,10 @@ def _article_display_no(article: dict[str, Any]) -> str:
 
 def _article_record_key(article: dict[str, Any]) -> str:
     return str(
-        article.get("jo_code")
-        or article.get("article_key")
+        article.get("article_key")
         or article.get("article_no_display")
         or article.get("article_no")
+        or article.get("jo_code")
         or ""
     ).strip()
 
@@ -554,6 +559,26 @@ def _build_appendix_text(
     return "\n".join(line for line in lines if line).strip()
 
 
+def _normalize_law_meta(parsed_law: dict[str, Any]) -> tuple[str | None, str]:
+    kind_name = normalize_kind_name(parsed_law.get("kind_name"))
+    classified_level = normalize_classified_level(
+        kind_name,
+        parsed_law.get("classified_level"),
+    )
+    return kind_name, classified_level
+
+
+def _ensure_unique_record_id(
+    record_id: str,
+    seen_ids: dict[str, int],
+) -> str:
+    count = seen_ids.get(record_id, 0)
+    seen_ids[record_id] = count + 1
+    if count == 0:
+        return record_id
+    return f"{record_id}::dup{count}"
+
+
 def build_law_records(
     normalized_base_dir: str | Path = "data/normalized/01_current_law",
     max_chars: int = 1200,
@@ -565,6 +590,7 @@ def build_law_records(
 ) -> list[dict[str, Any]]:
     base_dir = Path(normalized_base_dir)
     records: list[dict[str, Any]] = []
+    seen_ids: dict[str, int] = {}
 
     for path in sorted(base_dir.rglob("*__parsed_law.json")):
         parsed_law = _read_json(path)
@@ -573,13 +599,12 @@ def build_law_records(
         law_id = parsed_law.get("law_id")
         mst = parsed_law.get("mst")
         ef_yd = parsed_law.get("ef_yd")
-        kind_name = parsed_law.get("kind_name")
-        classified_level = parsed_law.get("classified_level")
+        kind_name, classified_level = _normalize_law_meta(parsed_law)
         scope_source = parsed_law.get("scope_source")
 
         articles = parsed_law.get("articles", [])
         if isinstance(articles, list):
-            for article in articles:
+            for article_index, article in enumerate(articles):
                 if not isinstance(article, dict):
                     continue
 
@@ -603,14 +628,17 @@ def build_law_records(
                 )
 
                 for chunk_index, chunk in enumerate(chunks):
-                    record_id = "::".join(
-                        [
-                            "law",
-                            law_name or "unknown",
-                            str(article_key or chunk_index),
-                            str(chunk_index),
-                        ]
+                    section_uid = article_key or f"article-{article_index}"
+                    record_id = build_record_id(
+                        prefix="law",
+                        law_id=law_id,
+                        mst=mst,
+                        law_name=law_name,
+                        section_type="article",
+                        section_uid=section_uid,
+                        chunk_index=chunk_index,
                     )
+                    record_id = _ensure_unique_record_id(record_id, seen_ids)
 
                     records.append(
                         {
@@ -625,6 +653,7 @@ def build_law_records(
                             "ef_yd": ef_yd,
                             "kind_name": kind_name,
                             "classified_level": classified_level,
+                            "law_level": classified_level,
                             "scope_source": scope_source,
                             "article_no": article_no,
                             "article_no_display": article_no_display,
@@ -661,15 +690,18 @@ def build_law_records(
                 )
 
                 for chunk_index, chunk in enumerate(chunks):
-                    record_id = "::".join(
-                        [
-                            "law",
-                            law_name or "unknown",
-                            "supplementary",
-                            str(item_index),
-                            str(chunk_index),
-                        ]
+                    section_uid = supplementary.get("supplementary_no") or f"supplementary-{item_index}"
+                    record_id = build_record_id(
+                        prefix="law",
+                        law_id=law_id,
+                        mst=mst,
+                        law_name=law_name,
+                        section_type="supplementary",
+                        section_uid=section_uid,
+                        chunk_index=chunk_index,
                     )
+                    record_id = _ensure_unique_record_id(record_id, seen_ids)
+
                     records.append(
                         {
                             "id": record_id,
@@ -683,6 +715,7 @@ def build_law_records(
                             "ef_yd": ef_yd,
                             "kind_name": kind_name,
                             "classified_level": classified_level,
+                            "law_level": classified_level,
                             "scope_source": scope_source,
                             "supplementary_no": supplementary.get("supplementary_no"),
                             "supplementary_title": supplementary.get("supplementary_title"),
@@ -717,15 +750,18 @@ def build_law_records(
                 )
 
                 for chunk_index, chunk in enumerate(chunks):
-                    record_id = "::".join(
-                        [
-                            "law",
-                            law_name or "unknown",
-                            "appendix",
-                            str(item_index),
-                            str(chunk_index),
-                        ]
+                    section_uid = appendix.get("appendix_title") or f"appendix-{item_index}"
+                    record_id = build_record_id(
+                        prefix="law",
+                        law_id=law_id,
+                        mst=mst,
+                        law_name=law_name,
+                        section_type="appendix",
+                        section_uid=section_uid,
+                        chunk_index=chunk_index,
                     )
+                    record_id = _ensure_unique_record_id(record_id, seen_ids)
+
                     records.append(
                         {
                             "id": record_id,
@@ -739,6 +775,7 @@ def build_law_records(
                             "ef_yd": ef_yd,
                             "kind_name": kind_name,
                             "classified_level": classified_level,
+                            "law_level": classified_level,
                             "scope_source": scope_source,
                             "appendix_title": appendix.get("appendix_title"),
                             "content_category": _aux_part_content_category(appendix),
