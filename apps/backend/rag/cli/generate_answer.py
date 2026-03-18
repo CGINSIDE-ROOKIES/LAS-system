@@ -2,9 +2,6 @@
 """Retrieval + Generator 통합 실행 스크립트.
 
 실행 예시:
-  uv run python apps/backend/rag/cli/generate_answer.py --question "연장근로 최대 시간은?"
-
-기본(JSON):
   uv run python cli/generate_answer.py --question "연장근로 최대 시간은?"
 
 스트리밍(NDJSON):
@@ -14,7 +11,7 @@
   uv run python cli/generate_answer.py --question "연장근로 최대 시간은?" --stream --text
 
 길이 제한 + temperature 설정:
-  uv run python cli/generate_answer.py --question "연장 근로 최대 시간은?" --stream --top-k 2 --max-content-chars 400 --max-total-chars 900 --llm-max-input-chars 1200 --llm-max-tokens 120 --llm-temperature 0.1
+  uv run python cli/generate_answer.py --question "연장근로 최대 시간은?" --top-k 2 --max-content-chars 400 --max-total-chars 900 --llm-max-input-chars 1200 --llm-max-tokens 200 --llm-temperature 0.1
 """
 
 from __future__ import annotations
@@ -229,7 +226,8 @@ def _build_user_prompt_with_limit(
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Retrieval + Generator 통합 실행기")
-    p.add_argument("--question", required=True, help="질문 텍스트")
+    p.add_argument("--question", default="", help="질문 텍스트")
+    p.add_argument("--interactive", action="store_true", help="대화형 질의 모드")
     p.add_argument("--top-k", type=int, default=5, help="최종 컨텍스트 문서 수")
     p.add_argument("--candidate-k", type=int, default=30, help="백엔드별 후보 수")
     p.add_argument("--rrf-k", type=int, default=60, help="RRF k 상수")
@@ -290,6 +288,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--llm-url", default="", help=f"기본: {DEFAULT_CHAT_COMPLETIONS_URL}"
     )
+    p.add_argument(
+        "--llm-provider",
+        default="",
+        choices=["openai_compat", "gemini"],
+        help="LLM provider (기본: LLM_PROVIDER 또는 openai_compat)",
+    )
     p.add_argument("--llm-model", default="", help=f"기본: {DEFAULT_MODEL}")
     p.add_argument(
         "--llm-api-key", default="", help="기본: LLM_API_KEY 또는 OPENAI_API_KEY"
@@ -297,10 +301,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--llm-max-input-chars",
         type=int,
-        default=3000,
+        default=12000,
         help="LLM 입력 프롬프트 최대 문자 수 (토큰 초과 방지)",
     )
-    p.add_argument("--llm-max-tokens", type=int, default=256, help="LLM 최대 생성 토큰")
+    p.add_argument(
+        "--llm-max-tokens", type=int, default=4096, help="LLM 최대 생성 토큰"
+    )
     p.add_argument("--llm-temperature", type=float, default=0.2, help="LLM 생성 온도")
 
     p.add_argument(
@@ -320,9 +326,10 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-    question = args.question.strip()
+def _run_for_question(args: argparse.Namespace, question: str) -> int:
+    question = question.strip()
+    if not question:
+        raise SystemExit("[ERROR] 질문이 비어 있습니다.")
 
     qdrant_url = require_env_or_arg(
         args.qdrant_url, "QDRANT_URL", "http://localhost:6333"
@@ -420,6 +427,7 @@ def main() -> int:
             for chunk in stream_answer(
                 llm_prompt,
                 system_prompt=args.system_prompt or None,
+                provider=args.llm_provider or None,
                 url=args.llm_url or None,
                 model=args.llm_model or None,
                 api_key=args.llm_api_key or None,
@@ -447,6 +455,7 @@ def main() -> int:
             answer = generate_answer(
                 llm_prompt,
                 system_prompt=args.system_prompt or None,
+                provider=args.llm_provider or None,
                 url=args.llm_url or None,
                 model=args.llm_model or None,
                 api_key=args.llm_api_key or None,
@@ -482,6 +491,33 @@ def main() -> int:
 
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
+
+
+def main() -> int:
+    args = parse_args()
+
+    if args.interactive:
+        initial_question = args.question.strip()
+        if initial_question:
+            _run_for_question(args, initial_question)
+
+        while True:
+            try:
+                question = input("\n질문> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 0
+
+            if question.lower() in {"q", "quit", "exit"}:
+                return 0
+            if not question:
+                continue
+            _run_for_question(args, question)
+
+    if not args.question.strip():
+        raise SystemExit("[ERROR] --question 또는 --interactive 중 하나는 필요합니다.")
+
+    return _run_for_question(args, args.question)
 
 
 if __name__ == "__main__":
