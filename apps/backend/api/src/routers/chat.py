@@ -22,7 +22,7 @@ async def chat(
     retrieval_service=Depends(get_retrieval_service),
     generation_service=Depends(get_generation_service),
 ):
-    """질문을 받아 검색 + 생성 파이프라인을 실행하고 답변을 반환한다."""
+    """질문을 받아 검색 + 생성 파이프라인을 실행하고 답변을 반환합니다."""
     # 1. retrieval_service.search(request.question) → contexts
     # 2. generation_service.generate(request.question, contexts) → answer
     # 3. return ChatResponse(answer=answer, contexts=contexts)
@@ -35,7 +35,7 @@ async def chat_stream(
     retrieval_service=Depends(get_retrieval_service),
     generation_service=Depends(get_generation_service),
 ):
-    """질문을 받아 검색 + 생성 파이프라인을 실행하고 답변을 스트리밍한다."""
+    """질문을 받아 검색 + 생성 파이프라인을 실행하고 답변을 스트리밍합니다."""
     # async def generate():
     #     contexts = await retrieval_service.search(request.question)
     #     async for chunk in generation_service.stream(request.question, contexts):
