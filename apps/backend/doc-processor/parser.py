@@ -1,6 +1,5 @@
 from pydantic import BaseModel, Field, ValidationError
 
-from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 
@@ -10,9 +9,8 @@ from pathlib import Path
 from typing import Literal, cast
 import re
 
-
+from llms import midm as llm
 from prompts import get_prompts
-from core.env_loader import load_env_SecretStr, load_env_str
 
 prompts = get_prompts()
 
@@ -45,12 +43,6 @@ class TextCategorization(BaseModel):
     )
 
 ###################################################################################################
-
-llm = ChatOpenAI(
-    base_url=load_env_str("PARSER_LLM_URL"),
-    api_key=load_env_SecretStr("PARSER_LLM_KEY"),
-    model=load_env_str("PARSER_LLM_MODEL"),
-)
 
 prelim_categorizer_llm = llm.with_structured_output(TextPrelimCategorization, method="json_mode") \
     .with_retry(retry_if_exception_type=(ValidationError, ValueError), stop_after_attempt=3)
@@ -174,11 +166,6 @@ parser_graph = parser_graph_builder.compile()
 
 
 if __name__ == "__main__":
-    # graph_png = main_graph.get_graph().draw_mermaid_png()
-    # with open("tests/graph.png", "wb") as f:
-    #     f.write(graph_png)
-    # print("Graph diagram saved to graph.png")
-
     file_dirs_std_labor = list(Path("tests/doc_samples/표준계약서모음(hwp-hwpx)").iterdir())
     file_dirs_std_contracts = list(Path("tests/doc_samples/(노동)표준근로계약서모음").iterdir())
     file_dirs = file_dirs_std_labor + file_dirs_std_contracts
@@ -199,6 +186,3 @@ if __name__ == "__main__":
                 text = chunk.text
                 category = chunk.category
                 f.write(f"category: {category} - {chunk.article_n}.{chunk.paragraph_n}\nchunk: {text}\n==========\n")
-            # text = group.formatted_str
-            # category = group.ir_chunks[0].category
-            # print(f"category: {category}\nchunk: {text}\n==========\n")
