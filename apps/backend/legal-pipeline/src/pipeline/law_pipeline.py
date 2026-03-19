@@ -14,12 +14,9 @@ from src.collector.raw_law_collector import (
     get_root_law_names,
 )
 from src.common.io_utils import _safe_filename, _write_json
+from src.parser.appendix_parser import parse_appendix_bundle, save_parsed_appendix_bundle
 from src.parser.law_parser import parse_law_body, save_parsed_law
-from src.scope.resolver import (
-    classify_law_level,
-    is_allowed_level,
-    select_family_law_refs_from_search,
-)
+from src.scope.resolver import select_family_law_refs_from_search
 
 
 def get_allowed_law_levels(
@@ -49,8 +46,16 @@ def get_part_policy(
         raise ValueError("exclude_parts must be a list")
 
     return {
-        "include_parts": [str(item).strip() for item in include_parts if str(item).strip()],
-        "exclude_parts": [str(item).strip() for item in exclude_parts if str(item).strip()],
+        "include_parts": [
+            str(item).strip()
+            for item in include_parts
+            if str(item).strip()
+        ],
+        "exclude_parts": [
+            str(item).strip()
+            for item in exclude_parts
+            if str(item).strip()
+        ],
     }
 
 
@@ -62,15 +67,23 @@ def should_include_descendants_from_system_diagram(
     return bool(output.get("include_descendants_from_system_diagram", False))
 
 
-def _save_law_body_payload(
+def _save_law_body_payloads(
     law_ref: dict[str, Any],
-    law_body: dict[str, Any],
+    law_body_response: dict[str, Any],
     save_dir: Path,
-) -> Path:
+) -> dict[str, str]:
     stem = _safe_filename(str(law_ref.get("law_name") or "unnamed"))
-    output_path = save_dir / f"{stem}__law_current_detail.json"
-    _write_json(output_path, law_body)
-    return output_path
+
+    parsed_path = save_dir / f"{stem}__law_current_detail.parsed.json"
+    response_path = save_dir / f"{stem}__law_current_detail.response.json"
+
+    _write_json(parsed_path, law_body_response["parsed"])
+    _write_json(response_path, law_body_response)
+
+    return {
+        "parsed_path": str(parsed_path),
+        "response_path": str(response_path),
+    }
 
 
 def collect_root_law_family(
@@ -88,6 +101,7 @@ def collect_root_law_family(
     raw_body_dir = base_dir / "raw" / "01_current_law_body" / root_stem
     raw_sub_dir = base_dir / "raw" / "01_current_sub_article" / root_stem
     normalized_dir = base_dir / "normalized" / "01_current_law" / root_stem
+    normalized_appendix_dir = base_dir / "normalized" / "01_current_law_appendix" / root_stem
     manifest_dir = base_dir / "manifest" / "01_current_law" / root_stem
 
     raw_record = collect_root_law_raw(
@@ -112,8 +126,14 @@ def collect_root_law_family(
     collected_laws: list[dict[str, Any]] = []
 
     for law_ref in family_refs:
-        law_body = fetch_law_body_by_ref(registry, oc, law_ref)
-        raw_body_path = _save_law_body_payload(law_ref, law_body, raw_body_dir)
+        law_body_response = fetch_law_body_by_ref(registry, oc, law_ref)
+        law_body = law_body_response["parsed"]
+
+        raw_body_paths = _save_law_body_payloads(
+            law_ref=law_ref,
+            law_body_response=law_body_response,
+            save_dir=raw_body_dir,
+        )
 
         parsed_law = parse_law_body(
             law_body,
@@ -122,6 +142,12 @@ def collect_root_law_family(
             exclude_parts=part_policy["exclude_parts"],
         )
         parsed_path = save_parsed_law(parsed_law, normalized_dir)
+
+        appendix_bundle = parse_appendix_bundle(law_body, law_ref=law_ref)
+        parsed_appendix_path = save_parsed_appendix_bundle(
+            appendix_bundle,
+            normalized_appendix_dir,
+        )
 
         sub_records = collect_sub_articles_for_parsed_law(
             registry=registry,
@@ -144,8 +170,12 @@ def collect_root_law_family(
                 "parsed_articles_count": parsed_law.get("articles_count"),
                 "parsed_supplementary_count": parsed_law.get("supplementary_count"),
                 "parsed_appendices_count": parsed_law.get("appendices_count"),
-                "raw_body_path": str(raw_body_path),
+                "appendix_bundle_count": appendix_bundle.get("appendix_count"),
+                "appendix_type_counts": appendix_bundle.get("appendix_type_counts", {}),
+                "raw_body_parsed_path": raw_body_paths["parsed_path"],
+                "raw_body_response_path": raw_body_paths["response_path"],
                 "parsed_path": str(parsed_path),
+                "parsed_appendix_path": str(parsed_appendix_path),
                 "sub_article_count": len(sub_records),
             }
         )
@@ -154,7 +184,7 @@ def collect_root_law_family(
         "root_law_name": root_law_name,
         "family_count": len(collected_laws),
         "laws": collected_laws,
-        "system_diagram_ref": raw_record.get("system_diagram_ref"),
+        "law_ref": raw_record.get("law_ref"),
         "scope_resolution": {
             "include_descendants_from_system_diagram": include_descendants,
             "source": "system_diagram" if include_descendants else "search_name_match",

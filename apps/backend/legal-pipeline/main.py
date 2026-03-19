@@ -6,6 +6,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from src.export.dataset_builder import build_and_write_datasets
+from src.pipeline.appendix_pipeline import run_appendix_asset_pipeline
 from src.pipeline.full_collection_pipeline import run_full_collection
 from src.registry.load_registry import (
     load_collection_scope,
@@ -84,6 +85,13 @@ def _validate_related_registry_basic(registry: dict[str, Any]) -> None:
             )
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "y", "yes", "on"}
+
+
 def main() -> None:
     load_dotenv()
 
@@ -122,6 +130,24 @@ def main() -> None:
     print("Collection finished")
     print("Root laws:", result["root_count"])
 
+    appendix_asset_result = None
+    appendix_asset_base_dir = "data/normalized/01_current_law_appendix_assets"
+    if _env_flag("ENABLE_APPENDIX_ASSET_PIPELINE", default=False):
+        appendix_asset_result = run_appendix_asset_pipeline(
+            normalized_appendix_base_dir="data/normalized/01_current_law_appendix",
+            raw_asset_base_dir="data/raw/01_current_law_appendix_assets",
+            normalized_asset_base_dir=appendix_asset_base_dir,
+            output_dir="data/dataset",
+            manifest_path="data/manifest/appendix_asset_pipeline_summary.json",
+            download_assets=_env_flag("APPENDIX_DOWNLOAD_ASSETS", default=False),
+            overwrite_assets=_env_flag("APPENDIX_OVERWRITE_ASSETS", default=False),
+            timeout_sec=int(os.environ.get("APPENDIX_DOWNLOAD_TIMEOUT_SEC", "60")),
+            download_base_url=os.environ.get("APPENDIX_DOWNLOAD_BASE_URL", "https://www.law.go.kr"),
+            max_chars=1200,
+            overlap=150,
+            build_dataset=False,
+        )
+
     print("Building JSONL dataset...")
 
     manifest = build_and_write_datasets(
@@ -129,12 +155,19 @@ def main() -> None:
         raw_related_base_dir="data/raw/02_related_legal_docs",
         expanded_base_dir="data/expanded/03_expanded_related_docs",
         output_dir="data/dataset",
+        normalized_appendix_base_dir="data/normalized/01_current_law_appendix",
+        normalized_appendix_asset_base_dir=(
+            appendix_asset_base_dir if appendix_asset_result is not None else None
+        ),
         max_chars=1200,
         overlap=150,
     )
 
     print("JSONL files created")
     print(manifest)
+    if appendix_asset_result is not None:
+        print("Appendix asset pipeline finished")
+        print(appendix_asset_result)
 
 
 if __name__ == "__main__":
