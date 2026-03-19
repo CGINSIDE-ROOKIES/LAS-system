@@ -587,6 +587,7 @@ def build_law_records(
     text_variant: TextVariant = "best",
     preserve_structure: bool = True,
     include_non_searchable_law_parts: bool = False,
+    include_appendix_as_law_rows: bool = False,
 ) -> list[dict[str, Any]]:
     base_dir = Path(normalized_base_dir)
     records: list[dict[str, Any]] = []
@@ -729,7 +730,7 @@ def build_law_records(
                     )
 
         appendices = parsed_law.get("appendices", [])
-        if isinstance(appendices, list):
+        if include_appendix_as_law_rows and isinstance(appendices, list):
             for item_index, appendix in enumerate(appendices):
                 if not isinstance(appendix, dict):
                     continue
@@ -1022,6 +1023,9 @@ def build_and_write_datasets(
     include_non_searchable_law_parts: bool = False,
     normalized_appendix_base_dir: str | Path | None = None,
     normalized_appendix_asset_base_dir: str | Path | None = None,
+    merge_appendices_into_law_article: bool = False,
+    include_appendix_bundle_text_in_payload: bool = True,
+    write_legacy_appendix_datasets: bool = True,
 ) -> dict[str, Any]:
     output_dir = Path(output_dir)
 
@@ -1032,6 +1036,7 @@ def build_and_write_datasets(
         text_variant=text_variant,
         preserve_structure=preserve_structure,
         include_non_searchable_law_parts=include_non_searchable_law_parts,
+        include_appendix_as_law_rows=False,
     )
     related_records = build_related_doc_records(
         raw_related_base_dir=raw_related_base_dir,
@@ -1043,7 +1048,7 @@ def build_and_write_datasets(
     )
 
     appendix_manifest: dict[str, Any] | None = None
-    if normalized_appendix_base_dir is not None:
+    if normalized_appendix_base_dir is not None and write_legacy_appendix_datasets:
         from src.export.appendix_dataset_builder import build_and_write_appendix_datasets
 
         appendix_manifest = build_and_write_appendix_datasets(
@@ -1053,6 +1058,33 @@ def build_and_write_datasets(
             overlap=overlap,
             normalized_appendix_asset_base_dir=normalized_appendix_asset_base_dir,
         )
+
+    article_appendix_manifest: dict[str, Any] | None = None
+    if merge_appendices_into_law_article and normalized_appendix_base_dir is not None:
+        from src.export.article_appendix_linker import (
+            augment_law_records_with_appendices,
+            build_article_appendix_links,
+            write_article_appendix_outputs,
+        )
+
+        article_appendix_result = build_article_appendix_links(
+            normalized_base_dir=normalized_base_dir,
+            normalized_appendix_base_dir=normalized_appendix_base_dir,
+            normalized_appendix_asset_base_dir=normalized_appendix_asset_base_dir,
+        )
+        law_records = augment_law_records_with_appendices(
+            law_records,
+            article_links=article_appendix_result["article_links"],
+            include_bundle_text_in_payload=include_appendix_bundle_text_in_payload,
+        )
+        write_article_appendix_outputs(
+            output_dir,
+            link_records=article_appendix_result["link_records"],
+            appendix_bundle_records=article_appendix_result["appendix_bundle_records"],
+            unresolved_appendix_records=article_appendix_result["unresolved_appendix_records"],
+            manifest=article_appendix_result["manifest"],
+        )
+        article_appendix_manifest = article_appendix_result["manifest"]
 
     legal_corpus_records = law_records + related_records
 
@@ -1065,6 +1097,10 @@ def build_and_write_datasets(
         "law_record_count": len(law_records),
         "related_doc_record_count": len(related_records),
         "appendix_dataset_manifest": appendix_manifest,
+        "article_appendix_manifest": article_appendix_manifest,
+        "merge_appendices_into_law_article": merge_appendices_into_law_article,
+        "include_appendix_bundle_text_in_payload": include_appendix_bundle_text_in_payload,
+        "write_legacy_appendix_datasets": write_legacy_appendix_datasets,
         "max_chars": max_chars,
         "overlap": overlap,
         "text_variant": text_variant,

@@ -161,6 +161,9 @@ def main() -> None:
         ),
         max_chars=1200,
         overlap=150,
+        merge_appendices_into_law_article=True,
+        include_appendix_bundle_text_in_payload=True,
+        write_legacy_appendix_datasets=True,
     )
 
     print("JSONL files created")

@@ -1,0 +1,549 @@
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from collections import Counter
+from pathlib import Path
+from typing import Iterable, Iterator, Sequence
+
+import numpy as np
+from sentence_transformers import SentenceTransformer
+
+
+MODEL_NAME = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+EMBEDDING_PASSAGE_PREFIX = ""
+NORMALIZE_EMBEDDINGS = True
+EMBEDDING_DTYPE = "float32"
+DEFAULT_BATCH_SIZE = 32
+CASE_DOC_TYPES = {"prec", "detc", "decc", "expc"}
+COLLECTIONS = ("law_article", "legal_case", "legal_relation")
+APPENDIX_VECTOR_PLACEHOLDER = "[NO_APPENDIX_LINKED]"
+LAW_ARTICLE_VECTOR_NAMES = ("body", "appendix")
+
+
+def read_jsonl(path: Path) -> list[dict]:
+    rows: list[dict] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rows.append(json.loads(line))
+    return rows
+
+
+def write_jsonl(path: Path, rows: Iterable[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _iter_jsonl(path: Path) -> Iterator[dict]:
+    if not path.exists():
+        return
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            yield json.loads(line)
+
+
+def _classify_kind_name(kind_name: object) -> str | None:
+    text = str(kind_name or "").strip()
+    if not text:
+        return None
+    if "법률" in text:
+        return "법"
+    if "대통령령" in text:
+        return "시행령"
+    if "부령" in text or text.endswith("규칙"):
+        return "시행규칙"
+    if any(token in text for token in ("훈령", "예규", "고시", "규정", "지침", "지시")):
+        return "행정규칙"
+    return None
+
+
+def _stable_law_level(row: dict) -> str | None:
+    value = row.get("law_level") or row.get("classified_level") or _classify_kind_name(row.get("kind_name"))
+    if value in (None, ""):
+        return None
+    return str(value).strip()
+
+
+def _iter_collection_rows(dataset_dir: Path, collection_name: str) -> Iterator[dict]:
+    legal_corpus_path = dataset_dir / "legal_corpus.jsonl"
+    relation_path = dataset_dir / "legal_relations.jsonl"
+
+    if collection_name == "law_article":
+        for row in _iter_jsonl(legal_corpus_path):
+            if row.get("doc_type") == "law":
+                yield row
+        return
+
+    if collection_name == "legal_case":
+        for row in _iter_jsonl(legal_corpus_path):
+            if row.get("doc_type") in CASE_DOC_TYPES:
+                yield row
+        return
+
+    if collection_name == "legal_relation":
+        yield from _iter_jsonl(relation_path)
+        return
+
+    raise ValueError(f"Unsupported collection_name: {collection_name}")
+
+
+def _canonical_id_from_row(row: dict) -> str:
+    value = row.get("id")
+    if value in (None, ""):
+        raise ValueError("row.id is required")
+    return str(value)
+
+
+def _point_id_context_digest(row: dict) -> str:
+    basis = {
+        "root_law_name": row.get("root_law_name"),
+        "related_law_name": row.get("related_law_name"),
+        "related_law_names": row.get("related_law_names"),
+        "source_law_name": row.get("source_law_name"),
+        "source_group": row.get("source_group"),
+        "source_file_path": row.get("source_file_path"),
+        "chunk_index": row.get("chunk_index"),
+        "doc_id": row.get("doc_id"),
+        "doc_number": row.get("doc_number"),
+        "title": row.get("title"),
+        "target": row.get("target"),
+    }
+    raw = json.dumps(basis, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.blake2b(raw.encode("utf-8"), digest_size=8).hexdigest()
+
+
+def _build_point_id(row: dict, duplicate_canonical_ids: set[str]) -> str:
+    canonical_id = _canonical_id_from_row(row)
+    if canonical_id not in duplicate_canonical_ids:
+        return canonical_id
+    digest = _point_id_context_digest(row)
+    return f"{canonical_id}::ctx::{digest}"
+
+
+def _scan_collection(dataset_dir: Path, collection_name: str) -> dict:
+    canonical_id_counter: Counter[str] = Counter()
+    doc_type_counter: Counter[str] = Counter()
+    row_count = 0
+    text_row_count = 0
+
+    for row in _iter_collection_rows(dataset_dir, collection_name):
+        row_count += 1
+        doc_type_counter[str(row.get("doc_type") or "")] += 1
+        text = str(row.get("text") or "").strip()
+        if collection_name == "law_article":
+            appendix_text = str(row.get("appendix_vector_text") or APPENDIX_VECTOR_PLACEHOLDER).strip()
+            if text or appendix_text:
+                text_row_count += 1
+        else:
+            if text:
+                text_row_count += 1
+        canonical_id_counter[_canonical_id_from_row(row)] += 1
+
+    duplicate_canonical_ids = {cid for cid, count in canonical_id_counter.items() if count > 1}
+    return {
+        "row_count": row_count,
+        "text_row_count": text_row_count,
+        "canonical_id_counter": canonical_id_counter,
+        "duplicate_canonical_ids": duplicate_canonical_ids,
+        "doc_type_counter": doc_type_counter,
+    }
+
+
+def _build_meta(collection_name: str, row: dict, point_id: str, text: str) -> dict:
+    doc_type = row.get("doc_type")
+    meta = {
+        "id": row.get("id"),
+        "canonical_id": row.get("id"),
+        "_point_id": point_id,
+        "collection_name": collection_name,
+        "doc_type": doc_type,
+        "doc_type_label": row.get("doc_type_label"),
+        "case_type": doc_type if collection_name == "legal_case" else None,
+        "case_type_label": row.get("doc_type_label") if collection_name == "legal_case" else None,
+        "law_name": row.get("law_name"),
+        "law_id": row.get("law_id"),
+        "mst": row.get("mst"),
+        "ef_yd": row.get("ef_yd"),
+        "kind_name": row.get("kind_name"),
+        "classified_level": row.get("classified_level") or _stable_law_level(row),
+        "law_level": _stable_law_level(row),
+        "source_group": row.get("source_group"),
+        "part_type": row.get("part_type"),
+        "section_type": row.get("section_type"),
+        "article_no": row.get("article_no"),
+        "article_no_display": row.get("article_no_display"),
+        "article_key": row.get("article_key"),
+        "root_law_name": row.get("root_law_name"),
+        "related_law_name": row.get("related_law_name"),
+        "related_law_names": row.get("related_law_names"),
+        "source_law_name": row.get("source_law_name"),
+        "relation_types": row.get("relation_types"),
+        "title": row.get("title"),
+        "doc_id": row.get("doc_id"),
+        "doc_number": row.get("doc_number"),
+        "doc_kind": row.get("doc_kind"),
+        "detail_link": row.get("detail_link"),
+        "target": row.get("target"),
+        "source_file_path": row.get("source_file_path"),
+        "chunk_index": row.get("chunk_index"),
+        "text_len": len(text),
+    }
+
+    if collection_name == "law_article":
+        meta.update(
+            {
+                "has_related_appendix": bool(row.get("has_related_appendix")),
+                "related_appendix_count": int(row.get("related_appendix_count") or 0),
+                "related_appendix_ids": row.get("related_appendix_ids") or [],
+                "related_appendix_keys": row.get("related_appendix_keys") or [],
+                "related_appendix_nos": row.get("related_appendix_nos") or [],
+                "related_appendix_titles": row.get("related_appendix_titles") or [],
+                "related_appendix_match_types": row.get("related_appendix_match_types") or [],
+                "related_appendix_previews": row.get("related_appendix_previews") or [],
+                "related_appendices": row.get("related_appendices") or [],
+                "appendix_vector_text_len": len(str(row.get("appendix_vector_text") or APPENDIX_VECTOR_PLACEHOLDER)),
+            }
+        )
+
+    return meta
+
+
+def _write_variant_source(handoff_dir: Path, collection_name: str, source_rows: Sequence[dict]) -> Path:
+    source_dir = handoff_dir / "source"
+    source_path = source_dir / f"{collection_name}.jsonl"
+    write_jsonl(source_path, source_rows)
+    return source_path
+
+
+def _write_variant_import(handoff_dir: Path, collection_name: str, import_rows: Sequence[dict]) -> Path:
+    import_dir = handoff_dir / "import"
+    import_path = import_dir / f"{collection_name}_for_import.jsonl"
+    write_jsonl(import_path, import_rows)
+    return import_path
+
+
+def _iter_law_article_rows(dataset_dir: Path) -> list[dict]:
+    return list(_iter_collection_rows(dataset_dir, "law_article"))
+
+
+def _iter_simple_rows(dataset_dir: Path, collection_name: str) -> list[dict]:
+    return list(_iter_collection_rows(dataset_dir, collection_name))
+
+
+def _build_law_article_import_rows(
+    metas: Sequence[dict],
+    body_texts: Sequence[str],
+    appendix_texts: Sequence[str],
+    body_embeddings: np.ndarray,
+    appendix_embeddings: np.ndarray,
+) -> list[dict]:
+    rows: list[dict] = []
+    for meta, body_text, appendix_text, body_vector, appendix_vector in zip(
+        metas,
+        body_texts,
+        appendix_texts,
+        body_embeddings,
+        appendix_embeddings,
+        strict=True,
+    ):
+        row = dict(meta)
+        row["text"] = body_text
+        row["appendix_vector_text"] = appendix_text
+        row["_vectors"] = {
+            "body": body_vector.astype(np.float32).tolist(),
+            "appendix": appendix_vector.astype(np.float32).tolist(),
+        }
+        row["_score"] = None
+        row["embedding_model"] = MODEL_NAME
+        row["embedding_passage_prefix"] = EMBEDDING_PASSAGE_PREFIX
+        row["normalized"] = NORMALIZE_EMBEDDINGS
+        rows.append(row)
+    return rows
+
+
+def _build_simple_import_rows(
+    metas: Sequence[dict],
+    texts: Sequence[str],
+    embeddings: np.ndarray,
+) -> list[dict]:
+    rows: list[dict] = []
+    for meta, text, vector in zip(metas, texts, embeddings, strict=True):
+        row = dict(meta)
+        row["text"] = text
+        row["_vector"] = vector.astype(np.float32).tolist()
+        row["_score"] = None
+        row["embedding_model"] = MODEL_NAME
+        row["embedding_passage_prefix"] = EMBEDDING_PASSAGE_PREFIX
+        row["normalized"] = NORMALIZE_EMBEDDINGS
+        rows.append(row)
+    return rows
+
+
+def embed_law_article(
+    model: SentenceTransformer,
+    dataset_dir: Path,
+    emb_dir: Path,
+    handoff_dir: Path,
+    *,
+    batch_size: int,
+) -> dict:
+    collection_name = "law_article"
+    rows = _iter_law_article_rows(dataset_dir)
+    stats = _scan_collection(dataset_dir, collection_name)
+    duplicate_canonical_ids: set[str] = stats["duplicate_canonical_ids"]
+
+    metas: list[dict] = []
+    body_texts: list[str] = []
+    appendix_texts: list[str] = []
+    source_rows: list[dict] = []
+
+    for row in rows:
+        body_text = str(row.get("text") or "").strip()
+        if not body_text:
+            continue
+        appendix_text = str(row.get("appendix_vector_text") or APPENDIX_VECTOR_PLACEHOLDER).strip() or APPENDIX_VECTOR_PLACEHOLDER
+        point_id = _build_point_id(row, duplicate_canonical_ids)
+        meta = _build_meta(collection_name, row, point_id, body_text)
+        metas.append(meta)
+        body_texts.append(body_text)
+        appendix_texts.append(appendix_text)
+        source_rows.append(dict(row))
+
+    if not body_texts:
+        raise ValueError("[law_article] no texts found to embed")
+
+    body_embeddings = model.encode(
+        body_texts,
+        batch_size=batch_size,
+        show_progress_bar=True,
+        convert_to_numpy=True,
+        normalize_embeddings=NORMALIZE_EMBEDDINGS,
+        precision=EMBEDDING_DTYPE,
+    ).astype(np.float32)
+    appendix_embeddings = model.encode(
+        appendix_texts,
+        batch_size=batch_size,
+        show_progress_bar=True,
+        convert_to_numpy=True,
+        normalize_embeddings=NORMALIZE_EMBEDDINGS,
+        precision=EMBEDDING_DTYPE,
+    ).astype(np.float32)
+
+    emb_dir.mkdir(parents=True, exist_ok=True)
+    body_npy_path = emb_dir / f"{collection_name}.body.npy"
+    appendix_npy_path = emb_dir / f"{collection_name}.appendix.npy"
+    meta_path = emb_dir / f"{collection_name}.meta.jsonl"
+    manifest_path = emb_dir / f"{collection_name}.manifest.json"
+
+    np.save(body_npy_path, body_embeddings)
+    np.save(appendix_npy_path, appendix_embeddings)
+    write_jsonl(meta_path, metas)
+
+    import_rows = _build_law_article_import_rows(metas, body_texts, appendix_texts, body_embeddings, appendix_embeddings)
+    source_path = _write_variant_source(handoff_dir, collection_name, source_rows)
+    import_path = _write_variant_import(handoff_dir, collection_name, import_rows)
+
+    manifest = {
+        "collection_name": collection_name,
+        "model_name": MODEL_NAME,
+        "count": len(metas),
+        "embedding_dim": int(body_embeddings.shape[1]) if len(body_embeddings) else 0,
+        "normalized": NORMALIZE_EMBEDDINGS,
+        "dtype": "float32",
+        "batch_size": batch_size,
+        "vector_names": list(LAW_ARTICLE_VECTOR_NAMES),
+        "dataset_dir": str(dataset_dir),
+        "body_npy_path": str(body_npy_path),
+        "appendix_npy_path": str(appendix_npy_path),
+        "meta_path": str(meta_path),
+        "source_jsonl_path": str(source_path),
+        "import_jsonl_path": str(import_path),
+    }
+    with manifest_path.open("w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+    return manifest
+
+
+def embed_simple_collection(
+    model: SentenceTransformer,
+    dataset_dir: Path,
+    emb_dir: Path,
+    handoff_dir: Path,
+    collection_name: str,
+    *,
+    batch_size: int,
+) -> dict:
+    rows = _iter_simple_rows(dataset_dir, collection_name)
+    stats = _scan_collection(dataset_dir, collection_name)
+    duplicate_canonical_ids: set[str] = stats["duplicate_canonical_ids"]
+
+    metas: list[dict] = []
+    texts: list[str] = []
+    source_rows: list[dict] = []
+
+    for row in rows:
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        point_id = _build_point_id(row, duplicate_canonical_ids)
+        meta = _build_meta(collection_name, row, point_id, text)
+        metas.append(meta)
+        texts.append(text)
+        source_rows.append(dict(row))
+
+    if not texts:
+        print(f"[skip] {collection_name}: no texts found to embed")
+        return {
+            "collection_name": collection_name,
+            "count": 0,
+            "skipped": True,
+            "reason": "no texts found to embed",
+        }
+
+    embeddings = model.encode(
+        texts,
+        batch_size=batch_size,
+        show_progress_bar=True,
+        convert_to_numpy=True,
+        normalize_embeddings=NORMALIZE_EMBEDDINGS,
+        precision=EMBEDDING_DTYPE,
+    ).astype(np.float32)
+
+    emb_dir.mkdir(parents=True, exist_ok=True)
+    npy_path = emb_dir / f"{collection_name}.npy"
+    meta_path = emb_dir / f"{collection_name}.meta.jsonl"
+    manifest_path = emb_dir / f"{collection_name}.manifest.json"
+
+    np.save(npy_path, embeddings)
+    write_jsonl(meta_path, metas)
+
+    import_rows = _build_simple_import_rows(metas, texts, embeddings)
+    source_path = _write_variant_source(handoff_dir, collection_name, source_rows)
+    import_path = _write_variant_import(handoff_dir, collection_name, import_rows)
+
+    manifest = {
+        "collection_name": collection_name,
+        "model_name": MODEL_NAME,
+        "count": len(metas),
+        "embedding_dim": int(embeddings.shape[1]) if len(embeddings) else 0,
+        "normalized": NORMALIZE_EMBEDDINGS,
+        "dtype": "float32",
+        "batch_size": batch_size,
+        "vector_names": ["default"],
+        "dataset_dir": str(dataset_dir),
+        "npy_path": str(npy_path),
+        "meta_path": str(meta_path),
+        "source_jsonl_path": str(source_path),
+        "import_jsonl_path": str(import_path),
+    }
+    with manifest_path.open("w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+    return manifest
+
+
+def write_embedding_manifest(
+    handoff_dir: Path,
+    dataset_dir: Path,
+    emb_dir: Path,
+    collection_manifests: Sequence[dict],
+) -> Path:
+    manifest_path = handoff_dir / "qdrant_embedding_manifest.json"
+    payload = {
+        "model_name": MODEL_NAME,
+        "embedding_dim": 768,
+        "normalized": NORMALIZE_EMBEDDINGS,
+        "dtype": "float32",
+        "metric": "cosine",
+        "embedding_passage_prefix": EMBEDDING_PASSAGE_PREFIX,
+        "dataset_dir": str(dataset_dir),
+        "emb_dir": str(emb_dir),
+        "collections": list(collection_manifests),
+    }
+    with manifest_path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return manifest_path
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Embed Qdrant 3-collection handoff files.")
+    parser.add_argument(
+        "--dataset-dir",
+        type=Path,
+        default=Path("data/dataset"),
+        help="Dataset directory containing legal_corpus.jsonl and legal_relations.jsonl.",
+    )
+    parser.add_argument(
+        "--emb-dir",
+        type=Path,
+        default=Path("data/emb/qdrant_3collections"),
+        help="Directory to write .npy and meta outputs.",
+    )
+    parser.add_argument(
+        "--handoff-dir",
+        type=Path,
+        default=Path("data/handoff/qdrant_3collections"),
+        help="Directory to write source/import JSONL and collection manifest.",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help="SentenceTransformer encode batch size.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    dataset_dir: Path = args.dataset_dir
+    emb_dir: Path = args.emb_dir
+    handoff_dir: Path = args.handoff_dir
+    batch_size: int = args.batch_size
+
+    if not dataset_dir.exists():
+        raise FileNotFoundError(f"dataset_dir not found: {dataset_dir}")
+
+    model = SentenceTransformer(MODEL_NAME)
+
+    collection_manifests: list[dict] = []
+    collection_manifests.append(
+        embed_law_article(
+            model=model,
+            dataset_dir=dataset_dir,
+            emb_dir=emb_dir,
+            handoff_dir=handoff_dir,
+            batch_size=batch_size,
+        )
+    )
+    for collection_name in ("legal_case", "legal_relation"):
+        collection_manifests.append(
+            embed_simple_collection(
+                model=model,
+                dataset_dir=dataset_dir,
+                emb_dir=emb_dir,
+                handoff_dir=handoff_dir,
+                collection_name=collection_name,
+                batch_size=batch_size,
+            )
+        )
+
+    write_embedding_manifest(
+        handoff_dir=handoff_dir,
+        dataset_dir=dataset_dir,
+        emb_dir=emb_dir,
+        collection_manifests=collection_manifests,
+    )
+
+
+if __name__ == "__main__":
+    main()

@@ -117,6 +117,11 @@ def main() -> None:
         overlap=150,
         text_variant="best",
         preserve_structure=True,
+
+        # 추가
+        merge_appendices_into_law_article=True,
+        include_appendix_bundle_text_in_payload=True,
+        write_legacy_appendix_datasets=False,
     )
 
     summary = {
