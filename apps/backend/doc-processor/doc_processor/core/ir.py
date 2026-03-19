@@ -5,7 +5,7 @@ from tabulate import tabulate
 from hwpx import HwpxDocument
 from hwpx.tools.exporter import export_markdown_structured
 
-from las_types import IRChunk, IRGroup, NumberMatch
+from ..las_types import IRChunk, IRGroup, NumberMatch
 
 
 # ---------------------------------------------------------------------------

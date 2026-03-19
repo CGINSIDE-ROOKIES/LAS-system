@@ -4,10 +4,10 @@ from langgraph.graph import StateGraph, START, END
 
 from typing import Literal, Annotated
 
-from llms import midm as llm_sm
-from llms import midm as llm_bg
-from prompts import get_prompts
-from core.chat_utils import trim_chat_history
+from doc_processor.llms import midm as llm_sm
+from doc_processor.llms import midm as llm_bg
+from doc_processor.prompts import get_prompts
+from doc_processor.core.chat_utils import trim_chat_history
 
 prompts = get_prompts()
 

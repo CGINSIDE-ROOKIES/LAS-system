@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-exclude = ["tests*", ".venv*", "vendor*"]
+exclude = ["tests*", ".venv*"]
 
-[tool.setuptools]
-py-modules = ["llms", "parser"]
+[tool.setuptools.package-data]
+doc_processor = ["vendor/**/*", "prompts/*.txt"]
 
 [project]
-name = "doc-processor"
+name = "doc_processor"
 version = "0.1.0"
 description = "HWPX document parsing and IR construction pipeline"
 readme = "README.md"
@@ -40,15 +40,3 @@ intel = [
 [tool.uv.sources]
 python-hwpx = { git = "https://github.com/maxjo0418/python-hwpx.git" }
 optimum-intel = { git = "https://github.com/huggingface/optimum-intel.git" }
-doc-processor = { workspace = true, editable = true }
-
-[tool.uv.workspace]
-members = [
-    ".",
-    ".",
-]
-
-[dependency-groups]
-dev = [
-    "doc-processor",
-]

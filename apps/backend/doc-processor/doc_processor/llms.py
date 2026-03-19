@@ -3,7 +3,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from pydantic import SecretStr
 
-from core.env_loader import load_env_SecretStr, load_env_str
+from doc_processor.core.env_loader import load_env_SecretStr, load_env_str
 
 
 midm = ChatOpenAI(

@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from las_types import RunStyleInfo, ParaStyleInfo, CellStyleInfo, TableStyleInfo, StyleMap
+from ..las_types import RunStyleInfo, ParaStyleInfo, CellStyleInfo, TableStyleInfo, StyleMap
 
 
 # ---------------------------------------------------------------------------

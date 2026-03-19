@@ -23,7 +23,7 @@ import re
 from html import escape
 from collections import defaultdict
 
-from las_types import (
+from ..las_types import (
     IRGroup, IRChunk, StyleMap, RunStyleInfo, ParaStyleInfo, CellStyleInfo,
     ResolvedHighlight, ArticleAnnotations,
 )

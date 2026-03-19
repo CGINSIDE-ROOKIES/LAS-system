@@ -78,7 +78,7 @@ from hwpx import HwpxDocument
 from docx.document import Document as DocxDocument
 from docx.table import Table
 from docx.text.paragraph import Paragraph
-from las_types import IRGroup, RunSpan
+from ..las_types import IRGroup, RunSpan
 
 
 # ---------------------------------------------------------------------------

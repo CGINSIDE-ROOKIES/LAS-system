@@ -3,14 +3,14 @@ from pydantic import BaseModel, Field, ValidationError
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 
-from las_types import IRGroup, DocumentState, IRGroupState
+from .las_types import IRGroup, DocumentState, IRGroupState
 
 from pathlib import Path
 from typing import Literal, cast
 import re
 
-from llms import midm as llm
-from prompts import get_prompts
+from .llms import midm as llm
+from .prompts import get_prompts
 
 prompts = get_prompts()
 
