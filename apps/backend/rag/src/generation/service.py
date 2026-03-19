@@ -22,7 +22,7 @@ class GenerationConfig:
     model: str = ""
     api_key: str = ""
     timeout: int = 120
-    max_tokens: int = 256
+    max_tokens: int = 2048
     temperature: float = 0.2
 
     def __post_init__(self) -> None:
