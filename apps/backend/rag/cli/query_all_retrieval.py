@@ -25,6 +25,10 @@ if str(_CLI_DIR) not in sys.path:
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from query_hybrid_rrf import fuse_rrf
 from retrieval_common import (
     DEFAULT_EMBEDDING_MODEL,
