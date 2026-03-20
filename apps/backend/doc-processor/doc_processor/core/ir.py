@@ -1,3 +1,4 @@
+import logging
 import re
 from collections import defaultdict
 
@@ -6,6 +7,8 @@ from hwpx import HwpxDocument
 from hwpx.tools.exporter import export_markdown_structured
 
 from ..las_types import IRChunk, IRGroup, NumberMatch
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +66,15 @@ def get_article_numbers(text: str) -> list[NumberMatch]:
         if preceded_like_heading or (start == 0) or followed_like_heading:
             results.append(NumberMatch(val=match.group(1), span=match.span()))
 
+    if len(results) <= 0:
+        fallback_pattern = r"^\s*(\d+)\.\s"
+        fallback: list[NumberMatch] = [
+            NumberMatch(val=m.group(1), span=m.span())
+            for m in re.finditer(fallback_pattern, text, re.MULTILINE)
+        ]
+        if fallback:
+            return fallback
+
     return results
 
 
@@ -104,6 +116,8 @@ def create_ir_dict_from_mapping(parsed: dict[str, str]) -> dict[str, IRChunk]:
     irs: dict[str, IRChunk] = {}
     active_article_num: str = "-1"
     active_paragraph_num: str | None = None
+    _primary_found = False
+    _fallback_found = False
 
     for id, text in parsed.items():
         detected_article_nums: list[str] = []
@@ -112,6 +126,11 @@ def create_ir_dict_from_mapping(parsed: dict[str, str]) -> dict[str, IRChunk]:
         section = "uncategorized-table" if "tbl" in id else "uncategorized"
 
         ex_article = get_article_numbers(text)
+        if ex_article:
+            if re.search(r"제\s*\d+\s*조", text):
+                _primary_found = True
+            else:
+                _fallback_found = True
         for match in ex_article:
             detected_article_nums.append(match.val)
             splits.append(match.span)
@@ -154,6 +173,11 @@ def create_ir_dict_from_mapping(parsed: dict[str, str]) -> dict[str, IRChunk]:
         elif detected_article_nums:
             active_article_num = detected_article_nums[-1]
             active_paragraph_num = None
+
+    if _fallback_found and not _primary_found:
+        logger.warning("create_ir_dict_from_mapping: 제N조 pattern not found; used fallback 'N.' pattern")
+    elif not _primary_found and not _fallback_found:
+        logger.warning("create_ir_dict_from_mapping: no article numbers found by either pattern")
 
     return irs
 
