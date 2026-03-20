@@ -176,18 +176,37 @@ def _clip_run_spans(
     i1: int,
     i2: int,
 ) -> list[RunSpan]:
-    """Return the subset of *spans* that overlaps ``[i1, i2)``."""
+    """Return the subset of *spans* that overlaps ``[i1, i2)``.
+
+    For zero-width ranges (inserts where ``i1 == i2``), the point is matched
+    using inclusive boundaries so that an insert at a run boundary is assigned
+    to the **preceding** run (appended) rather than silently dropped.
+    """
+    is_insert = i1 == i2
     clipped: list[RunSpan] = []
     for span in spans:
-        if span.end <= i1 or span.start >= i2:
-            continue
+        if is_insert:
+            if span.end < i1 or span.start > i2:
+                continue
+        else:
+            if span.end <= i1 or span.start >= i2:
+                continue
         clipped.append(
             RunSpan(
-                start=max(span.start, i1),
-                end=min(span.end, i2),
+                # For inserts, preserve the original span start/end so the
+                # caller computes correct local offsets within the run.
+                start=span.start if is_insert else max(span.start, i1),
+                end=span.end if is_insert else min(span.end, i2),
                 chunk_id=span.chunk_id,
             )
         )
+    # When an insert lands exactly between two adjacent runs, prefer the
+    # preceding one (whose end == insert point) so new text is appended to
+    # it rather than prepended to the next run.
+    if is_insert and len(clipped) > 1:
+        preceding = [s for s in clipped if s.end == i1]
+        if preceding:
+            clipped = preceding[:1]
     return clipped
 
 
