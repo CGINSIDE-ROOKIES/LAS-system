@@ -260,9 +260,13 @@ class RagPipeline:
         system_prompt: str | None = DEFAULT_SYSTEM_PROMPT,
         doc_types: list[str] | None = None,
         law_names: list[str] | None = None,
-    ) -> Iterator[str]:
-        """검색 후 생성을 스트리밍으로 반환한다. 토큰 조각을 순차 yield한다."""
-        llm_rows, context_text, law_context_status, _ = self._retrieve(
+    ) -> tuple[RagResult, Iterator[str]]:
+        """검색 후 생성을 스트리밍으로 반환한다.
+
+        Returns:
+            (meta, chunks): meta는 sources 등 메타데이터, chunks는 토큰 조각 이터레이터.
+        """
+        llm_rows, context_text, law_context_status, law_context_added = self._retrieve(
             question, doc_types=doc_types, law_names=law_names
         )
         prompt = build_user_prompt_with_limit(
@@ -271,4 +275,5 @@ class RagPipeline:
             max_input_chars=self._cfg.max_input_chars,
             law_context_status=law_context_status,
         )
-        yield from self._generation.stream(prompt, system_prompt=system_prompt)
+        meta = self._build_result("", llm_rows, law_context_status, law_context_added)
+        return meta, self._generation.stream(prompt, system_prompt=system_prompt)

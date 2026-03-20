@@ -59,13 +59,14 @@ def ask_stream(
 ) -> StreamingResponse:
     """질문을 받아 RAG 파이프라인을 실행하고 답변을 SSE로 스트리밍합니다."""
     def generate():
-        for chunk in pipeline.stream(
+        meta, chunks = pipeline.stream(
             request.question,
             doc_types=request.doc_types,
             law_names=request.law_names,
-        ):
+        )
+        for chunk in chunks:
             yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'sources': meta.sources, 'retrieved_docs': meta.retrieved_docs, 'law_context_status': meta.law_context_status, 'law_context_added': meta.law_context_added}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         generate(),
