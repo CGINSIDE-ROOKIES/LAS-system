@@ -6,7 +6,6 @@
 """
 
 import json
-from typing import Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -14,6 +13,7 @@ from pydantic import BaseModel
 
 from src.dependencies import get_rag_pipeline
 from src.generation.pipeline import RagPipeline
+from src.retrieval.common import RetrievalError
 
 router = APIRouter(tags=["qa"])
 
@@ -24,12 +24,19 @@ class AskRequest(BaseModel):
     law_names: list[str] | None = None
 
 
+class RetrievedDoc(BaseModel):
+    rank: int
+    source_id: str
+    doc_type: str
+    law_name: str
+    score: float | None
+    snippet: str
+
+
 class AskResponse(BaseModel):
     answer: str
-    sources: list[dict[str, Any]]
-    retrieved_docs: list[dict[str, Any]]
+    retrieved_docs: list[RetrievedDoc]
     law_context_status: str
-    law_context_added: bool
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -45,10 +52,8 @@ def ask(
     )
     return AskResponse(
         answer=result.answer,
-        sources=result.sources,
-        retrieved_docs=result.retrieved_docs,
+        retrieved_docs=[RetrievedDoc(**doc) for doc in result.retrieved_docs],
         law_context_status=result.law_context_status,
-        law_context_added=result.law_context_added,
     )
 
 
@@ -59,13 +64,24 @@ def ask_stream(
 ) -> StreamingResponse:
     """질문을 받아 RAG 파이프라인을 실행하고 답변을 SSE로 스트리밍합니다."""
     def generate():
-        for chunk in pipeline.stream(
-            request.question,
-            doc_types=request.doc_types,
-            law_names=request.law_names,
-        ):
-            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        try:
+            meta, chunks = pipeline.stream(
+                request.question,
+                doc_types=request.doc_types,
+                law_names=request.law_names,
+            )
+            for chunk in chunks:
+                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+            done_payload = {
+                "type": "done",
+                "retrieved_docs": [RetrievedDoc(**doc).model_dump() for doc in meta.retrieved_docs],
+                "law_context_status": meta.law_context_status,
+            }
+            yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+        except RetrievalError as exc:
+            yield f"data: {json.dumps({'type': 'error', 'code': 'PIPELINE_ERROR', 'error': str(exc)}, ensure_ascii=False)}\n\n"
+        except Exception:
+            yield f"data: {json.dumps({'type': 'error', 'code': 'INTERNAL_ERROR', 'error': '서버 오류가 발생했습니다.'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         generate(),

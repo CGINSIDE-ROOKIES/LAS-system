@@ -50,10 +50,8 @@ class RagResult:
     """run() 반환값. API 응답으로 직렬화한다."""
 
     answer: str
-    sources: list[dict[str, Any]]        # 중복 제거된 출처 목록
-    retrieved_docs: list[dict[str, Any]] # 컨텍스트에 사용된 문서 목록
-    law_context_status: str              # "ok" | "missing" | "supplemented"
-    law_context_added: bool
+    retrieved_docs: list[dict[str, Any]]  # 컨텍스트에 사용된 문서 목록
+    law_context_status: str               # "ok" | "missing" | "supplemented"
 
 
 # ── 프롬프트 빌더 ─────────────────────────────────────────────────────────────
@@ -193,24 +191,8 @@ class RagPipeline:
         answer: str,
         llm_rows: list[dict[str, Any]],
         law_context_status: str,
-        law_context_added: bool,
     ) -> RagResult:
         snippet_max = self._cfg.snippet_max_chars
-
-        seen: set[str] = set()
-        sources: list[dict[str, Any]] = []
-        for row in llm_rows:
-            source_id = str(row.get("source_id", "") or "")
-            if not source_id or source_id in seen:
-                continue
-            seen.add(source_id)
-            sources.append({
-                "source_id": source_id,
-                "rank": row.get("rank"),
-                "doc_type": str(row.get("doc_type", "") or ""),
-                "law_name": str(row.get("law_name", "") or ""),
-                "score": row.get("score"),
-            })
 
         retrieved_docs = [
             {
@@ -226,10 +208,8 @@ class RagPipeline:
 
         return RagResult(
             answer=answer,
-            sources=sources,
             retrieved_docs=retrieved_docs,
             law_context_status=law_context_status,
-            law_context_added=law_context_added,
         )
 
     def run(
@@ -251,7 +231,7 @@ class RagPipeline:
             law_context_status=law_context_status,
         )
         result = self._generation.generate(prompt, system_prompt=system_prompt)
-        return self._build_result(result.answer, llm_rows, law_context_status, law_context_added)
+        return self._build_result(result.answer, llm_rows, law_context_status)
 
     def stream(
         self,
@@ -260,9 +240,13 @@ class RagPipeline:
         system_prompt: str | None = DEFAULT_SYSTEM_PROMPT,
         doc_types: list[str] | None = None,
         law_names: list[str] | None = None,
-    ) -> Iterator[str]:
-        """검색 후 생성을 스트리밍으로 반환한다. 토큰 조각을 순차 yield한다."""
-        llm_rows, context_text, law_context_status, _ = self._retrieve(
+    ) -> tuple[RagResult, Iterator[str]]:
+        """검색 후 생성을 스트리밍으로 반환한다.
+
+        Returns:
+            (meta, chunks): meta는 sources 등 메타데이터, chunks는 토큰 조각 이터레이터.
+        """
+        llm_rows, context_text, law_context_status, law_context_added = self._retrieve(
             question, doc_types=doc_types, law_names=law_names
         )
         prompt = build_user_prompt_with_limit(
@@ -271,4 +255,5 @@ class RagPipeline:
             max_input_chars=self._cfg.max_input_chars,
             law_context_status=law_context_status,
         )
-        yield from self._generation.stream(prompt, system_prompt=system_prompt)
+        meta = self._build_result("", llm_rows, law_context_status)
+        return meta, self._generation.stream(prompt, system_prompt=system_prompt)
