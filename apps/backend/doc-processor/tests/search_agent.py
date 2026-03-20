@@ -205,8 +205,7 @@ search_graph = graph_builder.compile()
 if __name__ == "__main__":
     state = {"chat_history": []}
 
-    print("=== 노동법 검색 에이전트 ===")
-    print("종료하려면 'quit', 대화 초기화하려면 'clear' 입력\n")
+    print("commands: 'quit', 'clear'\n")
 
     while True:
         user_input = input("질문: ").strip()
