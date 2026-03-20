@@ -1,6 +1,8 @@
-# rag
+# rag-pipeline
 
-임베딩된 JSONL을 Qdrant/OpenSearch에 적재하고 retrieval 테스트를 수행하는 폴더.
+임베딩된 JSONL을 Qdrant/OpenSearch에 적재하고 retrieval/generation 테스트를 수행하는 폴더.
+
+`rag-pipeline` 패키지로 빌드되며, `apps/backend/api/`가 이 패키지를 라이브러리로 의존한다.
 
 ## 현재 상태
 - 인덱싱 파이프라인은 임시 운영 상태다.
@@ -20,6 +22,7 @@ docker compose ps
 3. 환경변수 로드
 ```bash
 cp .env.example .env   # 최초 1회
+# generate_answer.py / generator.py 사용 시 LLM 환경변수도 .env에 추가 (하단 참조)
 set -a && source .env && set +a
 ```
 4. (임시) 인덱싱 실행
@@ -103,6 +106,23 @@ uv run python cli/generate_answer.py --question "연장근로 최대 시간은?"
 - `source_id_raw`: 원본 source id
 - `source_id_normalized`: 중복 제거/병합 기준으로 사용한 정규화 source id
 - 운영/표시 권장: `source_id`(= normalized 우선), 디버깅 시 raw 함께 확인
+
+## LLM 환경변수 (generation CLI 사용 시)
+
+`generator.py` / `generate_answer.py` 실행 시 `.env`에 추가로 필요하다.
+
+```env
+# openai_compat (기본값)
+LLM_PROVIDER=openai_compat
+LLM_CHAT_COMPLETIONS_URL=http://...
+LLM_MODEL=...
+LLM_API_KEY=...
+
+# Gemini 사용 시
+# LLM_PROVIDER=gemini
+# GEMINI_API_KEY=...
+# GEMINI_MODEL=gemini-1.5-flash
+```
 
 ## 평가셋 기반 점검
 ```bash
