@@ -12,14 +12,12 @@ from .fusion import fuse_rrf
 from .opensearch import search_bm25
 from .qdrant import search_qdrant
 from .ranking import apply_law_boost, is_normative_query, rank_rows, select_llm_rows, select_rows_with_law_policy
-from .service import RetrievalConfig, RetrievalResult, RetrievalService
+from .service import RetrievalConfig
 
 __all__ = [
     "DEFAULT_EMBEDDING_MODEL",
     "RetrievalConfig",
     "RetrievalError",
-    "RetrievalResult",
-    "RetrievalService",
     "apply_law_boost",
     "build_llm_context_rows",
     "build_llm_context_text",

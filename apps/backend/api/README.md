@@ -15,8 +15,8 @@ Legal AI Assistant FastAPI 백엔드 서버.
 cd apps/backend/api
 cp ../rag/.env.example .env   # 최초 1회 — LLM 환경변수 추가 필요 (하단 참조)
 
-uv run dev      # 개발 서버 (--reload)
-uv run start    # 운영 서버
+uv run uvicorn main:app --reload                    # 개발 서버
+uv run uvicorn main:app --host 0.0.0.0 --port 8000  # 운영 서버
 ```
 
 ## 환경변수
