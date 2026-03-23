@@ -37,8 +37,8 @@ export function AppSidebar() {
               <Scale className="h-4 w-4 text-primary-foreground" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-sidebar-foreground">Legal AI</h2>
-              <p className="text-xs text-muted-foreground">법률 AI 어시스턴트</p>
+              <h2 className="text-sm font-semibold text-sidebar-foreground">AI 법무지원시스템</h2>
+              <p className="text-xs text-muted-foreground">법령 기반 AI 법무 지원</p>
             </div>
           </div>
         )}
