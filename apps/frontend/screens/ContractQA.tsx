@@ -30,6 +30,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { askStream, RetrievedDoc as ApiDoc } from "@/lib/api-client";
 import Link from "next/link";
 
 // Types
@@ -62,35 +63,21 @@ const sourceTypeConfig: Record<SourceType, { label: string; icon: typeof FileTex
   interpretation: { label: "해석례", icon: ExternalLink, className: "border-secondary-foreground/20 bg-secondary text-secondary-foreground" },
 };
 
-// Mock streaming simulation
-const mockResponses: Record<string, { content: string; sources: Source[]; followUps: string[] }> = {
-  default: {
-    content: `해당 계약서를 분석한 결과, 다음과 같은 답변을 드립니다.
-
-**제3조 (대금 지급)** 관련하여, 현재 계약서에는 대금 지급 시기가 "갑의 내부 결재 완료 후"로만 명시되어 있어 구체적인 지급일이 불분명합니다.
-
-### 관련 법률 검토
-
-하도급법 제13조에 따르면, 원사업자는 **목적물 수령일로부터 60일 이내**에 하도급대금을 지급하여야 합니다. 현재 조항은 이 기한을 준수하지 않을 가능성이 있습니다.
-
-### 권고사항
-
-1. 대금 지급 기한을 명확히 명시하세요 (예: 검수 완료일로부터 30일 이내)
-2. 지연 시 지연이자 조항을 추가하세요
-3. 분할 지급 시 각 단계별 지급 시기를 명시하세요`,
-    sources: [
-      { id: "s1", type: "contract", title: "제3조 (대금)", excerpt: "대금 지급 시기는 갑의 내부 결재 완료 후 지급하며, 구체적인 지급일은 별도로 정하지 아니한다." },
-      { id: "s2", type: "law", title: "하도급법", article: "제13조", excerpt: "원사업자가 수급사업자에게 목적물 등의 수령일부터 60일 이내의 가능한 짧은 기간으로 정한 지급기일까지 하도급대금을 지급하여야 한다." },
-      { id: "s3", type: "precedent", title: "대법원 2019다12345", excerpt: "지급기일을 정하지 아니한 경우에도 60일 이내 지급 의무가 있으며, 이를 위반한 경우 지연이자를 지급하여야 한다." },
-      { id: "s4", type: "interpretation", title: "공정위 해석례 제2023-15호", excerpt: "내부 결재 완료를 대금 지급 조건으로 하는 것은 하도급법 위반 소지가 있음." },
-    ],
-    followUps: [
-      "지연이자 조항은 어떻게 작성해야 하나요?",
-      "분할 지급 시 각 단계별 비율은 어떻게 정하나요?",
-      "대금 지급 관련 분쟁 시 구제 방법은?",
-    ],
-  },
+const DOC_TYPE_MAP: Record<string, SourceType> = {
+  contract: "contract",
+  law: "law",
+  precedent: "precedent",
+  interpretation: "interpretation",
 };
+
+function mapDocToSource(doc: ApiDoc): Source {
+  return {
+    id: doc.source_id,
+    type: DOC_TYPE_MAP[doc.doc_type] ?? "law",
+    title: doc.law_name,
+    excerpt: doc.snippet,
+  };
+}
 
 const initialMessages: ChatMessage[] = [
   {
@@ -116,6 +103,7 @@ const ContractQA = () => {
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const sourceRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const abortRef = useRef<AbortController | null>(null);
 
   const scrollToBottom = useCallback(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -125,37 +113,63 @@ const ContractQA = () => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  const simulateStream = useCallback(async (userQuestion: string) => {
-    const response = mockResponses.default;
-    const assistantId = `m${Date.now()}`;
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
 
+  const streamAnswer = useCallback(async (question: string) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const assistantId = `m${Date.now()}`;
     setMessages((prev) => [
       ...prev,
       { id: assistantId, role: "assistant", content: "", timestamp: new Date(), isStreaming: true },
     ]);
 
-    // Stream text character by character
-    const chars = response.content.split("");
-    for (let i = 0; i < chars.length; i++) {
-      await new Promise((r) => setTimeout(r, 8));
+    try {
+      for await (const event of askStream({ question }, controller.signal)) {
+        if (event.type === "chunk") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, content: m.content + event.content } : m
+            )
+          );
+          scrollToBottom();
+        } else if (event.type === "done") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, isStreaming: false, sources: event.retrieved_docs.map(mapDocToSource) }
+                : m
+            )
+          );
+          setActiveMessageId(assistantId);
+        } else if (event.type === "error") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, isStreaming: false, content: m.content || `오류가 발생했습니다: ${event.error}` }
+                : m
+            )
+          );
+          toast.error(event.error);
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return;
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === assistantId ? { ...m, content: response.content.slice(0, i + 1) } : m
+          m.id === assistantId
+            ? { ...m, isStreaming: false, content: m.content || "서버 오류가 발생했습니다." }
+            : m
         )
       );
-      if (i % 40 === 0) scrollToBottom();
+      toast.error("서버와 연결할 수 없습니다.");
+    } finally {
+      setIsStreaming(false);
     }
-
-    // Add sources and follow-ups
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === assistantId
-          ? { ...m, isStreaming: false, sources: response.sources, followUps: response.followUps }
-          : m
-      )
-    );
-    setActiveMessageId(assistantId);
-    setIsStreaming(false);
   }, [scrollToBottom]);
 
   const handleSend = useCallback(async () => {
@@ -173,8 +187,8 @@ const ContractQA = () => {
     setInput("");
     setIsStreaming(true);
 
-    await simulateStream(trimmed);
-  }, [input, isStreaming, simulateStream]);
+    await streamAnswer(trimmed);
+  }, [input, isStreaming, streamAnswer]);
 
   const handleFollowUp = useCallback((question: string) => {
     setInput(question);

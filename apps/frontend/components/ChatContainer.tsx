@@ -1,35 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { QuestionInput } from "./QuestionInput";
 import { MessageBubble, ChatMessage } from "./MessageBubble";
-
-const mockAnswer = {
-  summary:
-    "근로기준법 제17조에 따르면 근로계약서에는 임금, 소정근로시간, 휴일, 연차유급휴가 등의 사항을 반드시 명시해야 합니다.",
-  detail:
-    "사용자는 근로계약 체결 시 근로자에게 임금의 구성항목·계산방법·지급방법, 소정근로시간, 제55조에 따른 휴일, 제60조에 따른 연차 유급휴가에 관한 사항을 명시하여야 합니다. 또한 근로기준법 시행령에서 정하는 바에 따라 취업의 장소와 종사하여야 할 업무에 관한 사항도 포함되어야 합니다. 이를 위반할 경우 500만원 이하의 벌금에 처할 수 있습니다.",
-  citations: [
-    {
-      article: "근로기준법 제17조 (근로조건의 명시)",
-      content:
-        "① 사용자는 근로계약을 체결할 때에 근로자에게 다음 각 호의 사항을 명시하여야 한다. 근로계약 후 다음 각 호의 사항을 변경하는 경우에도 또한 같다.\n1. 임금\n2. 소정근로시간\n3. 제55조에 따른 휴일\n4. 제60조에 따른 연차 유급휴가",
-    },
-    {
-      article: "근로기준법 제114조 (벌칙)",
-      content:
-        "다음 각 호의 어느 하나에 해당하는 자는 500만원 이하의 벌금에 처한다. 1. 제17조를 위반한 자",
-    },
-  ],
-  references: [
-    "고용노동부 - 표준근로계약서 서식 가이드",
-    "대법원 2019다12345 판결 요지",
-    "근로기준법 시행령 제8조",
-  ],
-};
+import { askStream } from "@/lib/api-client";
 
 export function ChatContainer() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const abortRef = useRef<AbortController | null>(null);
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
@@ -41,49 +20,73 @@ export function ChatContainer() {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  const simulateStream = (userQuestion: string) => {
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
+
+  const streamAnswer = useCallback(async (userQuestion: string) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       role: "user",
       content: userQuestion,
     };
-
     const aiId = (Date.now() + 1).toString();
-    const aiMsg: ChatMessage = {
-      id: aiId,
-      role: "assistant",
-      content: "",
-      isStreaming: true,
-    };
+    const aiMsg: ChatMessage = { id: aiId, role: "assistant", content: "", isStreaming: true };
 
     setMessages((prev) => [...prev, userMsg, aiMsg]);
     setIsStreaming(true);
 
-    // Simulate streaming text
-    const streamText = mockAnswer.summary;
-    let index = 0;
-
-    const interval = setInterval(() => {
-      index += 2;
-      if (index >= streamText.length) {
-        clearInterval(interval);
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === aiId
-              ? { ...m, content: "", isStreaming: false, answerData: mockAnswer }
-              : m
-          )
-        );
-        setIsStreaming(false);
-      } else {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === aiId ? { ...m, content: streamText.slice(0, index) } : m
-          )
-        );
+    try {
+      for await (const event of askStream({ question: userQuestion }, controller.signal)) {
+        if (event.type === "chunk") {
+          setMessages((prev) =>
+            prev.map((m) => m.id === aiId ? { ...m, content: m.content + event.content } : m)
+          );
+          scrollToBottom();
+        } else if (event.type === "done") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === aiId
+                ? {
+                    ...m,
+                    content: "",
+                    isStreaming: false,
+                    answerData: {
+                      summary: m.content,
+                      detail: "",
+                      citations: event.retrieved_docs.map((doc) => ({
+                        article: doc.law_name,
+                        content: doc.snippet,
+                      })),
+                      references: [],
+                    },
+                  }
+                : m
+            )
+          );
+        } else if (event.type === "error") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === aiId ? { ...m, isStreaming: false, content: event.error } : m
+            )
+          );
+        }
       }
-    }, 30);
-  };
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === aiId ? { ...m, isStreaming: false, content: "서버 오류가 발생했습니다." } : m
+        )
+      );
+    } finally {
+      setIsStreaming(false);
+    }
+  }, [scrollToBottom]);
 
   const hasMessages = messages.length > 0;
 
@@ -125,7 +128,7 @@ export function ChatContainer() {
 
       {/* Input */}
       <div className="shrink-0 border-t border-border px-6 py-4">
-        <QuestionInput onSubmit={simulateStream} disabled={isStreaming} />
+        <QuestionInput onSubmit={streamAnswer} disabled={isStreaming} />
       </div>
     </div>
   );
