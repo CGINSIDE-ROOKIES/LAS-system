@@ -3,14 +3,13 @@ from pydantic import BaseModel, Field, ValidationError
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 
-from .las_types import IRGroup, DocumentState, IRGroupState
-
-from pathlib import Path
-from typing import Literal, cast
+from typing import Literal
 import re
 
-from .llms import midm as llm
-from .prompts import get_prompts
+from doc_processor.las_types import IRChunk, DocumentState, IRGroupState
+from doc_processor.llms import midm as llm
+from doc_processor.prompts import get_prompts
+from doc_processor.core.ir import ir_grouper
 
 prompts = get_prompts()
 
@@ -72,7 +71,24 @@ def document_reducer(state: DocumentState):
     # ir_groups_temp needs to be cleared!!! (or it'll accumulate)
     sorted_ir_groups = sorted(state.ir_groups_temp, key=lambda x: x[0])
     next_state = "prelim" if state.preprocess_state == "uncategorized" else "finished"
-    return {"ir_groups": [group for _, group in sorted_ir_groups], "ir_groups_temp": [], "preprocess_state": next_state}
+    groups = [group for _, group in sorted_ir_groups]
+
+    if next_state == "finished":
+        # Flatten all chunks back to an ordered dict (preserving document order)
+        # so ir_grouper can rebuild formatted_str and ir_join from the
+        # LLM-updated IRChunk.category values.
+        flat: dict[str, IRChunk] = {}
+        for group in groups:
+            for chunk_id, chunk in zip(group.ir_chunk_ids, group.ir_chunks):
+                # Clear article/paragraph numbering on non-조문 chunks so they
+                # don't pollute grouping (e.g. a 제목 chunk that was initially
+                # misdetected as 조문 would still carry stale article_n).
+                if chunk.category != "조문":
+                    chunk = chunk.model_copy(update={"article_n": [], "paragraph_n": []})
+                flat[chunk_id] = chunk
+        groups = ir_grouper(flat)
+
+    return {"ir_groups": groups, "ir_groups_temp": [], "preprocess_state": next_state}
 
 ###################################################################################################
 
@@ -128,6 +144,7 @@ def categorization_node_worker(state: IRGroupState):
             continue
         text = para_texts[key].strip()
         if not text:
+            para_categories[key] = "빈칸"
             continue
         messages = [
             ("system", prompts["categorization"]),

@@ -10,7 +10,7 @@ file_dirs_std_labor = list(Path("doc_samples/표준계약서모음(hwp-hwpx)").i
 file_dirs_std_contracts = list(Path("doc_samples/(노동)표준근로계약서모음").iterdir())
 file_dirs = file_dirs_std_labor + file_dirs_std_contracts
 
-[print(f"{i}. {f.name}") for i, f in enumerate(file_dirs)]
+[print(f"[{i}] {f.name}") for i, f in enumerate(file_dirs)]
 sel = int(input("select: "))
 file_path = file_dirs[sel]
 
