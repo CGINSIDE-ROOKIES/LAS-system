@@ -36,6 +36,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 @dataclass
 class EmbeddedDoc:

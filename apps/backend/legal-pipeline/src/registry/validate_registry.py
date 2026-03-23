@@ -22,12 +22,14 @@ RELATED_REQUIRED_ENDPOINTS = {
     "constitutional_list",
     "constitutional_detail",
     "interpretation_list",
+    "interpretation_detail",
     "admin_appeal_list",
     "admin_appeal_detail",
 }
 
 # 하위 호환
 REQUIRED_ENDPOINTS = LAW_REQUIRED_ENDPOINTS
+
 
 
 def validate_collection_scope(scope: dict[str, Any]) -> ValidationResult:
@@ -72,6 +74,7 @@ def validate_collection_scope(scope: dict[str, Any]) -> ValidationResult:
     return result
 
 
+
 def _get_required_endpoints(registry: dict[str, Any]) -> set[str]:
     registry_name = str(registry.get("registry_name") or "").strip()
 
@@ -81,40 +84,50 @@ def _get_required_endpoints(registry: dict[str, Any]) -> set[str]:
     return LAW_REQUIRED_ENDPOINTS
 
 
-def _validate_response_types(
-    result: ValidationResult,
-    path: str,
-    endpoint: dict[str, Any],
-    require_json_capable_for_enabled: bool,
-    allow_html_only_if_enabled_false: bool,
-) -> None:
-    enabled = bool(endpoint.get("enabled", False))
-    response_types = endpoint.get("response_types", [])
 
+def _normalize_response_types(response_types: Any) -> set[str] | None:
     if response_types is None:
-        response_types = []
-
+        return set()
     if not isinstance(response_types, list):
-        result.add_error(path, "'response_types' must be a list")
-        return
-
-    normalized = {
+        return None
+    return {
         str(item).strip().upper()
         for item in response_types
         if str(item).strip()
     }
 
-    if require_json_capable_for_enabled and enabled and "JSON" not in normalized:
+
+
+def _validate_response_types(
+    result: ValidationResult,
+    path: str,
+    endpoint_name: str,
+    endpoint: dict[str, Any],
+    require_json_capable_for_enabled: bool,
+    allow_html_only_if_enabled_false: bool,
+    enabled_html_only_whitelist: set[str],
+) -> None:
+    enabled = bool(endpoint.get("enabled", False))
+    normalized = _normalize_response_types(endpoint.get("response_types", []))
+
+    if normalized is None:
+        result.add_error(path, "'response_types' must be a list")
+        return
+
+    html_only_whitelisted = endpoint_name in enabled_html_only_whitelist and normalized == {"HTML"}
+
+    if require_json_capable_for_enabled and enabled and "JSON" not in normalized and not html_only_whitelisted:
         result.add_error(
             path,
             "Enabled endpoint must support JSON response",
         )
 
-    if allow_html_only_if_enabled_false and enabled and normalized == {"HTML"}:
+    if allow_html_only_if_enabled_false and enabled and normalized == {"HTML"} and not html_only_whitelisted:
         result.add_error(
             path,
             "Enabled endpoint cannot be HTML-only",
         )
+
 
 
 def validate_endpoint_registry(registry: dict[str, Any]) -> ValidationResult:
@@ -140,6 +153,11 @@ def validate_endpoint_registry(registry: dict[str, Any]) -> ValidationResult:
     allow_html_only_if_enabled_false = bool(
         validation.get("allow_html_only_if_enabled_false", True)
     )
+    enabled_html_only_whitelist = {
+        str(item).strip()
+        for item in validation.get("enabled_html_only_whitelist", [])
+        if str(item).strip()
+    }
 
     required_endpoints = _get_required_endpoints(registry)
 
@@ -159,12 +177,12 @@ def validate_endpoint_registry(registry: dict[str, Any]) -> ValidationResult:
 
         enabled = bool(endpoint.get("enabled", False))
 
-        if "path" not in endpoint:
-            result.add_error(path, "Missing 'path'")
-
         # disabled optional endpoint는 최소 구조만 허용
         if not enabled and name not in required_endpoints:
             continue
+
+        if "path" not in endpoint:
+            result.add_error(path, "Missing 'path'")
 
         if "target" not in endpoint:
             result.add_error(path, "Missing 'target'")
@@ -177,9 +195,11 @@ def validate_endpoint_registry(registry: dict[str, Any]) -> ValidationResult:
         _validate_response_types(
             result=result,
             path=path,
+            endpoint_name=name,
             endpoint=endpoint,
             require_json_capable_for_enabled=require_json_capable_for_enabled,
             allow_html_only_if_enabled_false=allow_html_only_if_enabled_false,
+            enabled_html_only_whitelist=enabled_html_only_whitelist,
         )
 
     return result

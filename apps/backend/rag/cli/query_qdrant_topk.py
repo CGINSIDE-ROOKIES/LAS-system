@@ -17,6 +17,10 @@ import json
 import os
 import sys
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from retrieval_common import (
     DEFAULT_EMBEDDING_MODEL,
     RetrievalError,

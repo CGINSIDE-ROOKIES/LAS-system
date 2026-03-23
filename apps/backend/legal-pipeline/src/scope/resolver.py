@@ -5,8 +5,14 @@ from typing import Any
 
 from src.collector.law_body_collector import (
     build_law_ref_from_search_item,
+    
     get_law_items_from_search,
 )
+from src.common.law_meta import (
+    normalize_classified_level,
+    normalize_kind_name,
+)
+
 from src.scope.system_diagram_parser import collect_descendant_law_refs
 
 
@@ -108,7 +114,8 @@ def _select_family_refs_from_system_diagram(
                 enriched = _merge_ref(enriched, candidate)
                 break
 
-        classified_level = classify_law_level(str(enriched.get("kind_name") or ""))
+        enriched["kind_name"] = normalize_kind_name(enriched.get("kind_name"))
+        classified_level = classify_law_level(enriched.get("kind_name"))
         if not is_allowed_level(classified_level, allowed_levels):
             continue
 
@@ -139,7 +146,7 @@ def _select_family_refs_from_name_search(
     for item in items:
         ref = build_law_ref_from_search_item(item)
         law_name = str(ref.get("law_name") or "")
-        kind_name = str(ref.get("kind_name") or "")
+        kind_name = normalize_kind_name(ref.get("kind_name"))
 
         if normalized_root not in _normalize_name(law_name):
             continue
@@ -148,8 +155,8 @@ def _select_family_refs_from_name_search(
         if not is_allowed_level(classified_level, allowed_levels):
             continue
 
+        ref["kind_name"] = kind_name
         ref["classified_level"] = classified_level
-        ref["scope_source"] = "search_name_match"
 
         dedup_key = _dedup_key(ref)
         if dedup_key in seen:

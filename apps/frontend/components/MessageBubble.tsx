@@ -8,7 +8,7 @@ export interface ChatMessage {
   isStreaming?: boolean;
   answerData?: {
     summary: string;
-    detail: string;
+    detail?: string;
     citations: { article: string; content: string }[];
     references: string[];
   };

@@ -15,6 +15,10 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from apps.backend.rag.cli.query_hybrid_rrf import fuse_rrf
 from apps.backend.rag.cli.retrieval_common import (
     DEFAULT_EMBEDDING_MODEL,

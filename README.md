@@ -14,7 +14,8 @@ AI 기반 법무지원 시스템 프로젝트입니다.
 ## Monorepo Structure
 
 - `apps/frontend`: Next.js 기반 프론트엔드 앱
-- `apps/backend`: Python 백엔드 앱
+- `apps/backend/api`: FastAPI 백엔드 서버
+- `apps/backend/rag`: RAG 파이프라인 패키지 (retrieval + generation)
 - `packages/ui`: 프론트 공유 UI 컴포넌트
 - `packages/eslint-config`: 프론트 공유 ESLint 설정
 - `packages/tsconfig`: 프론트 공유 TypeScript 설정
@@ -64,7 +65,8 @@ AI 기반 법무지원 시스템 프로젝트입니다.
 ## Docs
 
 - 프론트 로컬 실행/개발 가이드: `apps/frontend/README.md`
-- 백엔드 안내: `apps/backend/README.md`
+- API 서버 실행/엔드포인트: `apps/backend/api/README.md`
+- RAG 파이프라인 CLI/인덱싱: `apps/backend/rag/README.md`
 
 ## Quick Start
 
@@ -80,7 +82,15 @@ pnpm --filter @las/frontend dev
 
 ### Backend
 
+Docker 스토어(Qdrant/OpenSearch) 실행 후 API 서버를 시작한다.
+
 ```bash
-cd /home/user/projects/LAS-system/apps/backend
-uv run main.py
+cd apps/backend/rag
+docker compose up -d
+
+cd ../api
+cp ../rag/.env.example .env   # 최초 1회 — LLM 환경변수 추가 필요
+uv run dev
 ```
+
+상세 설정은 `apps/backend/api/README.md` 참조.
