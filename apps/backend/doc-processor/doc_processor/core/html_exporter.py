@@ -82,24 +82,32 @@ def _apply_highlights(
     if not intervals:
         return escape(text)
 
-    # Sort by start, then by end (descending) for nesting
-    intervals.sort(key=lambda x: (x[0], -x[1]))
+    # Sweep-line: collect all breakpoints, then render each segment with all
+    # active intervals merged — handles identical spans, nested spans, and
+    # partial overlaps without duplicating text.
+    breakpoints = sorted({0, len(text)} | {ls for ls, _, _, _ in intervals} | {le for _, le, _, _ in intervals})
 
-    # Build output by walking through the text
     parts: list[str] = []
-    pos = 0
-    for ls, le, color, label in intervals:
-        if ls > pos:
-            parts.append(escape(text[pos:ls]))
-        title_attr = f' title="{escape(label)}"' if label else ""
-        parts.append(
-            f'<mark style="background-color:{escape(color)};padding:1px 2px;border-radius:2px"{title_attr}>'
-            f"{escape(text[ls:le])}</mark>"
-        )
-        pos = max(pos, le)
+    for i in range(len(breakpoints) - 1):
+        seg_s = breakpoints[i]
+        seg_e = breakpoints[i + 1]
+        seg_text = text[seg_s:seg_e]
+        if not seg_text:
+            continue
 
-    if pos < len(text):
-        parts.append(escape(text[pos:]))
+        active = [(color, label) for ls, le, color, label in intervals if ls <= seg_s and le >= seg_e]
+        escaped = escape(seg_text)
+        if not active:
+            parts.append(escaped)
+        else:
+            color = active[0][0]
+            labels = [lbl for _, lbl in active if lbl]
+            combined_label = "\n".join(labels)
+            title_attr = f' data-label="{escape(combined_label)}"' if combined_label else ""
+            parts.append(
+                f'<mark style="background-color:{escape(color)};padding:1px 2px;border-radius:2px"{title_attr}>'
+                f"{escaped}</mark>"
+            )
 
     return "".join(parts)
 
@@ -403,11 +411,42 @@ def export_html(
     padding: 1px 2px;
     border-radius: 2px;
   }}
+  #_tooltip {{
+    position: fixed;
+    background: rgba(30,30,30,0.88);
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    pointer-events: none;
+    white-space: pre-wrap;
+    opacity: 0;
+    transition: opacity 0.1s;
+    z-index: 9999;
+  }}
 
 </style>
 </head>
 <body>
 {body}
+<script>
+  const tip = document.createElement('div');
+  tip.id = '_tooltip';
+  document.body.appendChild(tip);
+  document.addEventListener('mousemove', e => {{
+    tip.style.left = (e.clientX + 12) + 'px';
+    tip.style.top  = (e.clientY + 12) + 'px';
+  }});
+  document.querySelectorAll('mark[data-label]').forEach(el => {{
+    el.addEventListener('mouseenter', () => {{
+      tip.textContent = el.dataset.label;
+      tip.style.opacity = '1';
+    }});
+    el.addEventListener('mouseleave', () => {{
+      tip.style.opacity = '0';
+    }});
+  }});
+</script>
 </body>
 </html>
 """

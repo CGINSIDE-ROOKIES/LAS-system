@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field, ValidationError
+from langchain_core.exceptions import OutputParserException
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
@@ -44,9 +45,9 @@ class TextCategorization(BaseModel):
 ###################################################################################################
 
 prelim_categorizer_llm = llm.with_structured_output(TextPrelimCategorization, method="json_mode") \
-    .with_retry(retry_if_exception_type=(ValidationError, ValueError), stop_after_attempt=3)
+    .with_retry(retry_if_exception_type=(ValidationError, ValueError, OutputParserException), stop_after_attempt=3)
 categorizer_llm = llm.with_structured_output(TextCategorization, method="json_mode") \
-    .with_retry(retry_if_exception_type=(ValidationError, ValueError), stop_after_attempt=3)
+    .with_retry(retry_if_exception_type=(ValidationError, ValueError, OutputParserException), stop_after_attempt=3)
 
 BYPASS_PRELIM = False
 
@@ -109,7 +110,13 @@ def prelim_categorization_node_worker(state: IRGroupState):
         ("user", state.ir_group.formatted_str)
     ]
     print(f"\n--- LLM INPUT (group {state.group_idx})")
-    reply = TextPrelimCategorization.model_validate(prelim_categorizer_llm.invoke(messages))
+    try:
+        reply = TextPrelimCategorization.model_validate(prelim_categorizer_llm.invoke(messages))
+    except (ValidationError, OutputParserException) as e:
+        # Prelim is just a filter — defaulting to "uncategorized" is safe,
+        # it just means this group goes to the detailed categorization pass.
+        print(f"\n--- PRELIM FALLBACK (group {state.group_idx}) → uncategorized (LLM failed: {e!r})\n")
+        return {"ir_groups_temp": [(state.group_idx, state.ir_group)]}
     print(f"\n--- LLM OUTPUT (group {state.group_idx}) ---\n{reply!r}\n")
 
 

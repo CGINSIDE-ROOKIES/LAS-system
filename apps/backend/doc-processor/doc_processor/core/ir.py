@@ -44,8 +44,14 @@ def _normalize_enclosed_numbers(text: str) -> str:
     )
 
 
-def get_article_numbers(text: str) -> list[NumberMatch]:
-    """Extract article heading markers like '제N조' from *text*."""
+def get_article_numbers(text: str, allow_fallback: bool = True) -> list[NumberMatch]:
+    """Extract article heading markers like '제N조' from *text*.
+
+    When *allow_fallback* is False the ``N.`` line-start pattern is suppressed.
+    This should be set to False when the document is known to use ``제N조``
+    style (determined by a pre-scan), so that ``1. 2. 3.`` paragraph numbering
+    is not misdetected as article boundaries.
+    """
     pattern = r"제\s*(\d+)\s*조"
     results: list[NumberMatch] = []
     postposition_chars = set("에의을를은는이가와과로도만")
@@ -66,7 +72,7 @@ def get_article_numbers(text: str) -> list[NumberMatch]:
         if preceded_like_heading or (start == 0) or followed_like_heading:
             results.append(NumberMatch(val=match.group(1), span=match.span()))
 
-    if len(results) <= 0:
+    if allow_fallback and len(results) <= 0:
         fallback_pattern = r"^\s*(\d+)\.\s"
         fallback: list[NumberMatch] = [
             NumberMatch(val=m.group(1), span=m.span())
@@ -116,8 +122,12 @@ def create_ir_dict_from_mapping(parsed: dict[str, str]) -> dict[str, IRChunk]:
     irs: dict[str, IRChunk] = {}
     active_article_num: str = "-1"
     active_paragraph_num: str | None = None
-    _primary_found = False
-    _fallback_found = False
+
+    # Pre-scan: determine document-level article numbering style.
+    # If 제N조 exists anywhere, disable the N. fallback so paragraph
+    # numbering like "1. 2. 3." is not misdetected as article boundaries.
+    _has_primary = any(re.search(r"제\s*\d+\s*조", text) for text in parsed.values())
+    _allow_fallback = not _has_primary
 
     for id, text in parsed.items():
         detected_article_nums: list[str] = []
@@ -125,12 +135,7 @@ def create_ir_dict_from_mapping(parsed: dict[str, str]) -> dict[str, IRChunk]:
         splits: list[tuple[int, int]] = []
         section = "uncategorized-table" if "tbl" in id else "uncategorized"
 
-        ex_article = get_article_numbers(text)
-        if ex_article:
-            if re.search(r"제\s*\d+\s*조", text):
-                _primary_found = True
-            else:
-                _fallback_found = True
+        ex_article = get_article_numbers(text, allow_fallback=_allow_fallback)
         for match in ex_article:
             detected_article_nums.append(match.val)
             splits.append(match.span)
@@ -174,10 +179,12 @@ def create_ir_dict_from_mapping(parsed: dict[str, str]) -> dict[str, IRChunk]:
             active_article_num = detected_article_nums[-1]
             active_paragraph_num = None
 
-    if _fallback_found and not _primary_found:
-        logger.warning("create_ir_dict_from_mapping: 제N조 pattern not found; used fallback 'N.' pattern")
-    elif not _primary_found and not _fallback_found:
-        logger.warning("create_ir_dict_from_mapping: no article numbers found by either pattern")
+    if _allow_fallback:
+        _has_fallback = any(ir.article_n and ir.article_n != ["-1"] for ir in irs.values())
+        if _has_fallback:
+            logger.warning("create_ir_dict_from_mapping: 제N조 pattern not found; used fallback 'N.' pattern")
+        else:
+            logger.warning("create_ir_dict_from_mapping: no article numbers found by either pattern")
 
     return irs
 
