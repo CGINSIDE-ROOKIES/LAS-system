@@ -871,7 +871,7 @@ def _build_related_doc_records_from_text(
     return records
 
 
-def build_related_doc_records(
+def _build_related_doc_records_legacy(
     raw_related_base_dir: str | Path = "data/raw/02_related_legal_docs",
     max_chars: int = 1200,
     overlap: int = 150,
@@ -967,7 +967,7 @@ def build_related_doc_records(
     return records
 
 
-def build_relation_records(
+def _build_relation_records_legacy(
     expanded_base_dir: str | Path = "data/expanded/03_expanded_related_docs",
 ) -> list[dict[str, Any]]:
     base_dir = Path(expanded_base_dir)
@@ -1010,6 +1010,47 @@ def build_relation_records(
     return records
 
 
+def build_related_doc_records(
+    raw_related_base_dir: str | Path = "data/raw/02_related_legal_docs",
+    max_chars: int = 1200,
+    overlap: int = 150,
+) -> list[dict[str, Any]]:
+    from src.export.legal_case_dataset_builder import build_legal_case_records
+
+    records = build_legal_case_records(
+        raw_related_base_dir=raw_related_base_dir,
+        max_chars=max_chars,
+        overlap=overlap,
+    )
+    if records:
+        return records
+
+    return _build_related_doc_records_legacy(
+        raw_related_base_dir=raw_related_base_dir,
+        max_chars=max_chars,
+        overlap=overlap,
+    )
+
+
+
+def build_relation_records(
+    raw_related_base_dir: str | Path = "data/raw/02_related_legal_docs",
+    expanded_base_dir: str | Path = "data/expanded/03_expanded_related_docs",
+) -> list[dict[str, Any]]:
+    from src.export.legal_relation_builder import build_legal_relation_records
+
+    records = build_legal_relation_records(
+        expanded_base_dir=expanded_base_dir,
+        raw_related_base_dir=raw_related_base_dir,
+    )
+    if records:
+        return records
+
+    return _build_relation_records_legacy(
+        expanded_base_dir=expanded_base_dir,
+    )
+
+
 def build_and_write_datasets(
     normalized_base_dir: str | Path = "data/normalized/01_current_law",
     raw_related_base_dir: str | Path = "data/raw/02_related_legal_docs",
@@ -1023,7 +1064,7 @@ def build_and_write_datasets(
     include_non_searchable_law_parts: bool = False,
     normalized_appendix_base_dir: str | Path | None = None,
     normalized_appendix_asset_base_dir: str | Path | None = None,
-    merge_appendices_into_law_article: bool = False,
+    merge_appendices_into_law_article: bool = True,
     include_appendix_bundle_text_in_payload: bool = True,
     write_legacy_appendix_datasets: bool = True,
 ) -> dict[str, Any]:
@@ -1044,6 +1085,7 @@ def build_and_write_datasets(
         overlap=overlap,
     )
     relation_records = build_relation_records(
+        raw_related_base_dir=raw_related_base_dir,
         expanded_base_dir=expanded_base_dir,
     )
 

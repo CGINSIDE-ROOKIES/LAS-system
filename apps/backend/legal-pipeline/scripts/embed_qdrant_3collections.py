@@ -97,9 +97,9 @@ def _iter_collection_rows(dataset_dir: Path, collection_name: str) -> Iterator[d
 
 
 def _canonical_id_from_row(row: dict) -> str:
-    value = row.get("id")
+    value = row.get("canonical_id") or row.get("canonical_case_id") or row.get("id")
     if value in (None, ""):
-        raise ValueError("row.id is required")
+        raise ValueError("row.id or canonical_id is required")
     return str(value)
 
 
@@ -160,9 +160,11 @@ def _scan_collection(dataset_dir: Path, collection_name: str) -> dict:
 
 def _build_meta(collection_name: str, row: dict, point_id: str, text: str) -> dict:
     doc_type = row.get("doc_type")
+    canonical_id = _canonical_id_from_row(row)
     meta = {
         "id": row.get("id"),
-        "canonical_id": row.get("id"),
+        "canonical_id": canonical_id,
+        "canonical_case_id": row.get("canonical_case_id"),
         "_point_id": point_id,
         "collection_name": collection_name,
         "doc_type": doc_type,
@@ -193,6 +195,14 @@ def _build_meta(collection_name: str, row: dict, point_id: str, text: str) -> di
         "doc_kind": row.get("doc_kind"),
         "detail_link": row.get("detail_link"),
         "target": row.get("target"),
+        "decision_date": row.get("decision_date"),
+        "law_uid": row.get("law_uid"),
+        "source_law_uid": row.get("source_law_uid"),
+        "root_law_uid": row.get("root_law_uid"),
+        "article_keys": row.get("article_keys"),
+        "article_no_displays": row.get("article_no_displays"),
+        "relation_confidence": row.get("relation_confidence"),
+        "source_hit_count": row.get("source_hit_count"),
         "source_file_path": row.get("source_file_path"),
         "chunk_index": row.get("chunk_index"),
         "text_len": len(text),
