@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { QuestionInput } from "./QuestionInput";
 import { MessageBubble, ChatMessage } from "./MessageBubble";
 import { askStream } from "@/lib/api-client";
+import { ERROR_MESSAGES } from "@/lib/errors";
 
 export function ChatContainer() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -28,6 +29,7 @@ export function ChatContainer() {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    const timeoutId = setTimeout(() => controller.abort("timeout"), 60_000);
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -77,13 +79,23 @@ export function ChatContainer() {
         }
       }
     } catch (err) {
-      if ((err as Error).name === "AbortError") return;
+      const error = err as Error;
+      if (error.name === "AbortError" && error.message !== "timeout") return;
+
+      const errorContent =
+        error.message === "timeout"
+          ? ERROR_MESSAGES.TIMEOUT
+          : error.name === "TypeError"
+          ? ERROR_MESSAGES.NETWORK
+          : ERROR_MESSAGES.SERVER;
+
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === aiId ? { ...m, isStreaming: false, content: "서버 오류가 발생했습니다." } : m
+          m.id === aiId ? { ...m, isStreaming: false, content: errorContent } : m
         )
       );
     } finally {
+      clearTimeout(timeoutId);
       setIsStreaming(false);
     }
   }, [scrollToBottom]);

@@ -19,6 +19,10 @@ const nextConfig = {
             key: "Content-Security-Policy",
             value: `frame-ancestors ${frameAncestors}`,
           },
+          {
+            key: "X-Content-Type-Options",
+            value: "nosniff",
+          },
         ],
       },
     ];
