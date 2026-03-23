@@ -3,13 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from src.common.io_utils import _safe_filename, _write_json
+from src.common.io_utils import (
+    _iter_jsonl,
+    _safe_filename,
+    _write_json,
+    _write_jsonl,
+)
+from src.common.law_meta import build_law_uid, normalize_identifier_token
 from src.common.payload_utils import (
     _ensure_success_payload,
     _first_non_empty,
     _walk_objects,
 )
-from src.core.http_client import execute_json_request
+from src.core.http_client import execute_api_request, execute_json_request
 from src.core.request_builder import build_request
 from src.scope.resolver import is_allowed_level
 
@@ -26,7 +32,7 @@ TARGET_CONFIGS = {
     },
     "expc": {
         "list_endpoint": "interpretation_list",
-        "detail_endpoint": None,
+        "detail_endpoint": "interpretation_detail",
     },
     "decc": {
         "list_endpoint": "admin_appeal_list",
@@ -43,7 +49,7 @@ DOC_TYPE_LABELS = {
 }
 
 ID_KEYS_BY_TARGET = {
-    "prec": ("판례일련번호",),
+    "prec": ("판례일련번호", "판례정보일련번호"),
     "detc": ("헌재결정례일련번호",),
     "expc": ("법령해석례일련번호",),
     "decc": ("행정심판재결례일련번호", "행정심판례일련번호"),
@@ -105,6 +111,7 @@ def get_related_output_config(
     raise KeyError(f"Output config not found for file_id='{file_id}'")
 
 
+
 def get_configured_doc_types(
     scope: dict[str, Any],
     file_id: str = RELATED_OUTPUT_FILE_ID,
@@ -114,6 +121,7 @@ def get_configured_doc_types(
     if not isinstance(doc_types, list):
         raise ValueError("doc_types must be a list")
     return [str(item).strip() for item in doc_types if str(item).strip()]
+
 
 
 def get_configured_include_law_family_levels(
@@ -127,6 +135,7 @@ def get_configured_include_law_family_levels(
     return {str(item).strip() for item in levels if str(item).strip()}
 
 
+
 def get_configured_exclude_doc_kinds(
     scope: dict[str, Any],
     file_id: str = RELATED_OUTPUT_FILE_ID,
@@ -136,6 +145,7 @@ def get_configured_exclude_doc_kinds(
     if not isinstance(excluded, list):
         raise ValueError("exclude_doc_kinds must be a list")
     return {str(item).strip() for item in excluded if str(item).strip()}
+
 
 
 def _get_registry_endpoint(registry: dict[str, Any], endpoint_key: str | None) -> dict[str, Any] | None:
@@ -151,6 +161,7 @@ def _get_registry_endpoint(registry: dict[str, Any], endpoint_key: str | None) -
         return None
 
     return endpoint
+
 
 
 def resolve_selected_targets(
@@ -191,6 +202,7 @@ def resolve_selected_targets(
     return selected, skipped
 
 
+
 def _looks_like_item(target: str, obj: dict[str, Any]) -> bool:
     doc_id = _first_non_empty(obj, *ID_KEYS_BY_TARGET[target])
     if doc_id not in (None, ""):
@@ -208,6 +220,7 @@ def _looks_like_item(target: str, obj: dict[str, Any]) -> bool:
         return True
 
     return False
+
 
 
 def get_family_law_entries(
@@ -239,6 +252,7 @@ def get_family_law_entries(
     return results
 
 
+
 def build_search_params(
     target: str,
     law_name: str,
@@ -263,6 +277,7 @@ def build_search_params(
     raise ValueError(f"Unsupported target: {target}")
 
 
+
 def fetch_list_page(
     registry: dict[str, Any],
     oc: str,
@@ -283,6 +298,7 @@ def fetch_list_page(
     payload = execute_json_request(request)
     _ensure_success_payload(endpoint_key, payload)
     return payload
+
 
 
 def extract_list_items(payload: dict[str, Any], target: str) -> list[dict[str, Any]]:
@@ -315,6 +331,7 @@ def extract_list_items(payload: dict[str, Any], target: str) -> list[dict[str, A
     return items
 
 
+
 def _detect_doc_kind(item: dict[str, Any]) -> str | None:
     direct = _first_non_empty(item, *DOC_KIND_KEYS)
     if direct not in (None, ""):
@@ -330,6 +347,7 @@ def _detect_doc_kind(item: dict[str, Any]) -> str | None:
     return None
 
 
+
 def should_exclude_doc_item(item: dict[str, Any], exclude_doc_kinds: set[str]) -> bool:
     if not exclude_doc_kinds:
         return False
@@ -339,6 +357,7 @@ def should_exclude_doc_item(item: dict[str, Any], exclude_doc_kinds: set[str]) -
         return False
 
     return any(kind in doc_kind for kind in exclude_doc_kinds)
+
 
 
 def build_doc_ref(
@@ -362,6 +381,87 @@ def build_doc_ref(
         "doc_kind": str(doc_kind) if doc_kind is not None else None,
         "raw_item": item,
     }
+
+
+
+def build_canonical_case_id(
+    target: str,
+    doc_id: Any,
+    doc_number: Any = None,
+    title: Any = None,
+) -> str:
+    primary = doc_id or doc_number or title or "unknown"
+    return "::".join(
+        [
+            "case",
+            normalize_identifier_token(target),
+            normalize_identifier_token(primary),
+        ]
+    )
+
+
+
+def _build_candidate_hit_id(
+    root_law_name: str,
+    source_law_name: str,
+    target: str,
+    ref: dict[str, Any],
+    hit_rank: int,
+) -> str:
+    primary = ref.get("doc_id") or ref.get("doc_number") or ref.get("title") or hit_rank
+    return "::".join(
+        [
+            "candidate",
+            normalize_identifier_token(root_law_name),
+            normalize_identifier_token(source_law_name),
+            normalize_identifier_token(target),
+            normalize_identifier_token(primary),
+            str(hit_rank),
+        ]
+    )
+
+
+
+def build_candidate_hit(
+    *,
+    root_law_name: str,
+    law_entry: dict[str, Any],
+    target: str,
+    ref: dict[str, Any],
+    source_file_path: str,
+    hit_rank: int,
+) -> dict[str, Any]:
+    source_law_name = str(law_entry.get("law_name") or ref.get("related_law_name") or "").strip()
+    doc_id = ref.get("doc_id")
+    title = ref.get("title")
+    doc_number = ref.get("doc_number")
+    canonical_case_id = build_canonical_case_id(target, doc_id, doc_number, title)
+    source_law_uid = build_law_uid(law_entry.get("law_id"), law_entry.get("mst"), source_law_name)
+    root_law_uid = build_law_uid(None, None, root_law_name)
+
+    return {
+        "id": _build_candidate_hit_id(root_law_name, source_law_name, target, ref, hit_rank),
+        "candidate_id": _build_candidate_hit_id(root_law_name, source_law_name, target, ref, hit_rank),
+        "canonical_case_id": canonical_case_id,
+        "canonical_id": canonical_case_id,
+        "root_law_name": root_law_name,
+        "root_law_uid": root_law_uid,
+        "source_law_name": source_law_name,
+        "source_law_uid": source_law_uid,
+        "source_law_level": law_entry.get("classified_level"),
+        "target": target,
+        "doc_type_label": DOC_TYPE_LABELS[target],
+        "doc_id": str(doc_id) if doc_id not in (None, "") else None,
+        "title": str(title) if title not in (None, "") else None,
+        "doc_number": str(doc_number) if doc_number not in (None, "") else None,
+        "doc_kind": ref.get("doc_kind"),
+        "detail_link": ref.get("detail_link"),
+        "matched_query_law_name": source_law_name,
+        "search_param_type": "JO" if target == "prec" else "query",
+        "hit_rank": hit_rank,
+        "source_file_path": source_file_path,
+    }
+
 
 
 def collect_list_refs_for_law_name(
@@ -389,12 +489,11 @@ def collect_list_refs_for_law_name(
             display=display,
         )
 
+        list_path: Path | None = None
         if save_dir is not None:
             stem = _safe_filename(law_name)
-            _write_json(
-                Path(save_dir) / f"{stem}__{target}__page_{page}__list.json",
-                payload,
-            )
+            list_path = Path(save_dir) / f"{stem}__{target}__page_{page}__list.json"
+            _write_json(list_path, payload)
 
         items = extract_list_items(payload, target)
         if not items:
@@ -406,6 +505,8 @@ def collect_list_refs_for_law_name(
                 continue
 
             ref = build_doc_ref(target, law_name, item)
+            if list_path is not None:
+                ref["source_file_path"] = str(list_path)
             dedup_key = (
                 str(ref.get("doc_id") or ""),
                 str(ref.get("title") or ""),
@@ -421,6 +522,42 @@ def collect_list_refs_for_law_name(
             break
 
     return refs, filtered_out
+
+
+
+def _serialize_detail_response(result: dict[str, Any], target: str, ref: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "_response_format": result["format"],
+        "_response_content_type": result["content_type"],
+        "_response_url": result["url"],
+        "_target": target,
+        "_doc_ref": {
+            "doc_id": ref.get("doc_id"),
+            "title": ref.get("title"),
+            "doc_number": ref.get("doc_number"),
+            "detail_link": ref.get("detail_link"),
+        },
+    }
+
+    parsed = result.get("parsed")
+    if result["format"] in {"json", "xml"} and isinstance(parsed, dict):
+        payload.update(parsed)
+        return payload
+
+    if result["format"] == "html" and isinstance(parsed, dict):
+        html = parsed.get("html")
+        text = parsed.get("text")
+        if html not in (None, ""):
+            payload["html"] = str(html)
+        if text not in (None, ""):
+            payload["text"] = str(text)
+        return payload
+
+    text = result.get("text")
+    if text not in (None, ""):
+        payload["text"] = str(text)
+    return payload
+
 
 
 def fetch_detail_by_ref(
@@ -449,19 +586,20 @@ def fetch_detail_by_ref(
             "ID": str(doc_id),
         },
     )
-    payload = execute_json_request(request)
-    _ensure_success_payload(endpoint_key, payload)
-    return payload
+    result = execute_api_request(request)
+    if result["format"] == "json" and isinstance(result.get("parsed"), dict):
+        _ensure_success_payload(endpoint_key, result["parsed"])
+    return _serialize_detail_response(result, target, ref)
 
 
-def collect_related_docs_for_family_result(
+
+def collect_related_doc_candidates_for_family_result(
     registry: dict[str, Any],
     oc: str,
     family_result: dict[str, Any],
     scope: dict[str, Any] | None = None,
     targets: list[str] | None = None,
     max_pages_per_target: int = 1,
-    detail_limit_per_target: int = 2,
     base_dir: str | Path = "data/raw/02_related_legal_docs",
 ) -> dict[str, Any]:
     selected_targets, skipped_targets = resolve_selected_targets(scope, registry, targets)
@@ -484,10 +622,7 @@ def collect_related_docs_for_family_result(
     family_law_names = [str(item.get("law_name") or "").strip() for item in family_law_entries]
 
     root_dir = Path(base_dir) / _safe_filename(root_law_name)
-    seen_detail_ids: dict[str, set[str]] = {target: set() for target in selected_targets}
-    remaining_budget: dict[str, int] = {
-        target: detail_limit_per_target for target in selected_targets
-    }
+    candidate_hits: list[dict[str, Any]] = []
 
     result = {
         "root_law_name": root_law_name,
@@ -499,20 +634,23 @@ def collect_related_docs_for_family_result(
             "include_law_family_levels": sorted(allowed_levels),
             "exclude_doc_kinds": sorted(exclude_doc_kinds),
         },
+        "candidate_hits_path": str(root_dir / "candidate_hits.jsonl"),
+        "candidate_count": 0,
+        "unique_case_count": 0,
         "targets": {},
         "errors": [],
     }
 
     for target in selected_targets:
-        detail_endpoint = TARGET_CONFIGS[target]["detail_endpoint"]
-        detail_endpoint_enabled = bool(
-            detail_endpoint and (_get_registry_endpoint(registry, detail_endpoint) or {}).get("enabled", False)
-        )
+        unique_case_ids: set[str] = set()
         target_summary = {
             "list_item_count": 0,
             "filtered_out_count": 0,
-            "detail_count": 0,
-            "detail_supported": detail_endpoint_enabled,
+            "candidate_count": 0,
+            "unique_case_count": 0,
+            "detail_supported": bool(
+                (_get_registry_endpoint(registry, TARGET_CONFIGS[target]["detail_endpoint"]) or {}).get("enabled", False)
+            ),
             "searched_law_count": 0,
         }
 
@@ -545,56 +683,107 @@ def collect_related_docs_for_family_result(
                 )
                 continue
 
-            target_summary["list_item_count"] += len(refs)
             target_summary["filtered_out_count"] += filtered_out
+            target_summary["list_item_count"] += len(refs)
 
-            if not detail_endpoint_enabled or remaining_budget[target] <= 0:
-                continue
-
-            for ref in refs:
-                doc_id = str(ref.get("doc_id") or "").strip()
-                if not doc_id or doc_id in seen_detail_ids[target]:
-                    continue
-
-                try:
-                    payload = fetch_detail_by_ref(
-                        registry=registry,
-                        oc=oc,
-                        target=target,
-                        ref=ref,
-                    )
-                except Exception as exc:
-                    result["errors"].append(
-                        {
-                            "target": target,
-                            "law_name": law_name,
-                            "stage": "detail",
-                            "doc_id": doc_id,
-                            "message": str(exc),
-                        }
-                    )
-                    continue
-
-                if payload is None:
-                    continue
-
-                seen_detail_ids[target].add(doc_id)
-                target_summary["detail_count"] += 1
-                remaining_budget[target] -= 1
-
-                _write_json(
-                    law_dir / f"{_safe_filename(doc_id)}__detail.json",
-                    payload,
+            for hit_rank, ref in enumerate(refs, start=1):
+                candidate = build_candidate_hit(
+                    root_law_name=root_law_name,
+                    law_entry=law_entry,
+                    target=target,
+                    ref=ref,
+                    source_file_path=str(ref.get("source_file_path") or ""),
+                    hit_rank=hit_rank,
                 )
+                candidate_hits.append(candidate)
+                unique_case_ids.add(candidate["canonical_case_id"])
 
-                if remaining_budget[target] <= 0:
-                    break
+            target_summary["candidate_count"] += len(refs)
+            target_summary["unique_case_count"] = len(unique_case_ids)
 
         result["targets"][target] = target_summary
+
+    candidate_hits.sort(
+        key=lambda row: (
+            str(row.get("target") or ""),
+            str(row.get("source_law_name") or ""),
+            int(row.get("hit_rank") or 0),
+            str(row.get("canonical_case_id") or ""),
+        )
+    )
+
+    _write_jsonl(root_dir / "candidate_hits.jsonl", candidate_hits)
+
+    unique_case_ids = {
+        str(row.get("canonical_case_id") or "")
+        for row in candidate_hits
+        if str(row.get("canonical_case_id") or "")
+    }
+    result["candidate_count"] = len(candidate_hits)
+    result["unique_case_count"] = len(unique_case_ids)
 
     _write_json(
         root_dir / f"{_safe_filename(root_law_name)}__related_docs_manifest.json",
         result,
     )
+
+    return result
+
+
+
+def load_candidate_hits(raw_related_root_dir: str | Path) -> list[dict[str, Any]]:
+    return list(_iter_jsonl(Path(raw_related_root_dir) / "candidate_hits.jsonl"))
+
+
+
+def collect_related_docs_for_family_result(
+    registry: dict[str, Any],
+    oc: str,
+    family_result: dict[str, Any],
+    scope: dict[str, Any] | None = None,
+    targets: list[str] | None = None,
+    max_pages_per_target: int = 1,
+    detail_limit_per_target: int = 2,
+    base_dir: str | Path = "data/raw/02_related_legal_docs",
+) -> dict[str, Any]:
+    result = collect_related_doc_candidates_for_family_result(
+        registry=registry,
+        oc=oc,
+        family_result=family_result,
+        scope=scope,
+        targets=targets,
+        max_pages_per_target=max_pages_per_target,
+        base_dir=base_dir,
+    )
+
+    if detail_limit_per_target <= 0:
+        return result
+
+    try:
+        from src.collector.legal_case_hydrator import hydrate_canonical_cases_for_family_result
+
+        hydrate_result = hydrate_canonical_cases_for_family_result(
+            registry=registry,
+            oc=oc,
+            family_result=family_result,
+            raw_related_base_dir=base_dir,
+            targets=targets,
+            detail_limit_per_target=detail_limit_per_target,
+        )
+        result["canonical_case_count"] = hydrate_result.get("canonical_case_count", 0)
+        result["hydrate_errors"] = hydrate_result.get("errors", [])
+        result["canonical_cases_path"] = hydrate_result.get("canonical_cases_path")
+
+        hydrate_targets = hydrate_result.get("targets", {})
+        if isinstance(hydrate_targets, dict):
+            for target, summary in hydrate_targets.items():
+                target_summary = result.get("targets", {}).get(target)
+                if not isinstance(target_summary, dict) or not isinstance(summary, dict):
+                    continue
+                detail_count = int(summary.get("detail_fetched_count") or 0) + int(summary.get("detail_reused_count") or 0)
+                target_summary["detail_count"] = detail_count
+                target_summary["detail_missing_count"] = int(summary.get("detail_missing_count") or 0)
+    except Exception as exc:  # pragma: no cover - wrapper safety
+        result.setdefault("hydrate_errors", []).append({"stage": "hydrate", "message": str(exc)})
 
     return result

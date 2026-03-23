@@ -1,0 +1,318 @@
+from __future__ import annotations
+
+import re
+from typing import Any, Iterable
+
+from src.collector.legal_doc_collector import (
+    DETAIL_LINK_KEYS_BY_TARGET,
+    DOC_KIND_KEYS,
+    DOC_TYPE_LABELS,
+    ID_KEYS_BY_TARGET,
+    NUMBER_KEYS_BY_TARGET,
+    TEXT_KEYS_BY_TARGET,
+    TITLE_KEYS_BY_TARGET,
+    build_canonical_case_id,
+)
+from src.common.payload_utils import _first_non_empty, _walk_objects
+
+DECISION_DATE_KEYS_BY_TARGET = {
+    "prec": ("선고일자", "판결일자", "선고일"),
+    "detc": ("선고일자", "결정일자", "선고일"),
+    "expc": ("회신일자", "등록일자", "생산일자", "작성일자"),
+    "decc": ("재결일자", "의결일자", "결정일자"),
+}
+
+GENERIC_TEXT_KEYS = (
+    "전문",
+    "본문",
+    "내용",
+    "판례내용",
+    "판결요지",
+    "판시사항",
+    "결정요지",
+    "회답",
+    "해석내용",
+    "답변",
+    "주문",
+    "이유",
+    "재결요지",
+)
+
+
+
+def _normalize_space(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+
+def _normalize_structure(text: str) -> str:
+    normalized_lines: list[str] = []
+    previous_blank = False
+
+    for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = re.sub(r"[ \t\f\v]+", " ", raw_line).strip()
+        if not line:
+            if normalized_lines and not previous_blank:
+                normalized_lines.append("")
+            previous_blank = True
+            continue
+        normalized_lines.append(line)
+        previous_blank = False
+
+    while normalized_lines and normalized_lines[-1] == "":
+        normalized_lines.pop()
+
+    return "\n".join(normalized_lines).strip()
+
+
+
+def _normalize_name(text: str) -> str:
+    return re.sub(r"\s+", "", text or "")
+
+
+
+def _walk_strings(node: Any) -> Iterable[str]:
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "html":
+                continue
+            yield from _walk_strings(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _walk_strings(item)
+    elif isinstance(node, str):
+        text = _normalize_structure(node)
+        if text:
+            yield text
+
+
+
+def _find_first_recursive(node: Any, keys: tuple[str, ...]) -> Any:
+    for obj in _walk_objects(node):
+        if not isinstance(obj, dict):
+            continue
+        value = _first_non_empty(obj, *keys)
+        if value not in (None, "", []):
+            return value
+    return None
+
+
+
+def _find_all_recursive(node: Any, keys: tuple[str, ...]) -> list[str]:
+    results: list[str] = []
+    seen: set[str] = set()
+
+    for obj in _walk_objects(node):
+        if not isinstance(obj, dict):
+            continue
+        value = _first_non_empty(obj, *keys)
+        if value in (None, "", []):
+            continue
+        text = _normalize_structure(str(value))
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        results.append(text)
+
+    return results
+
+
+
+def _dedup_texts(texts: list[str]) -> list[str]:
+    results: list[str] = []
+    seen: set[str] = set()
+
+    for text in texts:
+        normalized = _normalize_structure(text)
+        if not normalized:
+            continue
+        key = _normalize_space(normalized)
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append(normalized)
+
+    return results
+
+
+
+def extract_case_meta(
+    target: str,
+    payload: dict[str, Any],
+    fallback: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    fallback = fallback or {}
+    doc_id = _find_first_recursive(payload, ID_KEYS_BY_TARGET[target]) or fallback.get("doc_id")
+    title = _find_first_recursive(payload, TITLE_KEYS_BY_TARGET[target]) or fallback.get("title")
+    doc_number = _find_first_recursive(payload, NUMBER_KEYS_BY_TARGET[target]) or fallback.get("doc_number")
+    detail_link = _find_first_recursive(payload, DETAIL_LINK_KEYS_BY_TARGET[target]) or fallback.get("detail_link")
+    doc_kind = _find_first_recursive(payload, DOC_KIND_KEYS) or fallback.get("doc_kind")
+    decision_date = _find_first_recursive(payload, DECISION_DATE_KEYS_BY_TARGET[target]) or fallback.get("decision_date")
+    canonical_case_id = build_canonical_case_id(target, doc_id, doc_number, title)
+
+    return {
+        "canonical_case_id": canonical_case_id,
+        "canonical_id": canonical_case_id,
+        "target": target,
+        "doc_type_label": DOC_TYPE_LABELS[target],
+        "doc_id": str(doc_id) if doc_id not in (None, "") else None,
+        "title": str(title) if title not in (None, "") else None,
+        "doc_number": str(doc_number) if doc_number not in (None, "") else None,
+        "doc_kind": str(doc_kind) if doc_kind not in (None, "") else None,
+        "detail_link": str(detail_link) if detail_link not in (None, "") else None,
+        "decision_date": str(decision_date) if decision_date not in (None, "") else None,
+    }
+
+
+
+def extract_case_body_text(
+    target: str,
+    payload: dict[str, Any],
+    fallback_text: str | None = None,
+) -> str:
+    texts: list[str] = []
+    response_format = str(payload.get("_response_format") or "").strip().lower()
+
+    if response_format == "html":
+        html_text = payload.get("text")
+        if html_text not in (None, ""):
+            return _normalize_structure(str(html_text))
+
+    texts.extend(_find_all_recursive(payload, TEXT_KEYS_BY_TARGET[target]))
+    texts.extend(_find_all_recursive(payload, GENERIC_TEXT_KEYS))
+
+    if not texts:
+        texts.extend(list(_walk_strings(payload)))
+
+    if fallback_text not in (None, ""):
+        texts.append(str(fallback_text))
+
+    deduped = _dedup_texts(texts)
+    return "\n\n".join(deduped).strip()
+
+
+
+def parse_case_payload(
+    target: str,
+    payload: dict[str, Any],
+    fallback: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    fallback = fallback or {}
+    meta = extract_case_meta(target, payload, fallback=fallback)
+    body_text = extract_case_body_text(target, payload, fallback_text=str(fallback.get("text") or ""))
+
+    return {
+        **meta,
+        "body_text": body_text,
+        "source_format": payload.get("_response_format"),
+        "source_content_type": payload.get("_response_content_type"),
+        "source_url": payload.get("_response_url"),
+    }
+
+
+
+def find_related_law_names(text: str, family_law_names: list[str]) -> list[str]:
+    normalized_text = _normalize_name(text)
+    matched: list[str] = []
+    seen: set[str] = set()
+
+    for law_name in family_law_names:
+        candidate = str(law_name or "").strip()
+        if not candidate:
+            continue
+        normalized_law = _normalize_name(candidate)
+        if normalized_law and normalized_law in normalized_text and candidate not in seen:
+            seen.add(candidate)
+            matched.append(candidate)
+
+    return matched
+
+
+
+def extract_explicit_article_refs(text: str, family_law_names: list[str]) -> dict[str, list[dict[str, str]]]:
+    normalized_text = _normalize_name(text)
+    results: dict[str, list[dict[str, str]]] = {}
+
+    for law_name in family_law_names:
+        candidate = str(law_name or "").strip()
+        if not candidate:
+            continue
+        normalized_law = _normalize_name(candidate)
+        if not normalized_law:
+            continue
+
+        pattern = re.compile(rf"{re.escape(normalized_law)}제(\d+)조(?:의(\d+))?")
+        seen_keys: set[str] = set()
+        matches: list[dict[str, str]] = []
+
+        for main_no, branch_no in pattern.findall(normalized_text):
+            article_key = main_no if not branch_no else f"{main_no}-{branch_no}"
+            if article_key in seen_keys:
+                continue
+            seen_keys.add(article_key)
+            article_display = f"제{main_no}조" if not branch_no else f"제{main_no}조의{branch_no}"
+            matches.append(
+                {
+                    "article_key": article_key,
+                    "article_no_display": article_display,
+                }
+            )
+
+        if matches:
+            results[candidate] = matches
+
+    return results
+
+
+
+CASE_NUMBER_REF_PATTERN = re.compile(r"(?<!\d)(\d{2,4}[가-힣]{1,4}\d{1,8})(?!\d)")
+
+
+def extract_case_number_refs(text: str, exclude_numbers: Iterable[str] | None = None) -> list[str]:
+    normalized_text = _normalize_structure(text)
+    if not normalized_text:
+        return []
+
+    excluded = {
+        _normalize_name(str(item))
+        for item in (exclude_numbers or [])
+        if str(item or "").strip()
+    }
+
+    results: list[str] = []
+    seen: set[str] = set()
+
+    for match in CASE_NUMBER_REF_PATTERN.findall(normalized_text):
+        candidate = str(match).strip()
+        if not candidate:
+            continue
+        normalized_candidate = _normalize_name(candidate)
+        if normalized_candidate in excluded or normalized_candidate in seen:
+            continue
+        seen.add(normalized_candidate)
+        results.append(candidate)
+
+    return results
+
+
+def build_evidence_preview(
+    text: str,
+    law_name: str | None = None,
+    limit: int = 240,
+    anchor: str | None = None,
+) -> str:
+    normalized_text = _normalize_structure(text)
+    if not normalized_text:
+        return ""
+
+    search_term = str(anchor or law_name or "").strip()
+    if not search_term:
+        return normalized_text[:limit]
+
+    idx = normalized_text.find(search_term)
+    if idx < 0:
+        return normalized_text[:limit]
+
+    start = max(0, idx - 40)
+    end = min(len(normalized_text), idx + limit)
+    return normalized_text[start:end].strip()
