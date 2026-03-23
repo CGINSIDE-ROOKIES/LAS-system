@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { askStream, RetrievedDoc as ApiDoc } from "@/lib/api-client";
+import { ERROR_MESSAGES } from "@/lib/errors";
 import Link from "next/link";
 
 // Types
@@ -121,6 +122,7 @@ const ContractQA = () => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    const timeoutId = setTimeout(() => controller.abort("timeout"), 60_000);
 
     const assistantId = `m${Date.now()}`;
     setMessages((prev) => [
@@ -158,16 +160,26 @@ const ContractQA = () => {
         }
       }
     } catch (err) {
-      if ((err as Error).name === "AbortError") return;
+      const error = err as Error;
+      if (error.name === "AbortError" && error.message !== "timeout") return;
+
+      const errorContent =
+        error.message === "timeout"
+          ? ERROR_MESSAGES.TIMEOUT
+          : error.name === "TypeError"
+          ? ERROR_MESSAGES.NETWORK
+          : ERROR_MESSAGES.SERVER;
+
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
-            ? { ...m, isStreaming: false, content: m.content || "서버 오류가 발생했습니다." }
+            ? { ...m, isStreaming: false, content: m.content || errorContent }
             : m
         )
       );
-      toast.error("서버와 연결할 수 없습니다.");
+      toast.error(errorContent);
     } finally {
+      clearTimeout(timeoutId);
       setIsStreaming(false);
     }
   }, [scrollToBottom]);

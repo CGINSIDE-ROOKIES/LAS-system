@@ -69,8 +69,9 @@ export async function* askStream(
     signal,
   });
   if (!res.ok) await throwApiError(res);
+  if (!res.body) throw new ApiError("NO_BODY", "응답 본문이 없습니다.", res.status);
 
-  const reader = res.body!.getReader();
+  const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
 
@@ -86,7 +87,12 @@ export async function* askStream(
       for (const line of lines) {
         if (line.startsWith("data: ")) {
           const data = line.slice(6).trim();
-          if (data) yield JSON.parse(data) as SseEvent;
+          if (!data) continue;
+          try {
+            yield JSON.parse(data) as SseEvent;
+          } catch {
+            // 파싱 불가 청크는 무시
+          }
         }
       }
     }
