@@ -5,12 +5,12 @@ class RunSpan(BaseModel):
     """Character range of one IR chunk within IRGroup.formatted_str."""
     start: int
     end: int
-    chunk_id: str  # e.g. "s1.p44.r2"
+    chunk_id: str  # ex) "s1.p44.r2"
 
 
 class IRChunk(BaseModel):
-    raw_text: str = ""            # original text preserving whitespace/tabs
-    text: str = ""                # cleaned text for LLM markdown export
+    raw_text: str = ""  # original text (preserve whitespace/tabs)
+    text: str = ""  # cleaned text for LLM markdown export
     category: str = "uncategorized"
     article_n: list[str] = Field(default_factory=list)
     paragraph_n: list[str] = Field(default_factory=list)

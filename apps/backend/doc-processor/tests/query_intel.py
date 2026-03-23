@@ -4,7 +4,7 @@ from langgraph.graph import StateGraph, END
 from langchain_community.embeddings import OpenVINOEmbeddings
 from langchain_qdrant import QdrantVectorStore, RetrievalMode
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 core = Core()
 devices = core.available_devices

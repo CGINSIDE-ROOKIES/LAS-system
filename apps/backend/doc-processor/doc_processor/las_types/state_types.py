@@ -15,9 +15,10 @@ class DocumentState(BaseModel):  # Main graph state
 
     # used as a collector (for concurrent workers) before re-indexing
     # empty list [] acts as a clear signal (operator.add would silently keep old items)
-    ir_groups_temp: Annotated[list[tuple[int, IRGroup]],
-        lambda left, right: [] if right == [] else left + right] = \
-        Field(default=[])
+    ir_groups_temp: Annotated[
+            list[tuple[int, IRGroup]],
+            lambda left, right: [] if right == [] else left + right
+        ] = Field(default=[])
 
     # used for preprocess routing / notifying state
     preprocess_state: Literal["uncategorized", "prelim", "finished"] = Field(default="uncategorized")
@@ -44,7 +45,7 @@ class DocumentState(BaseModel):  # Main graph state
     @classmethod
     def from_hwpx(cls, file_path: Path):
         from hwpx import HwpxDocument
-        from core.ir import create_ir_dict, ir_grouper
+        from ..core.ir import create_ir_dict, ir_grouper
         with HwpxDocument.open(file_path) as doc:
             ir_mappings = create_ir_dict(doc)
             ir_groups = ir_grouper(ir_mappings)
@@ -118,8 +119,8 @@ class DocumentState(BaseModel):  # Main graph state
 
     @classmethod
     def from_docx(cls, file_path: Path):
-        from core.docx_ir import export_docx_structured
-        from core.ir import create_ir_dict_from_mapping, ir_grouper
+        from ..core.docx_ir import export_docx_structured
+        from ..core.ir import create_ir_dict_from_mapping, ir_grouper
 
         parsed = export_docx_structured(file_path)
         ir_mappings = create_ir_dict_from_mapping(parsed)
