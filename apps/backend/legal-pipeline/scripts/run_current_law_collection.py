@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from src.common.io_utils import _write_json
 from src.export.dataset_builder import build_and_write_datasets
+from src.export.dataset_validation import validate_appendix_merge_outputs
 from src.pipeline.appendix_pipeline import run_appendix_asset_pipeline
 from src.pipeline.law_pipeline import collect_all_root_law_families
 from src.registry.load_registry import load_collection_scope, load_endpoint_registry
@@ -117,6 +118,16 @@ def main() -> None:
         overlap=150,
         text_variant="best",
         preserve_structure=True,
+
+        # 추가
+        merge_appendices_into_law_article=True,
+        include_appendix_bundle_text_in_payload=True,
+        write_legacy_appendix_datasets=False,
+    )
+    appendix_validation_summary = validate_appendix_merge_outputs(
+        output_dir=base_dir / "dataset",
+        manifest_path=base_dir / "manifest" / "appendix_validation_summary.json",
+        dataset_manifest=dataset_manifest,
     )
 
     summary = {
@@ -126,6 +137,7 @@ def main() -> None:
         "root_count": len(family_results),
         "roots": family_results,
         "dataset_manifest": dataset_manifest,
+        "appendix_validation_summary": appendix_validation_summary,
         "sub_article_mode": args.sub_article_mode,
         "appendix_asset_pipeline": appendix_asset_result,
     }

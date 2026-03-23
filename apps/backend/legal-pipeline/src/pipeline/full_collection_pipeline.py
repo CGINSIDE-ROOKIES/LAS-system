@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from src.collector.legal_doc_collector import collect_related_docs_for_family_result
+from src.collector.legal_case_hydrator import hydrate_canonical_cases_for_family_result
+from src.collector.legal_doc_collector import collect_related_doc_candidates_for_family_result
 from src.collector.related_doc_expander import collect_expanded_related_docs_for_family_result
 from src.common.io_utils import _write_json
 from src.pipeline.law_pipeline import collect_all_root_law_families
@@ -34,18 +35,26 @@ def run_full_collection(
     summaries: list[dict[str, Any]] = []
 
     for family_result in family_results:
-        related_result = collect_related_docs_for_family_result(
+        candidate_result = collect_related_doc_candidates_for_family_result(
             registry=related_registry,
             oc=oc,
             family_result=family_result,
             scope=scope,
             targets=related_targets,
             max_pages_per_target=max_pages_per_target,
-            detail_limit_per_target=detail_limit_per_target,
             base_dir=Path(base_dir) / "raw" / "02_related_legal_docs",
         )
 
-        effective_targets = list(related_result.get("targets", {}).keys())
+        effective_targets = list(candidate_result.get("targets", {}).keys())
+
+        hydrate_result = hydrate_canonical_cases_for_family_result(
+            registry=related_registry,
+            oc=oc,
+            family_result=family_result,
+            raw_related_base_dir=Path(base_dir) / "raw" / "02_related_legal_docs",
+            targets=effective_targets,
+            detail_limit_per_target=detail_limit_per_target,
+        )
 
         expanded_result = collect_expanded_related_docs_for_family_result(
             scope=scope,
@@ -60,8 +69,13 @@ def run_full_collection(
             {
                 "root_law_name": family_result["root_law_name"],
                 "family_count": family_result["family_count"],
-                "related_targets": related_result["targets"],
-                "related_errors": related_result["errors"],
+                "candidate_count": candidate_result.get("candidate_count", 0),
+                "unique_case_count": candidate_result.get("unique_case_count", 0),
+                "candidate_targets": candidate_result.get("targets", {}),
+                "candidate_errors": candidate_result.get("errors", []),
+                "canonical_case_count": hydrate_result.get("canonical_case_count", 0),
+                "hydrate_targets": hydrate_result.get("targets", {}),
+                "hydrate_errors": hydrate_result.get("errors", []),
                 "expanded_count": expanded_result["expanded_count"],
                 "expanded_targets": expanded_result["targets"],
                 "expanded_errors": expanded_result["errors"],

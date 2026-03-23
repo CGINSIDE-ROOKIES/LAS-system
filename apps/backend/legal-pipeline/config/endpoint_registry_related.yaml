@@ -14,6 +14,11 @@ runtime:
     max_attempts: 3
     backoff_sec: [1, 3, 5]
 
+validation:
+  require_json_capable_for_enabled: true
+  allow_html_only_if_enabled_false: true
+  enabled_html_only_whitelist: [interpretation_detail]
+
 endpoints:
   precedent_list:
     enabled: true
@@ -76,7 +81,7 @@ endpoints:
       sort: ddes
 
   interpretation_detail:
-    enabled: false
+    enabled: true
     path: /lawService.do
     target: expc
     response_types: [HTML]
@@ -85,7 +90,7 @@ endpoints:
     default_params:
       mobileYn: "Y"
       type: HTML
-    reason: "공식 확인 가이드 기준 mobile HTML-only 본문"
+    reason: "모바일 상세 본문은 HTML-only 허용"
 
   admin_appeal_list:
     enabled: true
@@ -110,7 +115,3 @@ endpoints:
     preferred_type: JSON
     required_params: [OC, target, type, ID]
     optional_params: [LM]
-
-  opinion_pending:
-    enabled: false
-    reason: "02단계 baseline에서는 제외"

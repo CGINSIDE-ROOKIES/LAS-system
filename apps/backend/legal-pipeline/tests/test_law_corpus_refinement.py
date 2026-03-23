@@ -128,8 +128,7 @@ def test_build_law_records_uses_article_key_and_skips_non_searchable_parts(tmp_p
     appendix_records = [record for record in records if record["section_type"] == "appendix"]
     supplementary_records = [record for record in records if record["section_type"] == "supplementary"]
 
-    assert article_records[0]["id"] == "law::근로기준법::43-2::0"
+    assert article_records[0]["id"] == "law::001::article::43-2::0"
     assert "조문번호: 제43조의2" in article_records[0]["text"]
-    assert len(appendix_records) == 1
-    assert appendix_records[0]["appendix_title"] == "별표 1"
+    assert len(appendix_records) == 0
     assert len(supplementary_records) == 0
