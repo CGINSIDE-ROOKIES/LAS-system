@@ -30,6 +30,10 @@ if str(CLI_DIR) not in sys.path:
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from generator import (
     DEFAULT_CHAT_COMPLETIONS_URL,
     DEFAULT_MODEL,

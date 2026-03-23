@@ -9,8 +9,8 @@ class RunSpan(BaseModel):
 
 
 class IRChunk(BaseModel):
-    raw_text: str = ""
-    markdown_text: str = ""
+    raw_text: str = ""            # original text preserving whitespace/tabs
+    text: str = ""                # cleaned text for LLM markdown export
     category: str = "uncategorized"
     article_n: list[str] = Field(default_factory=list)
     paragraph_n: list[str] = Field(default_factory=list)
@@ -23,11 +23,6 @@ class IRGroup(BaseModel):
     ir_chunk_ids: list[str] = Field(default_factory=list)
     ir_chunks: list[IRChunk] = Field(default_factory=list)
     ir_join: list[int] = Field(default_factory=list)   # start of each chunk in formatted_str
-    ir_trim: tuple[int, int] = (0, 0)
-    category_spans: list[tuple[int, int, str]] = Field(default_factory=list)
-    # Each entry: (start, end, category) — character range in formatted_str.
-    # Consecutive same-category chunks are merged.
-    # Example: [(0, 42, 'unk'), (42, 180, 'unk-table'), (180, 210, 'unk')]
 
     def run_spans(self) -> list[RunSpan]:
         """Return character ranges of each non-table chunk in formatted_str."""

@@ -35,7 +35,7 @@ class DocumentState(BaseModel):  # Main graph state
             case ".hwp":
                 return cls.from_hwp(file_path)
             case ".docx":
-                raise NotImplementedError()
+                return cls.from_docx(file_path)
             case ".pdf":
                 raise NotImplementedError()
             case _:
@@ -118,10 +118,16 @@ class DocumentState(BaseModel):  # Main graph state
 
     @classmethod
     def from_docx(cls, file_path: Path):
-        # in theory shared the same OOXML formatting,
-        # so should be able to translate to the same custom document IR
-        # I don't know if the "section" identifier works properly here, it doesn't for hwpx seems like
-        ...
+        from core.docx_ir import export_docx_structured
+        from core.ir import create_ir_dict_from_mapping, ir_grouper
+
+        parsed = export_docx_structured(file_path)
+        ir_mappings = create_ir_dict_from_mapping(parsed)
+        ir_groups = ir_grouper(ir_mappings)
+        return cls(
+            target_file=file_path,
+            ir_groups=ir_groups,
+        )
 
     @classmethod
     def from_pdf(cls, file_path: Path):

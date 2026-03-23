@@ -18,6 +18,10 @@ import json
 import os
 import sys
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from retrieval_common import RetrievalError, require_env_or_arg, search_bm25
 
 

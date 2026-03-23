@@ -16,6 +16,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from retrieval_common import RetrievalError, http_json
 
 DEFAULT_PROVIDER = "openai_compat"

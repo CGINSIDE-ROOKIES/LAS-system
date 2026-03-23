@@ -1,18 +1,16 @@
 from pydantic import BaseModel, Field, ValidationError
 
-from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 
-from las_types import IRGroup, DocumentState, IRGroupState
+from .las_types import IRGroup, DocumentState, IRGroupState
 
 from pathlib import Path
 from typing import Literal, cast
 import re
 
-
-from prompts import get_prompts
-from core.env_loader import load_env_SecretStr, load_env_str
+from .llms import midm as llm
+from .prompts import get_prompts
 
 prompts = get_prompts()
 
@@ -45,12 +43,6 @@ class TextCategorization(BaseModel):
     )
 
 ###################################################################################################
-
-llm = ChatOpenAI(
-    base_url=load_env_str("PARSER_LLM_URL"),
-    api_key=load_env_SecretStr("PARSER_LLM_KEY"),
-    model=load_env_str("PARSER_LLM_MODEL"),
-)
 
 prelim_categorizer_llm = llm.with_structured_output(TextPrelimCategorization, method="json_mode") \
     .with_retry(retry_if_exception_type=(ValidationError, ValueError), stop_after_attempt=3)
@@ -120,14 +112,14 @@ def categorization_node_worker(state: IRGroupState):
     def para_key(chunk_id: str) -> str:
         return re.sub(r"\.r\d+$", "", chunk_id)
 
-    # Group chunk indices and accumulate raw_text by paragraph key
+    # Group chunk indices and accumulate text by paragraph key
     para_indices: dict[str, list[int]] = {}
     para_texts: dict[str, str] = {}
 
     for i, (chunk_id, chunk) in enumerate(zip(state.ir_group.ir_chunk_ids, state.ir_group.ir_chunks)):
         key = para_key(chunk_id)
         para_indices.setdefault(key, []).append(i)
-        para_texts[key] = para_texts.get(key, "") + chunk.raw_text
+        para_texts[key] = para_texts.get(key, "") + chunk.text
 
     # Classify paragraphs that contain at least one uncategorized chunk
     para_categories: dict[str, str] = {}
@@ -158,27 +150,22 @@ def categorization_node_worker(state: IRGroupState):
 
 ###################################################################################################
 
-main_graph_builder = StateGraph(DocumentState)
+parser_graph_builder = StateGraph(DocumentState)
 
-main_graph_builder.add_node("prelim_categorization_workers", prelim_categorization_node_worker)
-main_graph_builder.add_node("categorization_workers", categorization_node_worker)
-main_graph_builder.add_node("document_reducer", document_reducer)
+parser_graph_builder.add_node("prelim_categorization_workers", prelim_categorization_node_worker)
+parser_graph_builder.add_node("categorization_workers", categorization_node_worker)
+parser_graph_builder.add_node("document_reducer", document_reducer)
 
 _splitter_targets = ["prelim_categorization_workers", "categorization_workers", END]
-main_graph_builder.add_conditional_edges(START, document_splitter, _splitter_targets)
-main_graph_builder.add_edge("prelim_categorization_workers", "document_reducer")
-main_graph_builder.add_conditional_edges("document_reducer", document_splitter, _splitter_targets)
-main_graph_builder.add_edge("categorization_workers", "document_reducer")
+parser_graph_builder.add_conditional_edges(START, document_splitter, _splitter_targets)
+parser_graph_builder.add_edge("prelim_categorization_workers", "document_reducer")
+parser_graph_builder.add_conditional_edges("document_reducer", document_splitter, _splitter_targets)
+parser_graph_builder.add_edge("categorization_workers", "document_reducer")
 
-main_graph = main_graph_builder.compile()
+parser_graph = parser_graph_builder.compile()
 
 
 if __name__ == "__main__":
-    # graph_png = main_graph.get_graph().draw_mermaid_png()
-    # with open("tests/graph.png", "wb") as f:
-    #     f.write(graph_png)
-    # print("Graph diagram saved to graph.png")
-
     file_dirs_std_labor = list(Path("tests/doc_samples/표준계약서모음(hwp-hwpx)").iterdir())
     file_dirs_std_contracts = list(Path("tests/doc_samples/(노동)표준근로계약서모음").iterdir())
     file_dirs = file_dirs_std_labor + file_dirs_std_contracts
@@ -187,7 +174,7 @@ if __name__ == "__main__":
     sel = int(input("select: "))
     file_path = file_dirs[sel]
 
-    result = main_graph.invoke(
+    result = parser_graph.invoke(
         input=DocumentState.from_file(Path(file_path)),
         config={"max_concurrency": 4}
     )
@@ -196,9 +183,6 @@ if __name__ == "__main__":
         for group in result["ir_groups"]:
             group = cast(IRGroup, group)
             for chunk in group.ir_chunks:
-                text = chunk.markdown_text
+                text = chunk.text
                 category = chunk.category
                 f.write(f"category: {category} - {chunk.article_n}.{chunk.paragraph_n}\nchunk: {text}\n==========\n")
-            # text = group.formatted_str
-            # category = group.ir_chunks[0].category
-            # print(f"category: {category}\nchunk: {text}\n==========\n")
