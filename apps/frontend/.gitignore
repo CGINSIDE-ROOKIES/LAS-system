@@ -1,0 +1,16 @@
+# Next.js
+.next/
+out/
+
+# env
+.env.local
+.env.*.local
+
+# dependencies
+node_modules/
+
+# misc
+.DS_Store
+
+# 루트 .gitignore의 lib/ 패턴 예외 처리
+!lib/

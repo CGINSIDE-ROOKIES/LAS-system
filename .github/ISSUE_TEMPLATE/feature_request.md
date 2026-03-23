@@ -1,8 +1,7 @@
 ---
 name: 기능 요청
 about: 새 기능 또는 개선 요청
-title: "[기능] "
-labels: enhancement
+title: "[Feature] "
 assignees: ""
 ---
 
