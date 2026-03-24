@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from src.common.appendix_scope import is_target_appendix
-from src.common.io_utils import _read_json
+from src.common.io_utils import _read_json, write_jsonl
 from src.common.law_meta import build_law_uid, normalize_kind_name, normalize_classified_level
 
 
@@ -510,14 +510,8 @@ def write_article_appendix_outputs(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as f:
-            for row in rows:
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
-
-    _write_jsonl(output_path / "article_appendix_links.jsonl", link_records)
-    _write_jsonl(output_path / "appendix_bundle_records.jsonl", appendix_bundle_records)
-    _write_jsonl(output_path / "unresolved_appendix_records.jsonl", unresolved_appendix_records)
+    write_jsonl(link_records, output_path / "article_appendix_links.jsonl")
+    write_jsonl(appendix_bundle_records, output_path / "appendix_bundle_records.jsonl")
+    write_jsonl(unresolved_appendix_records, output_path / "unresolved_appendix_records.jsonl")
     with (output_path / "article_appendix_manifest.json").open("w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)

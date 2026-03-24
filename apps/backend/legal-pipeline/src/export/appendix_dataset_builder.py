@@ -5,8 +5,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from src.common.appendix_scope import is_target_appendix
-from src.common.io_utils import _read_json, _write_json
-from src.export.jsonl_builder import write_jsonl
+from src.common.io_utils import _read_json, _write_json, write_jsonl
 
 
 APPENDIX_TYPE_LABELS = {

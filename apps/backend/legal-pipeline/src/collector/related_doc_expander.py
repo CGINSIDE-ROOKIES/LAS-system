@@ -4,7 +4,11 @@ from pathlib import Path
 from typing import Any
 
 from src.common.io_utils import _iter_jsonl, _safe_filename, _write_json, _write_jsonl
-from src.export.legal_relation_builder import build_root_relation_payloads
+from src.export.legal_relation_builder import (
+    DEFAULT_RELATION_RULES,
+    build_root_relation_payloads,
+    normalize_relation_rules,
+)
 
 
 
@@ -14,15 +18,15 @@ def get_relation_rules(
 ) -> list[str]:
     outputs = scope.get("outputs", [])
     if not isinstance(outputs, list):
-        return ["related_law", "cited_law", "cited_case", "referenced_interpretation"]
+        return list(DEFAULT_RELATION_RULES)
 
     for output in outputs:
         if isinstance(output, dict) and output.get("file_id") == file_id:
             rules = output.get("relation_rules", [])
             if isinstance(rules, list) and rules:
-                return [str(rule) for rule in rules]
+                return normalize_relation_rules([str(rule) for rule in rules])
 
-    return ["related_law", "cited_law", "cited_case", "referenced_interpretation"]
+    return list(DEFAULT_RELATION_RULES)
 
 
 

@@ -20,9 +20,8 @@ from src.common.law_meta import (
     normalize_classified_level,
     normalize_kind_name,
 )
-from src.common.io_utils import _read_json, _write_json
+from src.common.io_utils import _read_json, _write_json, write_jsonl
 from src.common.payload_utils import _first_non_empty, _walk_objects
-from src.export.jsonl_builder import write_jsonl
 
 TextVariant = Literal["best", "raw", "normalized"]
 

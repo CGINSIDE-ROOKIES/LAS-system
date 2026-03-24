@@ -229,6 +229,21 @@ def find_related_law_names(text: str, family_law_names: list[str]) -> list[str]:
 
 
 
+FIRST_ARTICLE_PATTERN = re.compile(r"^제(\d+)조(?:의(\d+))?")
+CONTINUED_ARTICLE_PATTERN = re.compile(r"^(?:,|및|와|과|또는|혹은|·)(?:제)?(\d+)조(?:의(\d+))?")
+CASE_NUMBER_REF_PATTERN = re.compile(r"(?<!\d)(\d{2,4}[가-힣]{1,4}\d{1,8})(?!\d)")
+
+
+def _format_article_ref(main_no: str, branch_no: str | None) -> dict[str, str]:
+    article_key = str(int(main_no)) if not branch_no else f"{int(main_no)}-{int(branch_no)}"
+    article_display = f"제{int(main_no)}조" if not branch_no else f"제{int(main_no)}조의{int(branch_no)}"
+    return {
+        "article_key": article_key,
+        "article_no_display": article_display,
+    }
+
+
+
 def extract_explicit_article_refs(text: str, family_law_names: list[str]) -> dict[str, list[dict[str, str]]]:
     normalized_text = _normalize_name(text)
     results: dict[str, list[dict[str, str]]] = {}
@@ -241,31 +256,47 @@ def extract_explicit_article_refs(text: str, family_law_names: list[str]) -> dic
         if not normalized_law:
             continue
 
-        pattern = re.compile(rf"{re.escape(normalized_law)}제(\d+)조(?:의(\d+))?")
-        seen_keys: set[str] = set()
         matches: list[dict[str, str]] = []
+        seen_keys: set[str] = set()
+        start = 0
 
-        for main_no, branch_no in pattern.findall(normalized_text):
-            article_key = main_no if not branch_no else f"{main_no}-{branch_no}"
-            if article_key in seen_keys:
+        while True:
+            law_idx = normalized_text.find(normalized_law, start)
+            if law_idx < 0:
+                break
+
+            cursor = law_idx + len(normalized_law)
+            tail = normalized_text[cursor:]
+            first_match = FIRST_ARTICLE_PATTERN.match(tail)
+            if not first_match:
+                start = law_idx + len(normalized_law)
                 continue
-            seen_keys.add(article_key)
-            article_display = f"제{main_no}조" if not branch_no else f"제{main_no}조의{branch_no}"
-            matches.append(
-                {
-                    "article_key": article_key,
-                    "article_no_display": article_display,
-                }
-            )
+
+            main_no, branch_no = first_match.groups()
+            article = _format_article_ref(main_no, branch_no)
+            if article["article_key"] not in seen_keys:
+                seen_keys.add(article["article_key"])
+                matches.append(article)
+
+            cursor += first_match.end()
+            while True:
+                continued_match = CONTINUED_ARTICLE_PATTERN.match(normalized_text[cursor:])
+                if not continued_match:
+                    break
+                main_no, branch_no = continued_match.groups()
+                article = _format_article_ref(main_no, branch_no)
+                if article["article_key"] not in seen_keys:
+                    seen_keys.add(article["article_key"])
+                    matches.append(article)
+                cursor += continued_match.end()
+
+            start = law_idx + len(normalized_law)
 
         if matches:
             results[candidate] = matches
 
     return results
 
-
-
-CASE_NUMBER_REF_PATTERN = re.compile(r"(?<!\d)(\d{2,4}[가-힣]{1,4}\d{1,8})(?!\d)")
 
 
 def extract_case_number_refs(text: str, exclude_numbers: Iterable[str] | None = None) -> list[str]:
@@ -285,6 +316,8 @@ def extract_case_number_refs(text: str, exclude_numbers: Iterable[str] | None = 
     for match in CASE_NUMBER_REF_PATTERN.findall(normalized_text):
         candidate = str(match).strip()
         if not candidate:
+            continue
+        if re.search(r"(조|항|호|목|쪽|면)", candidate):
             continue
         normalized_candidate = _normalize_name(candidate)
         if normalized_candidate in excluded or normalized_candidate in seen:

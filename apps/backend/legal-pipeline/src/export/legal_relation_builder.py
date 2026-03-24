@@ -15,6 +15,43 @@ from src.parser.legal_case_parser import (
 )
 
 
+DEFAULT_RELATION_RULES = ("related_law", "cited_law", "cited_case")
+SUPPORTED_RELATION_RULES = frozenset(DEFAULT_RELATION_RULES)
+DEFAULT_EXPANDED_BASE_DIR = Path("data/expanded/03_expanded_related_docs")
+DEFAULT_RAW_RELATED_BASE_DIR = Path("data/raw/02_related_legal_docs")
+
+
+def normalize_relation_rules(relation_rules: list[str] | None) -> list[str]:
+    if not relation_rules:
+        return list(DEFAULT_RELATION_RULES)
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for rule in relation_rules:
+        rule_name = str(rule or "").strip()
+        if not rule_name or rule_name not in SUPPORTED_RELATION_RULES or rule_name in seen:
+            continue
+        seen.add(rule_name)
+        normalized.append(rule_name)
+
+    return normalized or list(DEFAULT_RELATION_RULES)
+
+
+def _should_read_expanded_rows(
+    expanded_base_dir: str | Path,
+    raw_related_base_dir: str | Path | None,
+) -> bool:
+    if raw_related_base_dir is None:
+        return True
+
+    expanded_dir = Path(expanded_base_dir)
+    raw_dir = Path(raw_related_base_dir)
+    return not (
+        expanded_dir == DEFAULT_EXPANDED_BASE_DIR
+        and raw_dir != DEFAULT_RAW_RELATED_BASE_DIR
+    )
+
+
 
 def _iter_candidate_hit_rows(raw_related_base_dir: Path):
     for path in sorted(raw_related_base_dir.rglob("candidate_hits.jsonl")):
@@ -91,6 +128,16 @@ def _confidence(
 
 
 
+def _has_direct_law_signal(
+    *,
+    law_name: str,
+    matched_law_names: list[str],
+    article_refs: list[dict[str, str]],
+) -> bool:
+    return bool(article_refs) or law_name in matched_law_names
+
+
+
 def build_root_relation_payloads(
     *,
     root_law_name: str,
@@ -99,7 +146,7 @@ def build_root_relation_payloads(
     relation_rules: list[str] | None = None,
     targets: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    relation_rules = relation_rules or ["related_law", "cited_law", "cited_case", "referenced_interpretation"]
+    relation_rules = normalize_relation_rules(relation_rules)
     allowed_targets = set(targets) if targets else None
 
     candidate_hits = [
@@ -153,13 +200,19 @@ def build_root_relation_payloads(
             body_text,
             exclude_numbers=[parsed.get("doc_number")],
         ) if body_text else []
+        direct_law_signal = _has_direct_law_signal(
+            law_name=law_name,
+            matched_law_names=matched_law_names,
+            article_refs=article_refs,
+        )
+        row_referenced_case_numbers = referenced_case_numbers if direct_law_signal else []
 
         relation_types: list[str] = ["search_hit"]
         if law_name in matched_law_names and "cited_law" in relation_rules:
             relation_types.append("cited_law")
         if article_refs and "related_law" in relation_rules:
             relation_types.append("related_law")
-        if referenced_case_numbers and "cited_case" in relation_rules:
+        if row_referenced_case_numbers and "cited_case" in relation_rules:
             relation_types.append("cited_case")
 
         relation_types = list(dict.fromkeys(relation_types))
@@ -192,8 +245,8 @@ def build_root_relation_payloads(
             "relation_types": relation_types,
             "article_keys": article_keys,
             "article_no_displays": article_no_displays,
-            "referenced_case_numbers": referenced_case_numbers,
-            "relation_confidence": _confidence(article_refs, matched_law_names, law_name, referenced_case_numbers),
+            "referenced_case_numbers": row_referenced_case_numbers,
+            "relation_confidence": _confidence(article_refs, matched_law_names, law_name, row_referenced_case_numbers),
             "evidence_preview": evidence_preview,
             "source_hit_count": len(hits),
             "source_file_paths": sorted(
@@ -263,11 +316,12 @@ def build_legal_relation_records(
     expanded_dir = Path(expanded_base_dir)
     rows: list[dict[str, Any]] = []
 
-    for path in sorted(expanded_dir.rglob("relation_records.jsonl")):
-        rows.extend(list(_iter_jsonl(path)))
+    if _should_read_expanded_rows(expanded_base_dir, raw_related_base_dir):
+        for path in sorted(expanded_dir.rglob("relation_records.jsonl")):
+            rows.extend(list(_iter_jsonl(path)))
 
-    if rows:
-        return _merge_relation_rows(rows)
+        if rows:
+            return _merge_relation_rows(rows)
 
     if raw_related_base_dir is None:
         return []

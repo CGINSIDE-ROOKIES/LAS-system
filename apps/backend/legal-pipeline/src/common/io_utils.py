@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 
 def _safe_filename(text: str) -> str:
@@ -31,11 +31,16 @@ def _read_json(path: Path) -> dict[str, Any]:
     return data
 
 
-def _write_jsonl(path: Path, rows: list[dict[str, Any]] | Iterator[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as file:
+def write_jsonl(rows: Iterable[dict[str, Any]], path: str | Path) -> None:
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("w", encoding="utf-8") as file:
         for row in rows:
             file.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
+    write_jsonl(rows, path)
 
 
 
