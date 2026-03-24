@@ -12,7 +12,7 @@ from typing import Any, Iterator
 
 from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError
 from ..retrieval.context import build_llm_context_rows, build_llm_context_text
-from ..retrieval.fusion import fuse_rrf
+from ..retrieval.fusion import fuse_rrf, fuse_rrf_multi
 from ..retrieval.opensearch import search_bm25
 from ..retrieval.qdrant import search_qdrant
 from ..retrieval.ranking import apply_law_boost, select_rows_with_law_policy
@@ -148,9 +148,8 @@ class RagPipeline:
         rcfg = self._cfg.retrieval
         candidate_k = max(rcfg.top_k, rcfg.candidate_k)
 
-        qdrant_rows: list[dict[str, Any]] = []
-        for collection in rcfg.qdrant_collections:
-            rows = search_qdrant(
+        collection_rows = [
+            search_qdrant(
                 question, candidate_k,
                 qdrant_url=rcfg.qdrant_url,
                 collection=collection,
@@ -163,12 +162,9 @@ class RagPipeline:
                 fetch_multiplier=2,
                 vector_name=(rcfg.qdrant_vector_name_map or {}).get(collection),
             )
-            qdrant_rows.extend(rows)
-
-        # 컬렉션 간 score 기준으로 재정렬 후 rank 재부여
-        qdrant_rows.sort(key=lambda r: r.get("score") or 0.0, reverse=True)
-        for i, row in enumerate(qdrant_rows, start=1):
-            row["rank"] = i
+            for collection in rcfg.qdrant_collections
+        ]
+        qdrant_rows = fuse_rrf_multi(collection_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
 
         if rcfg.opensearch_url:
             try:

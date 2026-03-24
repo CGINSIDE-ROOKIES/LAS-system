@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from query_hybrid_rrf import fuse_rrf
+from query_hybrid_rrf import fuse_rrf, fuse_rrf_multi
 from retrieval_common import (
     DEFAULT_EMBEDDING_MODEL,
     require_env_or_arg,
@@ -177,7 +177,7 @@ def row_hit(row: GoldRow, results: list[dict[str, object]]) -> bool:
                 return True
         return False
 
-    if expected in {"prec", "decc", "expc"}:
+    if expected in {"prec", "decc", "expc", "relation"}:
         return any(str(r.get("doc_type", "") or "") == expected for r in results)
 
     if expected == "mixed":
@@ -252,19 +252,17 @@ def eval_backend(
         by_intent[row.intent]["count"] += 1
 
         if backend == "qdrant":
-            all_rows: list[dict] = []
-            for col in qdrant_collections:
-                all_rows.extend(search_qdrant(
+            collection_rows = [
+                search_qdrant(
                     row.query, args.top_k,
                     qdrant_url=qdrant_url, collection=col,
                     timeout=args.timeout, embedding_model=model_name,
                     api_key=qdrant_api_key, dedup=True, fetch_multiplier=2,
                     vector_name=vector_name_map.get(col),
-                ))
-            all_rows.sort(key=lambda r: float(r.get("score") or 0.0), reverse=True)
-            res = all_rows[: max(1, args.top_k)]
-            for i, r in enumerate(res, start=1):
-                r["rank"] = i
+                )
+                for col in qdrant_collections
+            ]
+            res = fuse_rrf_multi(collection_rows, rrf_k=args.rrf_k, top_k=args.top_k)
         elif backend == "bm25":
             res = search_bm25(
                 row.query,
@@ -279,16 +277,19 @@ def eval_backend(
                 fetch_multiplier=5,
             )
         else:
-            qdrant_rows = []
-            for col in qdrant_collections:
-                qdrant_rows.extend(search_qdrant(
+            qdrant_collection_rows = [
+                search_qdrant(
                     row.query, max(args.top_k, args.candidate_k),
                     qdrant_url=qdrant_url, collection=col,
                     timeout=args.timeout, embedding_model=model_name,
                     api_key=qdrant_api_key, dedup=True, fetch_multiplier=2,
                     vector_name=vector_name_map.get(col),
-                ))
-            qdrant_rows.sort(key=lambda r: float(r.get("score") or 0.0), reverse=True)
+                )
+                for col in qdrant_collections
+            ]
+            qdrant_rows = fuse_rrf_multi(
+                qdrant_collection_rows, rrf_k=args.rrf_k, top_k=max(args.top_k, args.candidate_k)
+            )
             bm25_rows = search_bm25(
                 row.query,
                 max(args.top_k, args.candidate_k),

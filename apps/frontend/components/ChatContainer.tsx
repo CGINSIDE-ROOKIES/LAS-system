@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { QuestionInput } from "./QuestionInput";
 import { MessageBubble, ChatMessage } from "./MessageBubble";
 import { askStream } from "@/lib/api-client";
-import { ERROR_MESSAGES } from "@/lib/errors";
+import { ERROR_MESSAGES, sseErrorMessage } from "@/lib/errors";
 
 export function ChatContainer() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -65,15 +65,23 @@ export function ChatContainer() {
                         .map((doc) => {
                           // source_id: law::{law_name}::{article_no}::{chunk}
                           const parts = (doc.source_id || "").split("::");
-                          let articleNo = parts[2] ?? "";
-                          // source_id에 조문 번호 없으면 텍스트의 "조문번호:" 필드에서 추출
-                          if (!articleNo) {
+                          const sourceArticleNo = parts[2] ?? "";
+                          let articleLabel: string;
+                          if (sourceArticleNo) {
+                            // source_id에 숫자만 있는 경우 (e.g. "9" → "제9조")
+                            articleLabel = `${doc.law_name} 제${sourceArticleNo}조`;
+                          } else {
+                            // 텍스트의 "조문번호:" 필드에서 추출 (e.g. "제13조의4", "제22조")
                             const noMatch = (doc.text || doc.snippet).match(/조문번호:\s*(제?\d[\d조의]*)/);
-                            if (noMatch) articleNo = noMatch[1].replace(/^제/, "").replace(/조$/, "");
+                            if (noMatch) {
+                              const extracted = noMatch[1];
+                              articleLabel = extracted.startsWith("제")
+                                ? `${doc.law_name} ${extracted}`
+                                : `${doc.law_name} 제${extracted}조`;
+                            } else {
+                              articleLabel = doc.law_name;
+                            }
                           }
-                          const articleLabel = articleNo
-                            ? `${doc.law_name} 제${articleNo}조`
-                            : doc.law_name;
 
                           // text(전체) 또는 snippet에서 메타데이터 헤더 제거
                           const raw = doc.text || doc.snippet;
@@ -119,7 +127,7 @@ export function ChatContainer() {
         } else if (event.type === "error") {
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === aiId ? { ...m, isStreaming: false, content: event.error } : m
+              m.id === aiId ? { ...m, isStreaming: false, content: sseErrorMessage(event.code) } : m
             )
           );
         }
