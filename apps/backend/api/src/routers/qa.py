@@ -31,6 +31,7 @@ class RetrievedDoc(BaseModel):
     law_name: str
     score: float | None
     snippet: str
+    text: str = ""
 
 
 class AskResponse(BaseModel):
