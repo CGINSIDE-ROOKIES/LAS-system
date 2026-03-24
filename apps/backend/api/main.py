@@ -4,6 +4,8 @@
   uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 """
 
+from contextlib import asynccontextmanager
+
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
@@ -12,13 +14,23 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from src.db import close_pool, init_pool
 from src.retrieval.common import RetrievalError
 from src.routers import health, qa
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_pool()
+    yield
+    close_pool()
+
 
 app = FastAPI(
     title="LAS API",
     description="Legal AI Assistant 백엔드 API",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
