@@ -231,7 +231,100 @@ def find_related_law_names(text: str, family_law_names: list[str]) -> list[str]:
 
 FIRST_ARTICLE_PATTERN = re.compile(r"^제(\d+)조(?:의(\d+))?")
 CONTINUED_ARTICLE_PATTERN = re.compile(r"^(?:,|및|와|과|또는|혹은|·)(?:제)?(\d+)조(?:의(\d+))?")
-CASE_NUMBER_REF_PATTERN = re.compile(r"(?<!\d)(\d{2,4}[가-힣]{1,4}\d{1,8})(?!\d)")
+CASE_NUMBER_REF_PATTERN = re.compile(r"(?<!\d)(?P<year>\d{2,4})(?P<case_type>[가-힣]{1,4})(?P<serial>\d{1,8})(?!\d)")
+ALLOWED_CASE_TYPE_TOKENS = {
+    "가",
+    "가단",
+    "가합",
+    "가소",
+    "거",
+    "고",
+    "고단",
+    "고약",
+    "고정",
+    "고합",
+    "고합부",
+    "고정단",
+    "과",
+    "구",
+    "구단",
+    "구라",
+    "구합",
+    "그",
+    "기",
+    "나",
+    "누",
+    "다",
+    "더",
+    "도",
+    "두",
+    "드",
+    "라",
+    "마",
+    "머",
+    "모",
+    "무",
+    "바",
+    "사",
+    "서",
+    "소",
+    "수",
+    "스",
+    "아",
+    "오",
+    "우",
+    "자",
+    "재",
+    "저",
+    "차",
+    "카",
+    "타",
+    "파",
+    "하",
+    "허",
+    "헌가",
+    "헌나",
+    "헌다",
+    "헌라",
+    "헌마",
+    "헌바",
+    "헌사",
+    "헌아",
+}
+DISALLOWED_CASE_TYPE_TOKENS = {
+    "개",
+    "건",
+    "개월",
+    "년",
+    "만",
+    "명",
+    "배",
+    "백",
+    "번",
+    "부",
+    "시",
+    "억",
+    "월",
+    "원",
+    "일",
+    "장",
+    "절",
+    "점",
+    "조",
+    "주",
+    "쪽",
+    "천",
+    "층",
+    "퍼센트",
+    "평",
+    "항",
+    "호",
+    "회",
+}
+CASE_REF_CONTEXT_PATTERN = re.compile(
+    r"(판결|결정|사건|사건번호|선고|재판|대법원|고등법원|지방법원|법원|헌재|헌법재판소|원심|항소심|상고심|참조)"
+)
+CASE_REF_TRAILING_NOISE_PATTERN = re.compile(r"^(?:원|만원|천원|억원|조원|개|건|명|차|항|호|조)")
 
 
 def _format_article_ref(main_no: str, branch_no: str | None) -> dict[str, str]:
@@ -241,6 +334,23 @@ def _format_article_ref(main_no: str, branch_no: str | None) -> dict[str, str]:
         "article_key": article_key,
         "article_no_display": article_display,
     }
+
+
+def _is_valid_case_type_token(case_type: str) -> bool:
+    token = str(case_type or "").strip()
+    if not token:
+        return False
+    if token in DISALLOWED_CASE_TYPE_TOKENS:
+        return False
+    if any(char in DISALLOWED_CASE_TYPE_TOKENS for char in token):
+        return False
+    return token in ALLOWED_CASE_TYPE_TOKENS
+
+
+def _has_case_reference_context(text: str, start: int, end: int) -> bool:
+    left = text[max(0, start - 16):start]
+    right = text[end:min(len(text), end + 16)]
+    return bool(CASE_REF_CONTEXT_PATTERN.search(left) or CASE_REF_CONTEXT_PATTERN.search(right))
 
 
 
@@ -313,11 +423,21 @@ def extract_case_number_refs(text: str, exclude_numbers: Iterable[str] | None = 
     results: list[str] = []
     seen: set[str] = set()
 
-    for match in CASE_NUMBER_REF_PATTERN.findall(normalized_text):
-        candidate = str(match).strip()
+    for match in CASE_NUMBER_REF_PATTERN.finditer(normalized_text):
+        candidate = str(match.group(0)).strip()
         if not candidate:
             continue
         if re.search(r"(조|항|호|목|쪽|면)", candidate):
+            continue
+        case_type = str(match.group("case_type") or "").strip()
+        if not _is_valid_case_type_token(case_type) and not _has_case_reference_context(
+            normalized_text,
+            match.start(),
+            match.end(),
+        ):
+            continue
+        trailing_text = normalized_text[match.end():match.end() + 4]
+        if CASE_REF_TRAILING_NOISE_PATTERN.match(trailing_text):
             continue
         normalized_candidate = _normalize_name(candidate)
         if normalized_candidate in excluded or normalized_candidate in seen:

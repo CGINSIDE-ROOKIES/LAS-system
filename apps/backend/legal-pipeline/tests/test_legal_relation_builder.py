@@ -192,6 +192,66 @@ def test_build_legal_relation_records_adds_cited_case_when_body_mentions_other_c
     assert "참조 사건번호: 2018다12345" in record["text"]
 
 
+def test_build_legal_relation_records_does_not_treat_amount_text_as_cited_case(tmp_path):
+    payload = {
+        "판례일련번호": "123456",
+        "사건명": "임금",
+        "사건번호": "2019다12345",
+        "선고일자": "2019.05.30",
+        "판례내용": "피고는 근로기준법 제43조의2에 따라 119만2666원과 66만4000원을 지급하여야 한다.",
+    }
+    raw_dir = tmp_path / "raw" / "02_related_legal_docs"
+    root = raw_dir / "근로기준법"
+    detail_path = root / "canonical" / "prec" / "case_prec_123456__detail.json"
+    _write_json(detail_path, payload)
+
+    _write_jsonl(
+        root / "candidate_hits.jsonl",
+        [
+            {
+                "candidate_id": "cand1",
+                "canonical_case_id": "case::prec::123456",
+                "target": "prec",
+                "source_law_name": "근로기준법",
+                "source_law_uid": "law-001",
+                "doc_id": "123456",
+                "title": "임금",
+                "doc_number": "2019다12345",
+                "root_law_name": "근로기준법",
+                "source_file_path": "list1.json",
+            }
+        ],
+    )
+    _write_jsonl(
+        root / "canonical_cases.jsonl",
+        [
+            {
+                "id": "case::prec::123456",
+                "canonical_case_id": "case::prec::123456",
+                "canonical_id": "case::prec::123456",
+                "target": "prec",
+                "doc_type_label": "판례",
+                "doc_id": "123456",
+                "title": "임금",
+                "doc_number": "2019다12345",
+                "root_law_name": "근로기준법",
+                "source_law_names": ["근로기준법"],
+                "source_law_uids": ["law-001"],
+                "source_hit_count": 1,
+                "detail_available": True,
+                "detail_payload_path": str(detail_path),
+            }
+        ],
+    )
+
+    records = build_legal_relation_records(raw_related_base_dir=raw_dir)
+
+    assert len(records) == 1
+    record = records[0]
+    assert "cited_case" not in record["relation_types"]
+    assert record["referenced_case_numbers"] == []
+
+
 def test_build_legal_relation_records_keeps_all_article_refs_in_single_relation(tmp_path):
     payload = {
         "판례일련번호": "123456",
