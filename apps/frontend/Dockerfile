@@ -34,10 +34,10 @@ COPY turbo.json package.json pnpm-workspace.yaml ./
 RUN pnpm --filter frontend build \
     && echo "=== standalone root ===" \
     && ls -la apps/frontend/.next/standalone/ \
-    && echo "=== standalone node_modules ===" \
-    && ls apps/frontend/.next/standalone/node_modules/ \
-    && echo "=== standalone .next ===" \
-    && ls -la apps/frontend/.next/standalone/.next/
+    && echo "=== standalone node_modules (top-level) ===" \
+    && ls apps/frontend/.next/standalone/node_modules/ | head -20 \
+    && echo "=== standalone apps/frontend ===" \
+    && ls -la apps/frontend/.next/standalone/apps/frontend/
 
 # ── Stage 3: runtime ────────────────────────────────
 FROM node:20-alpine AS runner
@@ -45,10 +45,12 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
+# outputFileTracingRoot=monorepo root means standalone mirrors the full tree:
+#   node_modules/ (with .pnpm), apps/frontend/server.js, apps/frontend/.next/
 COPY --from=builder /app/apps/frontend/.next/standalone ./
-COPY --from=builder /app/apps/frontend/.next/static ./.next/static
-COPY --from=builder /app/apps/frontend/public ./public
+COPY --from=builder /app/apps/frontend/.next/static ./apps/frontend/.next/static
+COPY --from=builder /app/apps/frontend/public ./apps/frontend/public
 
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+CMD ["node", "apps/frontend/server.js"]
