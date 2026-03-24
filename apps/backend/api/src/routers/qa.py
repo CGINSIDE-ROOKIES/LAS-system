@@ -9,7 +9,7 @@ import json
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from src.dependencies import get_rag_pipeline
 from src.generation.pipeline import RagPipeline
@@ -18,10 +18,30 @@ from src.retrieval.common import RetrievalError
 router = APIRouter(tags=["qa"])
 
 
+_VALID_DOC_TYPES = {"law", "case", "doc"}
+
+
 class AskRequest(BaseModel):
-    question: str
+    question: str = Field(min_length=1, max_length=2000)
     doc_types: list[str] | None = None
     law_names: list[str] | None = None
+
+    @field_validator("question")
+    @classmethod
+    def question_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("질문은 공백만으로 이루어질 수 없습니다.")
+        return v.strip()
+
+    @field_validator("doc_types")
+    @classmethod
+    def doc_types_valid(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        invalid = [t for t in v if t not in _VALID_DOC_TYPES]
+        if invalid:
+            raise ValueError(f"유효하지 않은 doc_type: {invalid}. 허용값: {sorted(_VALID_DOC_TYPES)}")
+        return v
 
 
 class RetrievedDoc(BaseModel):
@@ -31,6 +51,7 @@ class RetrievedDoc(BaseModel):
     law_name: str
     score: float | None
     snippet: str
+    text: str = ""
 
 
 class AskResponse(BaseModel):

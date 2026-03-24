@@ -62,6 +62,7 @@ def search_qdrant(
     law_names: list[str] | None = None,
     dedup: bool = True,
     fetch_multiplier: int = 2,
+    vector_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """쿼리를 임베딩 후 Qdrant에서 유사 문서 Top-K를 검색한다.
 
@@ -76,7 +77,7 @@ def search_qdrant(
 
     fetch_limit = max(1, top_k * max(1, fetch_multiplier)) if dedup else max(1, top_k)
     payload: dict[str, Any] = {
-        "vector": vector,
+        "vector": {"name": vector_name, "vector": vector} if vector_name else vector,
         "limit": fetch_limit,
         "with_payload": True,
         "with_vector": False,

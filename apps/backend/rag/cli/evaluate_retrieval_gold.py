@@ -2,8 +2,8 @@
 """Evaluate retrieval quality against gold evaluation CSV.
 
 Usage:
-  uv run python scripts/evaluate_retrieval_gold.py --top-k 5
-  uv run python scripts/evaluate_retrieval_gold.py --backend hybrid --top-k 5
+  uv run python cli/evaluate_retrieval_gold.py --top-k 5
+  uv run python cli/evaluate_retrieval_gold.py --backend hybrid --top-k 5
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from apps.backend.rag.cli.query_hybrid_rrf import fuse_rrf
-from apps.backend.rag.cli.retrieval_common import (
+from query_hybrid_rrf import fuse_rrf, fuse_rrf_multi
+from retrieval_common import (
     DEFAULT_EMBEDDING_MODEL,
     require_env_or_arg,
     search_bm25,
@@ -177,7 +177,7 @@ def row_hit(row: GoldRow, results: list[dict[str, object]]) -> bool:
                 return True
         return False
 
-    if expected in {"prec", "decc", "expc"}:
+    if expected in {"prec", "decc", "expc", "relation"}:
         return any(str(r.get("doc_type", "") or "") == expected for r in results)
 
     if expected == "mixed":
@@ -200,10 +200,27 @@ def eval_backend(
     qdrant_url = require_env_or_arg(
         args.qdrant_url, "QDRANT_URL", "http://localhost:6333"
     )
-    qdrant_collection = require_env_or_arg(args.qdrant_collection, "QDRANT_COLLECTION")
+    raw_collections = (
+        args.qdrant_collection
+        or os.getenv("QDRANT_COLLECTIONS", "")
+        or os.getenv("QDRANT_COLLECTION", "")
+    ).strip()
+    if not raw_collections:
+        raise SystemExit("Missing required setting: --qdrant-collection or QDRANT_COLLECTIONS")
+    qdrant_collections = [c.strip() for c in raw_collections.split(",") if c.strip()]
+
     qdrant_api_key = (
         args.qdrant_api_key or os.getenv("QDRANT_API_KEY", "").strip() or None
     )
+
+    # 컬렉션별 named vector 매핑 (예: law_article=body)
+    vector_name_map: dict[str, str | None] = {}
+    raw_map = os.getenv("QDRANT_VECTOR_NAME_MAP", "law_article=body")
+    for entry in raw_map.split(","):
+        entry = entry.strip()
+        if "=" in entry:
+            col, _, name = entry.partition("=")
+            vector_name_map[col.strip()] = name.strip() or None
 
     opensearch_url = require_env_or_arg(
         args.opensearch_url, "OPENSEARCH_URL", "http://localhost:9200"
@@ -235,17 +252,17 @@ def eval_backend(
         by_intent[row.intent]["count"] += 1
 
         if backend == "qdrant":
-            res = search_qdrant(
-                row.query,
-                args.top_k,
-                qdrant_url=qdrant_url,
-                collection=qdrant_collection,
-                timeout=args.timeout,
-                embedding_model=model_name,
-                api_key=qdrant_api_key,
-                dedup=True,
-                fetch_multiplier=2,
-            )
+            collection_rows = [
+                search_qdrant(
+                    row.query, args.top_k,
+                    qdrant_url=qdrant_url, collection=col,
+                    timeout=args.timeout, embedding_model=model_name,
+                    api_key=qdrant_api_key, dedup=True, fetch_multiplier=2,
+                    vector_name=vector_name_map.get(col),
+                )
+                for col in qdrant_collections
+            ]
+            res = fuse_rrf_multi(collection_rows, rrf_k=args.rrf_k, top_k=args.top_k)
         elif backend == "bm25":
             res = search_bm25(
                 row.query,
@@ -260,16 +277,18 @@ def eval_backend(
                 fetch_multiplier=5,
             )
         else:
-            qdrant_rows = search_qdrant(
-                row.query,
-                max(args.top_k, args.candidate_k),
-                qdrant_url=qdrant_url,
-                collection=qdrant_collection,
-                timeout=args.timeout,
-                embedding_model=model_name,
-                api_key=qdrant_api_key,
-                dedup=True,
-                fetch_multiplier=2,
+            qdrant_collection_rows = [
+                search_qdrant(
+                    row.query, max(args.top_k, args.candidate_k),
+                    qdrant_url=qdrant_url, collection=col,
+                    timeout=args.timeout, embedding_model=model_name,
+                    api_key=qdrant_api_key, dedup=True, fetch_multiplier=2,
+                    vector_name=vector_name_map.get(col),
+                )
+                for col in qdrant_collections
+            ]
+            qdrant_rows = fuse_rrf_multi(
+                qdrant_collection_rows, rrf_k=args.rrf_k, top_k=max(args.top_k, args.candidate_k)
             )
             bm25_rows = search_bm25(
                 row.query,

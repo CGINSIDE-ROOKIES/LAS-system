@@ -10,9 +10,9 @@ import os
 from dataclasses import dataclass
 from typing import Any, Iterator
 
-from ..retrieval.common import DEFAULT_EMBEDDING_MODEL
+from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError
 from ..retrieval.context import build_llm_context_rows, build_llm_context_text
-from ..retrieval.fusion import fuse_rrf
+from ..retrieval.fusion import fuse_rrf, fuse_rrf_multi
 from ..retrieval.opensearch import search_bm25
 from ..retrieval.qdrant import search_qdrant
 from ..retrieval.ranking import apply_law_boost, select_rows_with_law_policy
@@ -20,17 +20,16 @@ from ..retrieval.service import RetrievalConfig
 from .service import GenerationConfig, GenerationService
 
 DEFAULT_SYSTEM_PROMPT = (
-    "당신은 법률 Q&A 보조 시스템입니다.\n"
-    "반드시 제공된 컨텍스트 안의 정보만 근거로 답변하세요.\n"
-    "컨텍스트에 없는 사실은 추측하거나 단정하지 마세요.\n"
-    "근거가 부족하면 반드시 '근거 부족'이라고 명시하세요.\n"
-    "상충되는 근거가 있으면 상충 사실을 먼저 밝히세요.\n\n"
-    "다음 형식을 반드시 지켜 답변하세요:\n"
-    "요약 답변: <1~3문장>\n"
-    "근거:\n"
-    "- <핵심 근거 1> (law_name=<...>, doc_type=<...>, source_id=<...>)\n"
-    "- <핵심 근거 2> (law_name=<...>, doc_type=<...>, source_id=<...>)\n"
-    "근거 부족/한계: <없음 또는 부족 사유 1문장>"
+    "당신은 노동법 및 하도급법 전문 법률 Q&A 어시스턴트입니다.\n"
+    "주요 대상 법령은 근로기준법, 기간제 및 단시간근로자 보호 등에 관한 법률, "
+    "파견근로자 보호 등에 관한 법률, 최저임금법, 남녀고용평등과 일·가정 양립 지원에 관한 법률, "
+    "근로자퇴직급여 보장법, 하도급거래 공정화에 관한 법률, 건설산업기본법 등입니다.\n\n"
+    "답변 시 다음 원칙을 따르세요:\n"
+    "- 제공된 컨텍스트에 있는 내용만 근거로 답변하세요.\n"
+    "- 조문 번호나 출처 표기는 하지 마세요. 근거 문서는 별도로 제공됩니다.\n"
+    "- 핵심 내용을 3~5문장 이내로 간결하게 전달하세요.\n"
+    "- 컨텍스트에 없는 사실은 추측하거나 단정하지 말고, 근거가 부족한 경우 한 문장으로 짧게 밝히세요.\n"
+    "- 전문적이되 자연스러운 구어체로 작성하세요."
 )
 
 
@@ -103,14 +102,28 @@ class RagPipeline:
     @classmethod
     def from_env(cls) -> RagPipeline:
         """환경변수에서 설정을 읽어 인스턴스를 생성한다."""
+        raw_collections = os.environ["QDRANT_COLLECTIONS"]
+        collections = [c.strip() for c in raw_collections.split(",") if c.strip()]
+
+        # QDRANT_VECTOR_NAME_MAP=law_article=body,legal_case= 형식 파싱
+        vector_name_map: dict[str, str] = {}
+        raw_map = os.getenv("QDRANT_VECTOR_NAME_MAP", "")
+        for entry in raw_map.split(","):
+            entry = entry.strip()
+            if "=" in entry:
+                col, _, name = entry.partition("=")
+                if col.strip() and name.strip():
+                    vector_name_map[col.strip()] = name.strip()
+
         return cls(
             RagPipelineConfig(
                 retrieval=RetrievalConfig(
                     qdrant_url=os.environ["QDRANT_URL"],
-                    qdrant_collection=os.environ["QDRANT_COLLECTION"],
+                    qdrant_collections=collections,
+                    qdrant_vector_name_map=vector_name_map or None,
                     qdrant_api_key=os.getenv("QDRANT_API_KEY") or None,
-                    opensearch_url=os.environ["OPENSEARCH_URL"],
-                    opensearch_index=os.environ["OPENSEARCH_INDEX"],
+                    opensearch_url=os.getenv("OPENSEARCH_URL", ""),
+                    opensearch_index=os.getenv("OPENSEARCH_INDEX", ""),
                     opensearch_api_key=os.getenv("OPENSEARCH_API_KEY") or None,
                     opensearch_username=os.getenv("OPENSEARCH_USERNAME") or None,
                     opensearch_password=os.getenv("OPENSEARCH_PASSWORD") or None,
@@ -135,31 +148,43 @@ class RagPipeline:
         rcfg = self._cfg.retrieval
         candidate_k = max(rcfg.top_k, rcfg.candidate_k)
 
-        qdrant_rows = search_qdrant(
-            question, candidate_k,
-            qdrant_url=rcfg.qdrant_url,
-            collection=rcfg.qdrant_collection,
-            timeout=rcfg.timeout,
-            embedding_model=rcfg.embedding_model,
-            api_key=rcfg.qdrant_api_key,
-            doc_types=doc_types,
-            law_names=law_names,
-            dedup=True,
-            fetch_multiplier=2,
-        )
-        bm25_rows = search_bm25(
-            question, candidate_k,
-            opensearch_url=rcfg.opensearch_url,
-            index_name=rcfg.opensearch_index,
-            timeout=rcfg.timeout,
-            api_key=rcfg.opensearch_api_key,
-            username=rcfg.opensearch_username,
-            password=rcfg.opensearch_password,
-            doc_types=doc_types,
-            law_names=law_names,
-            dedup=True,
-            fetch_multiplier=5,
-        )
+        collection_rows = [
+            search_qdrant(
+                question, candidate_k,
+                qdrant_url=rcfg.qdrant_url,
+                collection=collection,
+                timeout=rcfg.timeout,
+                embedding_model=rcfg.embedding_model,
+                api_key=rcfg.qdrant_api_key,
+                doc_types=doc_types,
+                law_names=law_names,
+                dedup=True,
+                fetch_multiplier=2,
+                vector_name=(rcfg.qdrant_vector_name_map or {}).get(collection),
+            )
+            for collection in rcfg.qdrant_collections
+        ]
+        qdrant_rows = fuse_rrf_multi(collection_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
+
+        if rcfg.opensearch_url:
+            try:
+                bm25_rows = search_bm25(
+                    question, candidate_k,
+                    opensearch_url=rcfg.opensearch_url,
+                    index_name=rcfg.opensearch_index,
+                    timeout=rcfg.timeout,
+                    api_key=rcfg.opensearch_api_key,
+                    username=rcfg.opensearch_username,
+                    password=rcfg.opensearch_password,
+                    doc_types=doc_types,
+                    law_names=law_names,
+                    dedup=True,
+                    fetch_multiplier=5,
+                )
+            except RetrievalError:
+                bm25_rows = []
+        else:
+            bm25_rows = []
 
         # candidate_k 전체를 융합해야 law 보강 시 top_k 바깥 문서를 참조할 수 있음
         rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
@@ -202,6 +227,7 @@ class RagPipeline:
                 "law_name": str(row.get("law_name", "") or ""),
                 "score": row.get("score"),
                 "snippet": str(row.get("snippet", "") or "")[:snippet_max] if snippet_max > 0 else str(row.get("snippet", "") or ""),
+                "text": str(row.get("text", "") or ""),
             }
             for row in llm_rows
         ]
