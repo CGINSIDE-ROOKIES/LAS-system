@@ -86,4 +86,4 @@ jobs:
       - name: Deploy containers
         run: |
           tailscale ssh ${{ vars.VM_USER }}@${{ vars.VM_TAILSCALE_HOST }} \
-            "cd ~/las-deploy && docker compose pull && docker compose up -d --remove-orphans"
+            "cd ~/las-deploy && docker compose pull && docker compose up -d --remove-orphans && docker image prune -a -f --filter 'until=96h'"
