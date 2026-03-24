@@ -1,0 +1,8 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "review": "./doc_processor/review_pipeline.py:review_graph",
+    "parser": "./doc_processor/parser.py:parser_graph"
+  },
+  "env": ".env"
+}

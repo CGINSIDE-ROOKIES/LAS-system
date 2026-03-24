@@ -1,0 +1,25 @@
+services:
+  backend-api:
+    image: ghcr.io/cginside-rookies/las-system/backend-api:dev
+    container_name: las-backend-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file: .env.backend-api
+
+  backend-doc-pipeline:
+    image: ghcr.io/cginside-rookies/las-system/backend-doc-pipeline:dev
+    container_name: las-doc-pipeline
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+    env_file: .env.doc-pipeline
+
+  frontend:
+    image: ghcr.io/cginside-rookies/las-system/frontend:dev
+    container_name: las-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - ALLOWED_FRAME_ORIGINS=${ALLOWED_FRAME_ORIGINS:-}

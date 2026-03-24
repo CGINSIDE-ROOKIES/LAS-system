@@ -1,0 +1,89 @@
+name: CI/CD — dev
+
+on:
+  push:
+    branches: [dev]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/cginside-rookies/las-system
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # ── Build backend-api ──────────────────────────────
+  build-backend-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: apps/backend
+          file: apps/backend/api/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/backend-api:dev
+
+  # ── Build doc-pipeline ─────────────────────────────
+  build-doc-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: apps/backend/doc-processor
+          file: apps/backend/doc-processor/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/backend-doc-pipeline:dev
+
+  # ── Build frontend ─────────────────────────────────
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/frontend/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/frontend:dev
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+
+  # ── Deploy to VM via Tailscale SSH ─────────────────
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build-backend-api, build-doc-pipeline, build-frontend]
+    steps:
+      - uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Deploy containers
+        run: |
+          tailscale ssh ${{ vars.VM_USER }}@${{ vars.VM_TAILSCALE_HOST }} \
+            "cd ~/las-deploy && docker compose pull && docker compose up -d --remove-orphans"
