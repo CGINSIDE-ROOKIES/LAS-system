@@ -130,7 +130,7 @@ def test_build_legal_relation_records_dedupes_by_case_and_law(tmp_path):
     assert decree_relation["relation_types"] == ["search_hit"]
 
 
-def test_build_legal_relation_records_adds_cited_case_when_body_mentions_other_case_numbers(tmp_path):
+def test_build_legal_relation_records_keeps_case_reference_out_of_law_case_rows(tmp_path):
     payload = {
         "판례일련번호": "123456",
         "사건명": "임금",
@@ -186,10 +186,11 @@ def test_build_legal_relation_records_adds_cited_case_when_body_mentions_other_c
 
     assert len(records) == 1
     record = records[0]
-    assert "cited_case" in record["relation_types"]
-    assert record["referenced_case_numbers"] == ["2018다12345"]
+    assert record["relation_model"] == "law_to_case"
+    assert "cited_case" not in record["relation_types"]
+    assert "referenced_case_numbers" not in record
     assert record["relation_confidence"] == 0.95
-    assert "참조 사건번호: 2018다12345" in record["text"]
+    assert "관련 조문: 제43조의2" in record["text"]
 
 
 def test_build_legal_relation_records_does_not_treat_amount_text_as_cited_case(tmp_path):
@@ -249,7 +250,7 @@ def test_build_legal_relation_records_does_not_treat_amount_text_as_cited_case(t
     assert len(records) == 1
     record = records[0]
     assert "cited_case" not in record["relation_types"]
-    assert record["referenced_case_numbers"] == []
+    assert "referenced_case_numbers" not in record
 
 
 def test_build_legal_relation_records_keeps_all_article_refs_in_single_relation(tmp_path):

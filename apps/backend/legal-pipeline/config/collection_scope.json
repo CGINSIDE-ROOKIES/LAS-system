@@ -41,8 +41,7 @@
             "seed_from_files": ["01_current_law", "02_related_legal_docs"],
             "relation_rules": [
                 "related_law",
-                "cited_law",
-                "cited_case"
+                "cited_law"
             ]
         }
     ],
