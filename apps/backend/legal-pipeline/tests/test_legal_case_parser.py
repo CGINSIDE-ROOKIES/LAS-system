@@ -65,3 +65,32 @@ def test_case_number_reference_extraction_excludes_self_doc_number():
     refs = extract_case_number_refs(text, exclude_numbers=["2019다12345"])
 
     assert refs == ["2018다12345", "2020헌바12"]
+
+
+def test_case_number_reference_extraction_does_not_treat_amounts_as_case_numbers():
+    text = "피고는 119만2666원과 66만4000원을 지급하였고, 근로기준법 제43조의2를 함께 언급하였다."
+
+    refs = extract_case_number_refs(text)
+
+    assert refs == []
+
+
+def test_article_reference_extraction_supports_multiple_articles_with_mixed_notation():
+    text = "이 사건은 근로기준법 제23조, 30조 및 제43조의2의 적용 여부가 문제된다."
+
+    article_refs = extract_explicit_article_refs(text, ["근로기준법", "최저임금법"])
+
+    assert article_refs["근로기준법"] == [
+        {"article_key": "23", "article_no_display": "제23조"},
+        {"article_key": "30", "article_no_display": "제30조"},
+        {"article_key": "43-2", "article_no_display": "제43조의2"},
+    ]
+
+
+
+def test_case_number_reference_extraction_does_not_treat_articles_as_case_numbers():
+    text = "원심은 근로기준법 제43조의2 및 제12조를 근거로 판단하였다."
+
+    refs = extract_case_number_refs(text)
+
+    assert refs == []
