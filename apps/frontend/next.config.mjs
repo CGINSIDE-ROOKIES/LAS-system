@@ -15,7 +15,9 @@ const frameAncestors =
 
 const nextConfig = {
   output: "standalone",
-  outputFileTracingRoot: path.join(__dirname, "../../"),
+  experimental: {
+    outputFileTracingRoot: path.join(__dirname, "../../"),
+  },
   async headers() {
     return [
       {

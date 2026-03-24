@@ -36,8 +36,10 @@ RUN pnpm --filter frontend build \
     && ls -la apps/frontend/.next/standalone/ \
     && echo "=== standalone node_modules (top-level) ===" \
     && ls apps/frontend/.next/standalone/node_modules/ | head -20 \
-    && echo "=== standalone apps/frontend ===" \
-    && ls -la apps/frontend/.next/standalone/apps/frontend/
+    && echo "=== standalone apps/frontend (should exist with experimental.outputFileTracingRoot) ===" \
+    && ls -la apps/frontend/.next/standalone/apps/frontend/ \
+    && echo "=== standalone node_modules (.pnpm should be present) ===" \
+    && ls apps/frontend/.next/standalone/node_modules/ | head -5
 
 # ── Stage 3: runtime ────────────────────────────────
 FROM node:20-alpine AS runner
