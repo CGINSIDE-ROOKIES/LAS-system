@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable, Literal
 
@@ -16,12 +17,15 @@ from src.collector.legal_doc_collector import (
     extract_list_items,
 )
 from src.common.law_meta import (
+    build_law_uid,
     build_record_id,
     normalize_classified_level,
     normalize_kind_name,
 )
-from src.common.io_utils import _read_json, _write_json
+from src.common.io_utils import _iter_jsonl, _read_json, _write_json
 from src.common.payload_utils import _first_non_empty, _walk_objects
+from src.common.url_utils import sanitize_detail_link
+from src.export.qdrant_point_id import build_qdrant_point_id, duplicate_canonical_ids
 from src.export.jsonl_builder import write_jsonl
 
 TextVariant = Literal["best", "raw", "normalized"]
@@ -94,6 +98,45 @@ def _dedup_texts(texts: list[str]) -> list[str]:
 
 def _normalize_law_text(text: str, *, preserve_structure: bool) -> str:
     return _normalize_structure(text) if preserve_structure else _normalize_space(text)
+
+
+def _now_timestamp() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _truncate_text(text: str, limit: int = 320) -> str:
+    normalized = _normalize_space(text)
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _build_text_fields(
+    *,
+    text: str,
+    title: str | None = None,
+    law_name: str | None = None,
+    article_no_display: str | None = None,
+    doc_number: str | None = None,
+    extra_lines: list[str] | None = None,
+) -> dict[str, str]:
+    extra_lines = extra_lines or []
+    search_parts = [law_name, article_no_display, title, doc_number]
+    search_parts.extend(extra_lines)
+    search_parts.append(text)
+    search_text = "\n".join(str(item).strip() for item in search_parts if str(item or "").strip()).strip()
+    display_prefix = "\n".join(
+        str(item).strip()
+        for item in (law_name, article_no_display, title, doc_number)
+        if str(item or "").strip()
+    ).strip()
+    display_body = _truncate_text(text)
+    display_text = "\n".join(part for part in (display_prefix, display_body) if part).strip()
+    return {
+        "text": text,
+        "search_text": search_text or text,
+        "display_text": display_text or _truncate_text(text),
+    }
 
 
 def _article_display_no(article: dict[str, Any]) -> str:
@@ -597,11 +640,14 @@ def build_law_records(
         parsed_law = _read_json(path)
 
         law_name = str(parsed_law.get("law_name") or "").strip()
+        root_law_name = path.parent.name.replace("_", " ").strip() or law_name
         law_id = parsed_law.get("law_id")
         mst = parsed_law.get("mst")
         ef_yd = parsed_law.get("ef_yd")
         kind_name, classified_level = _normalize_law_meta(parsed_law)
         scope_source = parsed_law.get("scope_source")
+        law_uid = build_law_uid(law_id, mst, law_name)
+        root_law_uid = build_law_uid(None, None, root_law_name)
 
         articles = parsed_law.get("articles", [])
         if isinstance(articles, list):
@@ -640,11 +686,17 @@ def build_law_records(
                         chunk_index=chunk_index,
                     )
                     record_id = _ensure_unique_record_id(record_id, seen_ids)
+                    text_fields = _build_text_fields(
+                        text=chunk,
+                        law_name=law_name,
+                        article_no_display=str(article_no_display or ""),
+                        extra_lines=[str(kind_name or ""), str(classified_level or "")],
+                    )
 
                     records.append(
                         {
                             "id": record_id,
-                            "text": chunk,
+                            "canonical_id": record_id,
                             "doc_type": "law",
                             "section_type": "article",
                             "source_group": "01_current_law",
@@ -655,6 +707,9 @@ def build_law_records(
                             "kind_name": kind_name,
                             "classified_level": classified_level,
                             "law_level": classified_level,
+                            "law_uid": law_uid,
+                            "root_law_name": root_law_name,
+                            "root_law_uid": root_law_uid,
                             "scope_source": scope_source,
                             "article_no": article_no,
                             "article_no_display": article_no_display,
@@ -666,6 +721,7 @@ def build_law_records(
                             "text_variant": text_variant,
                             "structure_preserved": preserve_structure,
                             "source_file_path": str(path),
+                            **text_fields,
                         }
                     )
 
@@ -702,11 +758,17 @@ def build_law_records(
                         chunk_index=chunk_index,
                     )
                     record_id = _ensure_unique_record_id(record_id, seen_ids)
+                    text_fields = _build_text_fields(
+                        text=chunk,
+                        law_name=law_name,
+                        title=str(supplementary.get("supplementary_title") or ""),
+                        extra_lines=[str(kind_name or ""), str(classified_level or "")],
+                    )
 
                     records.append(
                         {
                             "id": record_id,
-                            "text": chunk,
+                            "canonical_id": record_id,
                             "doc_type": "law",
                             "section_type": "supplementary",
                             "source_group": "01_current_law",
@@ -717,6 +779,9 @@ def build_law_records(
                             "kind_name": kind_name,
                             "classified_level": classified_level,
                             "law_level": classified_level,
+                            "law_uid": law_uid,
+                            "root_law_name": root_law_name,
+                            "root_law_uid": root_law_uid,
                             "scope_source": scope_source,
                             "supplementary_no": supplementary.get("supplementary_no"),
                             "supplementary_title": supplementary.get("supplementary_title"),
@@ -726,6 +791,7 @@ def build_law_records(
                             "text_variant": text_variant,
                             "structure_preserved": preserve_structure,
                             "source_file_path": str(path),
+                            **text_fields,
                         }
                     )
 
@@ -762,11 +828,17 @@ def build_law_records(
                         chunk_index=chunk_index,
                     )
                     record_id = _ensure_unique_record_id(record_id, seen_ids)
+                    text_fields = _build_text_fields(
+                        text=chunk,
+                        law_name=law_name,
+                        title=str(appendix.get("appendix_title") or ""),
+                        extra_lines=[str(kind_name or ""), str(classified_level or "")],
+                    )
 
                     records.append(
                         {
                             "id": record_id,
-                            "text": chunk,
+                            "canonical_id": record_id,
                             "doc_type": "law",
                             "section_type": "appendix",
                             "source_group": "01_current_law",
@@ -777,6 +849,9 @@ def build_law_records(
                             "kind_name": kind_name,
                             "classified_level": classified_level,
                             "law_level": classified_level,
+                            "law_uid": law_uid,
+                            "root_law_name": root_law_name,
+                            "root_law_uid": root_law_uid,
                             "scope_source": scope_source,
                             "appendix_title": appendix.get("appendix_title"),
                             "content_category": _aux_part_content_category(appendix),
@@ -785,6 +860,7 @@ def build_law_records(
                             "text_variant": text_variant,
                             "structure_preserved": preserve_structure,
                             "source_file_path": str(path),
+                            **text_fields,
                         }
                     )
 
@@ -802,7 +878,7 @@ def _extract_doc_meta_from_payload(target: str, payload: dict[str, Any]) -> dict
         "doc_id": str(doc_id) if doc_id is not None else None,
         "title": str(title) if title is not None else None,
         "doc_number": str(doc_number) if doc_number is not None else None,
-        "detail_link": str(detail_link) if detail_link is not None else None,
+        "detail_link": sanitize_detail_link(str(detail_link)) if detail_link is not None else None,
         "doc_kind": str(doc_kind) if doc_kind is not None else None,
     }
 
@@ -849,14 +925,23 @@ def _build_related_doc_records_from_text(
             ]
         )
 
+        text_fields = _build_text_fields(
+            text=full_text,
+            title=str(doc_meta.get("title") or ""),
+            law_name=source_law_name,
+            doc_number=str(doc_meta.get("doc_number") or ""),
+            extra_lines=[DOC_TYPE_LABELS[target], root_law_name],
+        )
+
         records.append(
             {
                 "id": record_id,
-                "text": full_text,
+                "canonical_id": record_id,
                 "doc_type": target,
                 "doc_type_label": DOC_TYPE_LABELS[target],
                 "source_group": "02_related_legal_docs",
                 "root_law_name": root_law_name,
+                "root_law_uid": build_law_uid(None, None, root_law_name),
                 "related_law_name": source_law_name,
                 "doc_id": doc_meta.get("doc_id"),
                 "title": doc_meta.get("title"),
@@ -865,6 +950,7 @@ def _build_related_doc_records_from_text(
                 "doc_kind": doc_meta.get("doc_kind"),
                 "chunk_index": chunk_index,
                 "source_file_path": source_file_path,
+                **text_fields,
             }
         )
 
@@ -991,13 +1077,22 @@ def _build_relation_records_legacy(
         records.append(
             {
                 "id": record_id,
+                "canonical_id": record_id,
                 "text": text,
+                "search_text": text,
+                "display_text": _truncate_text(text),
                 "doc_type": "relation",
                 "source_group": "03_expanded_related_docs",
                 "target": payload.get("target"),
                 "doc_type_label": payload.get("doc_type_label"),
                 "root_law_name": payload.get("root_law_name"),
+                "root_law_uid": build_law_uid(None, None, payload.get("root_law_name")),
                 "source_law_name": payload.get("source_law_name"),
+                "source_law_uid": build_law_uid(None, None, payload.get("source_law_name")),
+                "law_name": payload.get("source_law_name"),
+                "law_uid": build_law_uid(None, None, payload.get("source_law_name")),
+                "relation_model": "law_to_case",
+                "relation_type": "search_hit",
                 "related_law_names": payload.get("related_law_names", []),
                 "relation_types": payload.get("relation_types", []),
                 "doc_id": payload.get("doc_id"),
@@ -1036,19 +1131,26 @@ def build_related_doc_records(
 def build_relation_records(
     raw_related_base_dir: str | Path = "data/raw/02_related_legal_docs",
     expanded_base_dir: str | Path = "data/expanded/03_expanded_related_docs",
+    normalized_base_dir: str | Path | None = None,
+    include_law_to_law_relations: bool = True,
 ) -> list[dict[str, Any]]:
     from src.export.legal_relation_builder import build_legal_relation_records
+    from src.export.law_to_law_relation_builder import build_law_to_law_relation_records
 
     records = build_legal_relation_records(
         expanded_base_dir=expanded_base_dir,
         raw_related_base_dir=raw_related_base_dir,
     )
-    if records:
-        return records
+    if not records:
+        records = _build_relation_records_legacy(
+            expanded_base_dir=expanded_base_dir,
+        )
 
-    return _build_relation_records_legacy(
-        expanded_base_dir=expanded_base_dir,
-    )
+    if include_law_to_law_relations and normalized_base_dir is not None:
+        records.extend(build_law_to_law_relation_records(normalized_base_dir=normalized_base_dir))
+
+    records.sort(key=lambda row: str(row.get("id") or ""))
+    return records
 
 
 def build_and_write_datasets(
@@ -1067,6 +1169,7 @@ def build_and_write_datasets(
     merge_appendices_into_law_article: bool = True,
     include_appendix_bundle_text_in_payload: bool = True,
     write_legacy_appendix_datasets: bool = True,
+    include_law_to_law_relations: bool = True,
 ) -> dict[str, Any]:
     output_dir = Path(output_dir)
 
@@ -1087,6 +1190,8 @@ def build_and_write_datasets(
     relation_records = build_relation_records(
         raw_related_base_dir=raw_related_base_dir,
         expanded_base_dir=expanded_base_dir,
+        normalized_base_dir=normalized_base_dir,
+        include_law_to_law_relations=include_law_to_law_relations,
     )
 
     appendix_manifest: dict[str, Any] | None = None
@@ -1143,6 +1248,7 @@ def build_and_write_datasets(
         "merge_appendices_into_law_article": merge_appendices_into_law_article,
         "include_appendix_bundle_text_in_payload": include_appendix_bundle_text_in_payload,
         "write_legacy_appendix_datasets": write_legacy_appendix_datasets,
+        "include_law_to_law_relations": include_law_to_law_relations,
         "max_chars": max_chars,
         "overlap": overlap,
         "text_variant": text_variant,
@@ -1153,3 +1259,118 @@ def build_and_write_datasets(
     _write_json(output_dir / "dataset_manifest.json", manifest)
 
     return manifest
+
+
+def _rows_by_id(rows: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    indexed: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        row_id = str(row.get("id") or "").strip()
+        if not row_id:
+            continue
+        indexed[row_id] = dict(row)
+    return indexed
+
+
+def _infer_collection_name(row: dict[str, Any], *, relation_file: bool) -> str:
+    if relation_file:
+        return "legal_relation"
+    return "law_article" if str(row.get("doc_type") or "").strip() == "law" else "legal_case"
+
+
+def _annotate_point_ids(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = [dict(row) for row in rows]
+    duplicates = duplicate_canonical_ids(rows)
+    for row in rows:
+        row["_point_id"] = build_qdrant_point_id(row, duplicates)
+    return rows
+
+
+def build_incremental_dataset_patch(
+    *,
+    previous_corpus_rows: list[dict[str, Any]],
+    current_corpus_rows: list[dict[str, Any]],
+    previous_relation_rows: list[dict[str, Any]],
+    current_relation_rows: list[dict[str, Any]],
+    patch_dir: str | Path,
+    delta_batch_id: str,
+    updated_at: str | None = None,
+) -> dict[str, Any]:
+    patch_dir = Path(patch_dir)
+    updated_at = updated_at or _now_timestamp()
+
+    previous_corpus_rows = _annotate_point_ids(previous_corpus_rows)
+    current_corpus_rows = _annotate_point_ids(current_corpus_rows)
+    previous_relation_rows = _annotate_point_ids(previous_relation_rows)
+    current_relation_rows = _annotate_point_ids(current_relation_rows)
+
+    previous_corpus = _rows_by_id(previous_corpus_rows)
+    current_corpus = _rows_by_id(current_corpus_rows)
+    previous_relations = _rows_by_id(previous_relation_rows)
+    current_relations = _rows_by_id(current_relation_rows)
+
+    def _build_patch(previous_rows: dict[str, dict[str, Any]], current_rows: dict[str, dict[str, Any]], *, relation_file: bool):
+        upserts: list[dict[str, Any]] = []
+        deletes: list[dict[str, Any]] = []
+
+        current_ids = set(current_rows)
+        previous_ids = set(previous_rows)
+
+        for row_id in sorted(current_ids - previous_ids):
+            row = dict(current_rows[row_id])
+            row["collection_name"] = _infer_collection_name(row, relation_file=relation_file)
+            row["delta_batch_id"] = delta_batch_id
+            row["updated_at"] = updated_at
+            upserts.append(row)
+
+        for row_id in sorted(previous_ids & current_ids):
+            previous_row = previous_rows[row_id]
+            current_row = current_rows[row_id]
+            if previous_row == current_row:
+                continue
+            row = dict(current_row)
+            row["collection_name"] = _infer_collection_name(row, relation_file=relation_file)
+            row["delta_batch_id"] = delta_batch_id
+            row["updated_at"] = updated_at
+            upserts.append(row)
+            if str(previous_row.get("_point_id") or "") != str(current_row.get("_point_id") or ""):
+                delete_row = dict(previous_row)
+                delete_row["collection_name"] = _infer_collection_name(delete_row, relation_file=relation_file)
+                delete_row["delta_batch_id"] = delta_batch_id
+                delete_row["updated_at"] = updated_at
+                deletes.append(delete_row)
+
+        for row_id in sorted(previous_ids - current_ids):
+            row = dict(previous_rows[row_id])
+            row["collection_name"] = _infer_collection_name(row, relation_file=relation_file)
+            row["delta_batch_id"] = delta_batch_id
+            row["updated_at"] = updated_at
+            deletes.append(row)
+
+        return upserts, deletes
+
+    corpus_upserts, corpus_deletes = _build_patch(previous_corpus, current_corpus, relation_file=False)
+    relation_upserts, relation_deletes = _build_patch(previous_relations, current_relations, relation_file=True)
+
+    write_jsonl(corpus_upserts, patch_dir / "legal_corpus.upsert.jsonl")
+    write_jsonl(corpus_deletes, patch_dir / "legal_corpus.delete.jsonl")
+    write_jsonl(relation_upserts, patch_dir / "legal_relations.upsert.jsonl")
+    write_jsonl(relation_deletes, patch_dir / "legal_relations.delete.jsonl")
+
+    manifest = {
+        "delta_batch_id": delta_batch_id,
+        "updated_at": updated_at,
+        "legal_corpus_upsert_count": len(corpus_upserts),
+        "legal_corpus_delete_count": len(corpus_deletes),
+        "legal_relations_upsert_count": len(relation_upserts),
+        "legal_relations_delete_count": len(relation_deletes),
+    }
+    _write_json(patch_dir / "delta_manifest.json", manifest)
+    return manifest
+
+
+def load_dataset_rows(output_dir: str | Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    output_dir = Path(output_dir)
+    return (
+        list(_iter_jsonl(output_dir / "legal_corpus.jsonl")),
+        list(_iter_jsonl(output_dir / "legal_relations.jsonl")),
+    )

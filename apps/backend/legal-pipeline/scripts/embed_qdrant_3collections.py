@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Iterable, Iterator, Sequence
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.export.qdrant_point_id import (
+    build_qdrant_point_id,
+    canonical_id_from_row,
+)
 
 
 MODEL_NAME = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
@@ -25,6 +34,11 @@ RELATION_MODEL_SEARCH_PROFILES = {
         "default_score_multiplier": 1.0,
         "priority": "primary",
         "retrieval_role": "expansion",
+    },
+    "law_to_law": {
+        "default_score_multiplier": 0.95,
+        "priority": "primary",
+        "retrieval_role": "linkage",
     },
     "case_to_case": {
         "default_score_multiplier": 0.75,
@@ -50,6 +64,7 @@ QUERY_RETRIEVAL_PROFILES = {
                 "score_multiplier": 0.85,
                 "relation_model_weights": {
                     "law_to_case": 1.0,
+                    "law_to_law": 0.95,
                     "case_to_case": 0.6,
                 },
             },
@@ -66,6 +81,7 @@ QUERY_RETRIEVAL_PROFILES = {
                 "score_multiplier": 0.9,
                 "relation_model_weights": {
                     "law_to_case": 0.8,
+                    "law_to_law": 0.7,
                     "case_to_case": 1.0,
                 },
             },
@@ -82,6 +98,7 @@ QUERY_RETRIEVAL_PROFILES = {
                 "score_multiplier": 1.0,
                 "relation_model_weights": {
                     "law_to_case": 0.7,
+                    "law_to_law": 0.5,
                     "case_to_case": 1.0,
                 },
             },
@@ -167,36 +184,11 @@ def _iter_collection_rows(dataset_dir: Path, collection_name: str) -> Iterator[d
 
 
 def _canonical_id_from_row(row: dict) -> str:
-    value = row.get("canonical_id") or row.get("canonical_case_id") or row.get("id")
-    if value in (None, ""):
-        raise ValueError("row.id or canonical_id is required")
-    return str(value)
-
-
-def _point_id_context_digest(row: dict) -> str:
-    basis = {
-        "root_law_name": row.get("root_law_name"),
-        "related_law_name": row.get("related_law_name"),
-        "related_law_names": row.get("related_law_names"),
-        "source_law_name": row.get("source_law_name"),
-        "source_group": row.get("source_group"),
-        "source_file_path": row.get("source_file_path"),
-        "chunk_index": row.get("chunk_index"),
-        "doc_id": row.get("doc_id"),
-        "doc_number": row.get("doc_number"),
-        "title": row.get("title"),
-        "target": row.get("target"),
-    }
-    raw = json.dumps(basis, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.blake2b(raw.encode("utf-8"), digest_size=8).hexdigest()
+    return canonical_id_from_row(row)
 
 
 def _build_point_id(row: dict, duplicate_canonical_ids: set[str]) -> str:
-    canonical_id = _canonical_id_from_row(row)
-    if canonical_id not in duplicate_canonical_ids:
-        return canonical_id
-    digest = _point_id_context_digest(row)
-    return f"{canonical_id}::ctx::{digest}"
+    return build_qdrant_point_id(row, duplicate_canonical_ids)
 
 
 def _scan_collection(dataset_dir: Path, collection_name: str) -> dict:
@@ -291,6 +283,10 @@ def _build_meta(collection_name: str, row: dict, point_id: str, text: str) -> di
         "source_file_path": row.get("source_file_path"),
         "chunk_index": row.get("chunk_index"),
         "text_len": len(text),
+        "search_text": row.get("search_text"),
+        "display_text": row.get("display_text"),
+        "updated_at": row.get("updated_at"),
+        "delta_batch_id": row.get("delta_batch_id"),
         "default_score_multiplier": relation_profile.get("default_score_multiplier"),
         "relation_model_priority": relation_profile.get("priority"),
         "retrieval_role": relation_profile.get("retrieval_role"),

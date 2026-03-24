@@ -63,6 +63,25 @@ def test_build_meta_includes_relation_model_search_profile():
     assert meta["retrieval_role"] == "trace"
 
 
+def test_build_meta_includes_law_to_law_search_profile():
+    row = {
+        "id": "relation::law::source-law::target-law::16",
+        "canonical_id": "relation::law::source-law::target-law::16",
+        "doc_type": "relation",
+        "relation_model": "law_to_law",
+        "relation_type": "related_law",
+        "relation_types": ["related_law"],
+        "text": "law to law relation",
+    }
+
+    meta = _build_meta("legal_relation", row, "point-law", row["text"])
+
+    assert meta["relation_model"] == "law_to_law"
+    assert meta["default_score_multiplier"] == 0.95
+    assert meta["relation_model_priority"] == "primary"
+    assert meta["retrieval_role"] == "linkage"
+
+
 def test_build_retrieval_policy_marks_collection_availability_and_weights():
     policy = _build_retrieval_policy(
         [
@@ -77,4 +96,5 @@ def test_build_retrieval_policy_marks_collection_availability_and_weights():
     citation_profile = policy["query_profiles"]["citation_trace"]
     assert citation_profile["collections"][0]["name"] == "legal_relation"
     assert citation_profile["collections"][0]["relation_model_weights"]["case_to_case"] == 1.0
+    assert policy["query_profiles"]["law_lookup"]["collections"][2]["relation_model_weights"]["law_to_law"] == 0.95
     assert all(item["available"] is True for item in citation_profile["collections"][:2])

@@ -128,6 +128,8 @@ COMMON_KEYWORD_INDEX_FIELDS = [
     "detail_link",
     "target",
     "decision_date",
+    "delta_batch_id",
+    "updated_at",
 ]
 
 COMMON_INTEGER_INDEX_FIELDS = [

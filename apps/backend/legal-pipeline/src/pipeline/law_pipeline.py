@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -86,6 +87,12 @@ def _save_law_body_payloads(
     }
 
 
+def _reset_family_dirs(paths: list[Path]) -> None:
+    for path in paths:
+        if path.exists():
+            shutil.rmtree(path)
+
+
 def collect_root_law_family(
     scope: dict[str, Any],
     registry: dict[str, Any],
@@ -93,6 +100,7 @@ def collect_root_law_family(
     root_law_name: str,
     base_dir: str | Path = "data",
     sub_article_mode: SubArticleMode = "none",
+    clean_existing: bool = False,
 ) -> dict[str, Any]:
     base_dir = Path(base_dir)
     root_stem = _safe_filename(root_law_name)
@@ -103,6 +111,18 @@ def collect_root_law_family(
     normalized_dir = base_dir / "normalized" / "01_current_law" / root_stem
     normalized_appendix_dir = base_dir / "normalized" / "01_current_law_appendix" / root_stem
     manifest_dir = base_dir / "manifest" / "01_current_law" / root_stem
+
+    if clean_existing:
+        _reset_family_dirs(
+            [
+                raw_root_dir,
+                raw_body_dir,
+                raw_sub_dir,
+                normalized_dir,
+                normalized_appendix_dir,
+                manifest_dir,
+            ]
+        )
 
     raw_record = collect_root_law_raw(
         registry=registry,

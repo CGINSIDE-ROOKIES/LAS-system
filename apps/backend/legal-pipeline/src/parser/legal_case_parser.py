@@ -13,6 +13,7 @@ from src.collector.legal_doc_collector import (
     TITLE_KEYS_BY_TARGET,
     build_canonical_case_id,
 )
+from src.common.url_utils import sanitize_detail_link, sanitize_inline_urls
 from src.common.payload_utils import _first_non_empty, _walk_objects
 
 DECISION_DATE_KEYS_BY_TARGET = {
@@ -159,7 +160,7 @@ def extract_case_meta(
         "title": str(title) if title not in (None, "") else None,
         "doc_number": str(doc_number) if doc_number not in (None, "") else None,
         "doc_kind": str(doc_kind) if doc_kind not in (None, "") else None,
-        "detail_link": str(detail_link) if detail_link not in (None, "") else None,
+        "detail_link": sanitize_detail_link(str(detail_link)) if detail_link not in (None, "") else None,
         "decision_date": str(decision_date) if decision_date not in (None, "") else None,
     }
 
@@ -188,7 +189,7 @@ def extract_case_body_text(
         texts.append(str(fallback_text))
 
     deduped = _dedup_texts(texts)
-    return "\n\n".join(deduped).strip()
+    return sanitize_inline_urls("\n\n".join(deduped).strip())
 
 
 
@@ -266,6 +267,40 @@ def extract_explicit_article_refs(text: str, family_law_names: list[str]) -> dic
 
 
 CASE_NUMBER_REF_PATTERN = re.compile(r"(?<!\d)(\d{2,4}[가-힣]{1,4}\d{1,8})(?!\d)")
+INVALID_CASE_CODE_TOKENS = (
+    "조",
+    "조의",
+    "항",
+    "항의",
+    "호",
+    "호의",
+    "목",
+    "목의",
+    "편",
+    "장",
+    "절",
+    "관",
+    "만",
+    "억",
+    "천",
+    "백",
+    "십",
+    "원",
+)
+
+
+def _is_valid_case_number_candidate(candidate: str) -> bool:
+    match = re.fullmatch(r"(\d{2,4})([가-힣]{1,4})(\d{1,8})", candidate)
+    if match is None:
+        return False
+    code = str(match.group(2) or "").strip()
+    if not code:
+        return False
+    if code in INVALID_CASE_CODE_TOKENS:
+        return False
+    if any(token in code for token in INVALID_CASE_CODE_TOKENS):
+        return False
+    return True
 
 
 def extract_case_number_refs(text: str, exclude_numbers: Iterable[str] | None = None) -> list[str]:
@@ -285,6 +320,8 @@ def extract_case_number_refs(text: str, exclude_numbers: Iterable[str] | None = 
     for match in CASE_NUMBER_REF_PATTERN.findall(normalized_text):
         candidate = str(match).strip()
         if not candidate:
+            continue
+        if not _is_valid_case_number_candidate(candidate):
             continue
         normalized_candidate = _normalize_name(candidate)
         if normalized_candidate in excluded or normalized_candidate in seen:

@@ -190,3 +190,38 @@ def test_build_legal_relation_records_adds_cited_case_when_body_mentions_other_c
     assert record["referenced_case_numbers"] == ["2018다12345"]
     assert record["relation_confidence"] == 0.95
     assert "참조 사건번호: 2018다12345" in record["text"]
+
+
+def test_build_legal_relation_records_sanitizes_existing_expanded_rows(tmp_path):
+    expanded_dir = tmp_path / "expanded" / "03_expanded_related_docs" / "근로기준법"
+    _write_jsonl(
+        expanded_dir / "relation_records.jsonl",
+        [
+            {
+                "id": "relation::case::decc::10073::001872",
+                "canonical_case_id": "case::decc::10073",
+                "doc_type": "relation",
+                "doc_type_label": "행정심판례",
+                "source_group": "03_expanded_related_docs",
+                "target": "decc",
+                "title": "이행강제금 부과처분 취소청구",
+                "doc_id": "10073",
+                "doc_number": "2017-08376",
+                "detail_link": "/DRF/lawService.do?OC=matrix2012&target=decc&ID=10073&type=HTML&mobileYn=Y",
+                "law_name": "근로기준법",
+                "source_law_name": "근로기준법",
+                "relation_types": ["search_hit", "cited_law"],
+                "text": "legacy relation",
+            }
+        ],
+    )
+
+    records = build_legal_relation_records(expanded_base_dir=tmp_path / "expanded" / "03_expanded_related_docs")
+
+    assert len(records) == 1
+    record = records[0]
+    assert record["relation_model"] == "law_to_case"
+    assert record["relation_type"] == "cited_law"
+    assert record["detail_link"] == "/DRF/lawService.do?target=decc&ID=10073&type=HTML&mobileYn=Y"
+    assert "OC=" not in record["text"]
+    assert "OC=" not in record["display_text"]

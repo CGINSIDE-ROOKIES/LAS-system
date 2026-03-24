@@ -65,3 +65,44 @@ def test_case_number_reference_extraction_excludes_self_doc_number():
     refs = extract_case_number_refs(text, exclude_numbers=["2019다12345"])
 
     assert refs == ["2018다12345", "2020헌바12"]
+
+
+def test_case_number_reference_extraction_rejects_article_and_amount_text():
+    text = "근로기준법 제43조의2와 119만2666원의 지급 여부를 본 뒤 2018다12345 판결을 참조하였다."
+
+    refs = extract_case_number_refs(text)
+
+    assert refs == ["2018다12345"]
+
+
+def test_parse_case_payload_sanitizes_detail_link_oc_param():
+    payload = {
+        "판례": {
+            "판례일련번호": "123456",
+            "사건명": "임금",
+            "사건번호": "2019다12345",
+            "판례상세링크": "/DRF/lawService.do?OC=matrix2012&target=prec&ID=123456",
+            "판례내용": "본문",
+        }
+    }
+
+    parsed = parse_case_payload("prec", payload)
+
+    assert parsed["detail_link"] == "/DRF/lawService.do?target=prec&ID=123456"
+
+
+def test_parse_case_payload_sanitizes_inline_detail_link_from_body_text():
+    payload = {
+        "판례": {
+            "판례일련번호": "123456",
+            "사건명": "임금",
+            "사건번호": "2019다12345",
+            "판례상세링크": "/DRF/lawService.do?OC=matrix2012&target=prec&ID=123456",
+            "판례내용": "본문 /DRF/lawService.do?OC=matrix2012&target=prec&ID=123456",
+        }
+    }
+
+    parsed = parse_case_payload("prec", payload)
+
+    assert "OC=" not in parsed["body_text"]
+    assert "/DRF/lawService.do?target=prec&ID=123456" in parsed["body_text"]
