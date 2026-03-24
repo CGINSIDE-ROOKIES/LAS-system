@@ -301,6 +301,7 @@ def search_qdrant(
     law_names: list[str] | None = None,
     dedup: bool = True,
     fetch_multiplier: int = 2,
+    vector_name: str | None = "body",
 ) -> list[dict[str, Any]]:
     """쿼리를 임베딩 후 Qdrant에서 유사 문서 Top-K를 검색한다.
 
@@ -333,7 +334,7 @@ def search_qdrant(
     # dedup 여유분 확보: 중복 제거 후에도 top-k개가 남도록 넉넉히 요청
     fetch_limit = max(1, top_k * max(1, fetch_multiplier)) if dedup else max(1, top_k)
     payload: dict[str, Any] = {
-        "vector": vector,
+        "vector": {"name": vector_name, "vector": vector} if vector_name else vector,
         "limit": fetch_limit,
         "with_payload": True,  # 메타데이터(text, doc_type 등) 포함
         "with_vector": False,  # 벡터값은 응답에 불필요

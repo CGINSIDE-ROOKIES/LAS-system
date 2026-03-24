@@ -13,6 +13,7 @@ export interface RetrievedDoc {
   law_name: string;
   score: number | null;
   snippet: string;
+  text?: string;
 }
 
 export type LawContextStatus = "ok" | "missing" | "supplemented";

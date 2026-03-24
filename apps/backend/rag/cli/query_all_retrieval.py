@@ -266,10 +266,24 @@ def run_single_query(args: argparse.Namespace, question: str) -> int:
     qdrant_url = require_env_or_arg(
         args.qdrant_url, "QDRANT_URL", "http://localhost:6333"
     )
-    qdrant_collection = require_env_or_arg(args.qdrant_collection, "QDRANT_COLLECTION")
+    raw_collections = (
+        args.qdrant_collection
+        or os.getenv("QDRANT_COLLECTIONS", "")
+        or os.getenv("QDRANT_COLLECTION", "")
+    ).strip()
+    if not raw_collections:
+        raise SystemExit("Missing required setting: --qdrant-collection or QDRANT_COLLECTIONS")
+    qdrant_collections = [c.strip() for c in raw_collections.split(",") if c.strip()]
     qdrant_api_key = (
         args.qdrant_api_key or os.getenv("QDRANT_API_KEY", "").strip() or None
     )
+
+    vector_name_map: dict[str, str | None] = {}
+    for entry in os.getenv("QDRANT_VECTOR_NAME_MAP", "law_article=body").split(","):
+        entry = entry.strip()
+        if "=" in entry:
+            col, _, name = entry.partition("=")
+            vector_name_map[col.strip()] = name.strip() or None
 
     opensearch_url = require_env_or_arg(
         args.opensearch_url, "OPENSEARCH_URL", "http://localhost:9200"
@@ -293,20 +307,20 @@ def run_single_query(args: argparse.Namespace, question: str) -> int:
     candidate_k = max(args.top_k, args.candidate_k)
 
     try:
-        # 1. Qdrant 벡터 검색
-        qdrant_rows = search_qdrant(
-            question,
-            candidate_k,
-            qdrant_url=qdrant_url,
-            collection=qdrant_collection,
-            timeout=args.timeout,
-            embedding_model=model_name,
-            api_key=qdrant_api_key,
-            doc_types=args.doc_type,
-            law_names=args.law_name,
-            dedup=True,
-            fetch_multiplier=2,
-        )
+        # 1. Qdrant 벡터 검색 (멀티 컬렉션)
+        qdrant_rows = []
+        for col in qdrant_collections:
+            qdrant_rows.extend(search_qdrant(
+                question, candidate_k,
+                qdrant_url=qdrant_url, collection=col,
+                timeout=args.timeout, embedding_model=model_name,
+                api_key=qdrant_api_key, doc_types=args.doc_type,
+                law_names=args.law_name, dedup=True, fetch_multiplier=2,
+                vector_name=vector_name_map.get(col),
+            ))
+        qdrant_rows.sort(key=lambda r: float(r.get("score") or 0.0), reverse=True)
+        for i, r in enumerate(qdrant_rows, start=1):
+            r["rank"] = i
         # 2. OpenSearch BM25 키워드 검색
         bm25_rows = search_bm25(
             question,
