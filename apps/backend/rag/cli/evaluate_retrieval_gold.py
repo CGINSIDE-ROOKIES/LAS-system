@@ -2,8 +2,8 @@
 """Evaluate retrieval quality against gold evaluation CSV.
 
 Usage:
-  uv run python scripts/evaluate_retrieval_gold.py --top-k 5
-  uv run python scripts/evaluate_retrieval_gold.py --backend hybrid --top-k 5
+  uv run python cli/evaluate_retrieval_gold.py --top-k 5
+  uv run python cli/evaluate_retrieval_gold.py --backend hybrid --top-k 5
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from apps.backend.rag.cli.query_hybrid_rrf import fuse_rrf
-from apps.backend.rag.cli.retrieval_common import (
+from query_hybrid_rrf import fuse_rrf
+from retrieval_common import (
     DEFAULT_EMBEDDING_MODEL,
     require_env_or_arg,
     search_bm25,
@@ -200,10 +200,27 @@ def eval_backend(
     qdrant_url = require_env_or_arg(
         args.qdrant_url, "QDRANT_URL", "http://localhost:6333"
     )
-    qdrant_collection = require_env_or_arg(args.qdrant_collection, "QDRANT_COLLECTION")
+    raw_collections = (
+        args.qdrant_collection
+        or os.getenv("QDRANT_COLLECTIONS", "")
+        or os.getenv("QDRANT_COLLECTION", "")
+    ).strip()
+    if not raw_collections:
+        raise SystemExit("Missing required setting: --qdrant-collection or QDRANT_COLLECTIONS")
+    qdrant_collections = [c.strip() for c in raw_collections.split(",") if c.strip()]
+
     qdrant_api_key = (
         args.qdrant_api_key or os.getenv("QDRANT_API_KEY", "").strip() or None
     )
+
+    # 컬렉션별 named vector 매핑 (예: law_article=body)
+    vector_name_map: dict[str, str | None] = {}
+    raw_map = os.getenv("QDRANT_VECTOR_NAME_MAP", "law_article=body")
+    for entry in raw_map.split(","):
+        entry = entry.strip()
+        if "=" in entry:
+            col, _, name = entry.partition("=")
+            vector_name_map[col.strip()] = name.strip() or None
 
     opensearch_url = require_env_or_arg(
         args.opensearch_url, "OPENSEARCH_URL", "http://localhost:9200"
@@ -235,17 +252,19 @@ def eval_backend(
         by_intent[row.intent]["count"] += 1
 
         if backend == "qdrant":
-            res = search_qdrant(
-                row.query,
-                args.top_k,
-                qdrant_url=qdrant_url,
-                collection=qdrant_collection,
-                timeout=args.timeout,
-                embedding_model=model_name,
-                api_key=qdrant_api_key,
-                dedup=True,
-                fetch_multiplier=2,
-            )
+            all_rows: list[dict] = []
+            for col in qdrant_collections:
+                all_rows.extend(search_qdrant(
+                    row.query, args.top_k,
+                    qdrant_url=qdrant_url, collection=col,
+                    timeout=args.timeout, embedding_model=model_name,
+                    api_key=qdrant_api_key, dedup=True, fetch_multiplier=2,
+                    vector_name=vector_name_map.get(col),
+                ))
+            all_rows.sort(key=lambda r: float(r.get("score") or 0.0), reverse=True)
+            res = all_rows[: max(1, args.top_k)]
+            for i, r in enumerate(res, start=1):
+                r["rank"] = i
         elif backend == "bm25":
             res = search_bm25(
                 row.query,
@@ -260,17 +279,16 @@ def eval_backend(
                 fetch_multiplier=5,
             )
         else:
-            qdrant_rows = search_qdrant(
-                row.query,
-                max(args.top_k, args.candidate_k),
-                qdrant_url=qdrant_url,
-                collection=qdrant_collection,
-                timeout=args.timeout,
-                embedding_model=model_name,
-                api_key=qdrant_api_key,
-                dedup=True,
-                fetch_multiplier=2,
-            )
+            qdrant_rows = []
+            for col in qdrant_collections:
+                qdrant_rows.extend(search_qdrant(
+                    row.query, max(args.top_k, args.candidate_k),
+                    qdrant_url=qdrant_url, collection=col,
+                    timeout=args.timeout, embedding_model=model_name,
+                    api_key=qdrant_api_key, dedup=True, fetch_multiplier=2,
+                    vector_name=vector_name_map.get(col),
+                ))
+            qdrant_rows.sort(key=lambda r: float(r.get("score") or 0.0), reverse=True)
             bm25_rows = search_bm25(
                 row.query,
                 max(args.top_k, args.candidate_k),

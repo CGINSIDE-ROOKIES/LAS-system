@@ -10,7 +10,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Iterator
 
-from ..retrieval.common import DEFAULT_EMBEDDING_MODEL
+from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError
 from ..retrieval.context import build_llm_context_rows, build_llm_context_text
 from ..retrieval.fusion import fuse_rrf
 from ..retrieval.opensearch import search_bm25
@@ -103,14 +103,28 @@ class RagPipeline:
     @classmethod
     def from_env(cls) -> RagPipeline:
         """환경변수에서 설정을 읽어 인스턴스를 생성한다."""
+        raw_collections = os.environ["QDRANT_COLLECTIONS"]
+        collections = [c.strip() for c in raw_collections.split(",") if c.strip()]
+
+        # QDRANT_VECTOR_NAME_MAP=law_article=body,legal_case= 형식 파싱
+        vector_name_map: dict[str, str] = {}
+        raw_map = os.getenv("QDRANT_VECTOR_NAME_MAP", "")
+        for entry in raw_map.split(","):
+            entry = entry.strip()
+            if "=" in entry:
+                col, _, name = entry.partition("=")
+                if col.strip() and name.strip():
+                    vector_name_map[col.strip()] = name.strip()
+
         return cls(
             RagPipelineConfig(
                 retrieval=RetrievalConfig(
                     qdrant_url=os.environ["QDRANT_URL"],
-                    qdrant_collection=os.environ["QDRANT_COLLECTION"],
+                    qdrant_collections=collections,
+                    qdrant_vector_name_map=vector_name_map or None,
                     qdrant_api_key=os.getenv("QDRANT_API_KEY") or None,
-                    opensearch_url=os.environ["OPENSEARCH_URL"],
-                    opensearch_index=os.environ["OPENSEARCH_INDEX"],
+                    opensearch_url=os.getenv("OPENSEARCH_URL", ""),
+                    opensearch_index=os.getenv("OPENSEARCH_INDEX", ""),
                     opensearch_api_key=os.getenv("OPENSEARCH_API_KEY") or None,
                     opensearch_username=os.getenv("OPENSEARCH_USERNAME") or None,
                     opensearch_password=os.getenv("OPENSEARCH_PASSWORD") or None,
@@ -135,31 +149,47 @@ class RagPipeline:
         rcfg = self._cfg.retrieval
         candidate_k = max(rcfg.top_k, rcfg.candidate_k)
 
-        qdrant_rows = search_qdrant(
-            question, candidate_k,
-            qdrant_url=rcfg.qdrant_url,
-            collection=rcfg.qdrant_collection,
-            timeout=rcfg.timeout,
-            embedding_model=rcfg.embedding_model,
-            api_key=rcfg.qdrant_api_key,
-            doc_types=doc_types,
-            law_names=law_names,
-            dedup=True,
-            fetch_multiplier=2,
-        )
-        bm25_rows = search_bm25(
-            question, candidate_k,
-            opensearch_url=rcfg.opensearch_url,
-            index_name=rcfg.opensearch_index,
-            timeout=rcfg.timeout,
-            api_key=rcfg.opensearch_api_key,
-            username=rcfg.opensearch_username,
-            password=rcfg.opensearch_password,
-            doc_types=doc_types,
-            law_names=law_names,
-            dedup=True,
-            fetch_multiplier=5,
-        )
+        qdrant_rows: list[dict[str, Any]] = []
+        for collection in rcfg.qdrant_collections:
+            rows = search_qdrant(
+                question, candidate_k,
+                qdrant_url=rcfg.qdrant_url,
+                collection=collection,
+                timeout=rcfg.timeout,
+                embedding_model=rcfg.embedding_model,
+                api_key=rcfg.qdrant_api_key,
+                doc_types=doc_types,
+                law_names=law_names,
+                dedup=True,
+                fetch_multiplier=2,
+                vector_name=(rcfg.qdrant_vector_name_map or {}).get(collection),
+            )
+            qdrant_rows.extend(rows)
+
+        # 컬렉션 간 score 기준으로 재정렬 후 rank 재부여
+        qdrant_rows.sort(key=lambda r: r.get("score") or 0.0, reverse=True)
+        for i, row in enumerate(qdrant_rows, start=1):
+            row["rank"] = i
+
+        if rcfg.opensearch_url:
+            try:
+                bm25_rows = search_bm25(
+                    question, candidate_k,
+                    opensearch_url=rcfg.opensearch_url,
+                    index_name=rcfg.opensearch_index,
+                    timeout=rcfg.timeout,
+                    api_key=rcfg.opensearch_api_key,
+                    username=rcfg.opensearch_username,
+                    password=rcfg.opensearch_password,
+                    doc_types=doc_types,
+                    law_names=law_names,
+                    dedup=True,
+                    fetch_multiplier=5,
+                )
+            except RetrievalError:
+                bm25_rows = []
+        else:
+            bm25_rows = []
 
         # candidate_k 전체를 융합해야 law 보강 시 top_k 바깥 문서를 참조할 수 있음
         rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
