@@ -41,9 +41,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY --from=builder /app/apps/frontend/.next/standalone ./
-COPY --from=builder /app/apps/frontend/.next/static ./apps/frontend/.next/static
-COPY --from=builder /app/apps/frontend/public ./apps/frontend/public
+COPY --from=builder /app/apps/frontend/.next/static ./.next/static
+COPY --from=builder /app/apps/frontend/public ./public
 
 EXPOSE 3000
 
-CMD ["node", "apps/frontend/server.js"]
+CMD ["node", "server.js"]
