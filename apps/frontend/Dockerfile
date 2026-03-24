@@ -31,10 +31,7 @@ COPY --from=deps /app/apps/frontend/node_modules ./apps/frontend/node_modules
 COPY apps/frontend/ apps/frontend/
 COPY turbo.json package.json pnpm-workspace.yaml ./
 
-RUN pnpm --filter frontend build \
-    && echo "=== standalone contents ===" \
-    && find apps/frontend/.next/standalone -maxdepth 3 -type f -name "server.js" \
-    && ls -la apps/frontend/.next/standalone/
+RUN pnpm --filter frontend build
 
 # ── Stage 3: runtime ────────────────────────────────
 FROM node:20-alpine AS runner
@@ -42,11 +39,10 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Standalone output recreates monorepo structure from root
 COPY --from=builder /app/apps/frontend/.next/standalone ./
-COPY --from=builder /app/apps/frontend/.next/static ./apps/frontend/.next/static
-COPY --from=builder /app/apps/frontend/public ./apps/frontend/public
+COPY --from=builder /app/apps/frontend/.next/static ./.next/static
+COPY --from=builder /app/apps/frontend/public ./public
 
 EXPOSE 3000
 
-CMD ["node", "apps/frontend/server.js"]
+CMD ["node", "server.js"]
