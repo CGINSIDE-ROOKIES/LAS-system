@@ -9,12 +9,12 @@ COPY rag/pyproject.toml rag/pyproject.toml
 COPY rag/src/ rag/src/
 
 # Copy api project
-COPY api/pyproject.toml api/pyproject.toml
+COPY api/pyproject.toml api/uv.lock api/
 COPY api/main.py api/main.py
 COPY api/src/ api/src/
 
 WORKDIR /build/api
-RUN uv sync --no-dev
+RUN uv sync --frozen --no-dev
 
 # ── Stage 2: runtime ────────────────────────────────
 FROM python:3.12-slim-bookworm
