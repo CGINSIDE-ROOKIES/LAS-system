@@ -32,7 +32,7 @@ COPY apps/frontend/ apps/frontend/
 COPY turbo.json package.json pnpm-workspace.yaml ./
 
 WORKDIR /app/apps/frontend
-RUN pnpm build
+RUN npx next build
 
 # ── Stage 3: runtime ────────────────────────────────
 FROM node:20-alpine AS runner
