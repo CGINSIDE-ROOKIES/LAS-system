@@ -1,0 +1,15 @@
+node_modules
+.next
+.turbo
+.venv
+__pycache__
+*.egg-info
+.git
+.mypy_cache
+.ruff_cache
+.env
+reference-docs
+results
+*.ipynb
+.claude
+doc_processor.egg-info
