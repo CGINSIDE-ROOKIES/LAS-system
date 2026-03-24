@@ -1,16 +1,16 @@
 from pydantic import BaseModel, Field, ValidationError
+from langchain_core.exceptions import OutputParserException
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 
-from .las_types import IRGroup, DocumentState, IRGroupState
-
-from pathlib import Path
-from typing import Literal, cast
+from typing import Literal
 import re
 
-from .llms import midm as llm
-from .prompts import get_prompts
+from doc_processor.las_types import IRChunk, DocumentState, IRGroupState
+from doc_processor.llms import midm as llm
+from doc_processor.prompts import get_prompts
+from doc_processor.core.ir import ir_grouper
 
 prompts = get_prompts()
 
@@ -45,9 +45,9 @@ class TextCategorization(BaseModel):
 ###################################################################################################
 
 prelim_categorizer_llm = llm.with_structured_output(TextPrelimCategorization, method="json_mode") \
-    .with_retry(retry_if_exception_type=(ValidationError, ValueError), stop_after_attempt=3)
+    .with_retry(retry_if_exception_type=(ValidationError, ValueError, OutputParserException), stop_after_attempt=3)
 categorizer_llm = llm.with_structured_output(TextCategorization, method="json_mode") \
-    .with_retry(retry_if_exception_type=(ValidationError, ValueError), stop_after_attempt=3)
+    .with_retry(retry_if_exception_type=(ValidationError, ValueError, OutputParserException), stop_after_attempt=3)
 
 BYPASS_PRELIM = False
 
@@ -72,7 +72,24 @@ def document_reducer(state: DocumentState):
     # ir_groups_temp needs to be cleared!!! (or it'll accumulate)
     sorted_ir_groups = sorted(state.ir_groups_temp, key=lambda x: x[0])
     next_state = "prelim" if state.preprocess_state == "uncategorized" else "finished"
-    return {"ir_groups": [group for _, group in sorted_ir_groups], "ir_groups_temp": [], "preprocess_state": next_state}
+    groups = [group for _, group in sorted_ir_groups]
+
+    if next_state == "finished":
+        # Flatten all chunks back to an ordered dict (preserving document order)
+        # so ir_grouper can rebuild formatted_str and ir_join from the
+        # LLM-updated IRChunk.category values.
+        flat: dict[str, IRChunk] = {}
+        for group in groups:
+            for chunk_id, chunk in zip(group.ir_chunk_ids, group.ir_chunks):
+                # Clear article/paragraph numbering on non-조문 chunks so they
+                # don't pollute grouping (e.g. a 제목 chunk that was initially
+                # misdetected as 조문 would still carry stale article_n).
+                if chunk.category != "조문":
+                    chunk = chunk.model_copy(update={"article_n": [], "paragraph_n": []})
+                flat[chunk_id] = chunk
+        groups = ir_grouper(flat)
+
+    return {"ir_groups": groups, "ir_groups_temp": [], "preprocess_state": next_state}
 
 ###################################################################################################
 
@@ -93,7 +110,13 @@ def prelim_categorization_node_worker(state: IRGroupState):
         ("user", state.ir_group.formatted_str)
     ]
     print(f"\n--- LLM INPUT (group {state.group_idx})")
-    reply = TextPrelimCategorization.model_validate(prelim_categorizer_llm.invoke(messages))
+    try:
+        reply = TextPrelimCategorization.model_validate(prelim_categorizer_llm.invoke(messages))
+    except (ValidationError, OutputParserException) as e:
+        # Prelim is just a filter — defaulting to "uncategorized" is safe,
+        # it just means this group goes to the detailed categorization pass.
+        print(f"\n--- PRELIM FALLBACK (group {state.group_idx}) → uncategorized (LLM failed: {e!r})\n")
+        return {"ir_groups_temp": [(state.group_idx, state.ir_group)]}
     print(f"\n--- LLM OUTPUT (group {state.group_idx}) ---\n{reply!r}\n")
 
 
@@ -128,6 +151,7 @@ def categorization_node_worker(state: IRGroupState):
             continue
         text = para_texts[key].strip()
         if not text:
+            para_categories[key] = "빈칸"
             continue
         messages = [
             ("system", prompts["categorization"]),
@@ -163,26 +187,3 @@ parser_graph_builder.add_conditional_edges("document_reducer", document_splitter
 parser_graph_builder.add_edge("categorization_workers", "document_reducer")
 
 parser_graph = parser_graph_builder.compile()
-
-
-if __name__ == "__main__":
-    file_dirs_std_labor = list(Path("tests/doc_samples/표준계약서모음(hwp-hwpx)").iterdir())
-    file_dirs_std_contracts = list(Path("tests/doc_samples/(노동)표준근로계약서모음").iterdir())
-    file_dirs = file_dirs_std_labor + file_dirs_std_contracts
-    
-    [print(f"{i}. {f.name}") for i, f in enumerate(file_dirs)]
-    sel = int(input("select: "))
-    file_path = file_dirs[sel]
-
-    result = parser_graph.invoke(
-        input=DocumentState.from_file(Path(file_path)),
-        config={"max_concurrency": 4}
-    )
-
-    with open(f"tests/results/{file_path.name}_parser_res.txt", "w", encoding="utf-8") as f:
-        for group in result["ir_groups"]:
-            group = cast(IRGroup, group)
-            for chunk in group.ir_chunks:
-                text = chunk.text
-                category = chunk.category
-                f.write(f"category: {category} - {chunk.article_n}.{chunk.paragraph_n}\nchunk: {text}\n==========\n")

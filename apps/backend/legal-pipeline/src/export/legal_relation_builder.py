@@ -8,12 +8,32 @@ from src.common.io_utils import _iter_jsonl, _read_json, _write_jsonl
 from src.common.law_meta import build_law_uid
 from src.parser.legal_case_parser import (
     build_evidence_preview,
-    extract_case_number_refs,
     extract_explicit_article_refs,
     find_related_law_names,
     parse_case_payload,
 )
 
+
+DEFAULT_RELATION_RULES = ("related_law", "cited_law")
+SUPPORTED_RELATION_RULES = frozenset(DEFAULT_RELATION_RULES)
+DEFAULT_EXPANDED_BASE_DIR = Path("data/expanded/03_expanded_related_docs")
+DEFAULT_RAW_RELATED_BASE_DIR = Path("data/raw/02_related_legal_docs")
+
+
+def normalize_relation_rules(relation_rules: list[str] | None) -> list[str]:
+    if not relation_rules:
+        return list(DEFAULT_RELATION_RULES)
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for rule in relation_rules:
+        rule_name = str(rule or "").strip()
+        if not rule_name or rule_name not in SUPPORTED_RELATION_RULES or rule_name in seen:
+            continue
+        seen.add(rule_name)
+        normalized.append(rule_name)
+
+    return normalized or list(DEFAULT_RELATION_RULES)
 
 
 def _iter_candidate_hit_rows(raw_related_base_dir: Path):
@@ -62,10 +82,6 @@ def _build_relation_text(record: dict[str, Any]) -> str:
     if article_displays:
         lines.append(f"관련 조문: {', '.join(article_displays)}")
 
-    referenced_case_numbers = record.get("referenced_case_numbers") or []
-    if referenced_case_numbers:
-        lines.append(f"참조 사건번호: {', '.join(referenced_case_numbers)}")
-
     evidence_preview = str(record.get("evidence_preview") or "").strip()
     if evidence_preview:
         lines.append("근거 일부:")
@@ -79,14 +95,11 @@ def _confidence(
     article_refs: list[dict[str, str]],
     matched_law_names: list[str],
     law_name: str,
-    referenced_case_numbers: list[str] | None = None,
 ) -> float:
     if article_refs:
         return 0.95
     if law_name in matched_law_names:
         return 0.85
-    if referenced_case_numbers:
-        return 0.75
     return 0.65
 
 
@@ -99,7 +112,7 @@ def build_root_relation_payloads(
     relation_rules: list[str] | None = None,
     targets: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    relation_rules = relation_rules or ["related_law", "cited_law", "cited_case", "referenced_interpretation"]
+    relation_rules = normalize_relation_rules(relation_rules)
     allowed_targets = set(targets) if targets else None
 
     candidate_hits = [
@@ -149,22 +162,16 @@ def build_root_relation_payloads(
         matched_law_names = find_related_law_names(body_text, family_law_names) if body_text else []
         article_refs_map = extract_explicit_article_refs(body_text, family_law_names) if body_text else {}
         article_refs = article_refs_map.get(law_name, [])
-        referenced_case_numbers = extract_case_number_refs(
-            body_text,
-            exclude_numbers=[parsed.get("doc_number")],
-        ) if body_text else []
 
         relation_types: list[str] = ["search_hit"]
         if law_name in matched_law_names and "cited_law" in relation_rules:
             relation_types.append("cited_law")
         if article_refs and "related_law" in relation_rules:
             relation_types.append("related_law")
-        if referenced_case_numbers and "cited_case" in relation_rules:
-            relation_types.append("cited_case")
 
         relation_types = list(dict.fromkeys(relation_types))
         source_law_uid = str(hits[0].get("source_law_uid") or build_law_uid(None, None, law_name))
-        preview_anchor = law_name if law_name in matched_law_names else (referenced_case_numbers[0] if referenced_case_numbers else None)
+        preview_anchor = law_name if law_name in matched_law_names else None
         evidence_preview = build_evidence_preview(body_text, law_name=law_name, anchor=preview_anchor)
         article_keys = [item["article_key"] for item in article_refs]
         article_no_displays = [item["article_no_display"] for item in article_refs]
@@ -173,6 +180,7 @@ def build_root_relation_payloads(
             "id": f"relation::{canonical_case_id}::{source_law_uid}",
             "canonical_case_id": canonical_case_id,
             "canonical_id": canonical_case_id,
+            "relation_model": "law_to_case",
             "law_uid": source_law_uid,
             "law_name": law_name,
             "root_law_name": root_law_name,
@@ -192,8 +200,7 @@ def build_root_relation_payloads(
             "relation_types": relation_types,
             "article_keys": article_keys,
             "article_no_displays": article_no_displays,
-            "referenced_case_numbers": referenced_case_numbers,
-            "relation_confidence": _confidence(article_refs, matched_law_names, law_name, referenced_case_numbers),
+            "relation_confidence": _confidence(article_refs, matched_law_names, law_name),
             "evidence_preview": evidence_preview,
             "source_hit_count": len(hits),
             "source_file_paths": sorted(
@@ -227,7 +234,6 @@ def _merge_relation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             current["relation_types"] = list(dict.fromkeys(row.get("relation_types", [])))
             current["article_keys"] = list(dict.fromkeys(row.get("article_keys", [])))
             current["article_no_displays"] = list(dict.fromkeys(row.get("article_no_displays", [])))
-            current["referenced_case_numbers"] = list(dict.fromkeys(row.get("referenced_case_numbers", [])))
             current["source_file_paths"] = list(dict.fromkeys(row.get("source_file_paths", [])))
             merged[row_id] = current
             continue
@@ -238,7 +244,6 @@ def _merge_relation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         current["relation_types"] = list(dict.fromkeys(list(current.get("relation_types", [])) + list(row.get("relation_types", []))))
         current["article_keys"] = list(dict.fromkeys(list(current.get("article_keys", [])) + list(row.get("article_keys", []))))
         current["article_no_displays"] = list(dict.fromkeys(list(current.get("article_no_displays", [])) + list(row.get("article_no_displays", []))))
-        current["referenced_case_numbers"] = list(dict.fromkeys(list(current.get("referenced_case_numbers", [])) + list(row.get("referenced_case_numbers", []))))
         current["source_file_paths"] = list(dict.fromkeys(list(current.get("source_file_paths", [])) + list(row.get("source_file_paths", []))))
         current["relation_confidence"] = max(float(current.get("relation_confidence") or 0), float(row.get("relation_confidence") or 0))
         if not current.get("evidence_preview") and row.get("evidence_preview"):
@@ -260,43 +265,39 @@ def build_legal_relation_records(
     expanded_base_dir: str | Path = "data/expanded/03_expanded_related_docs",
     raw_related_base_dir: str | Path | None = None,
 ) -> list[dict[str, Any]]:
+    if raw_related_base_dir is not None:
+        raw_dir = Path(raw_related_base_dir)
+        candidate_hits = list(_iter_candidate_hit_rows(raw_dir))
+        canonical_rows = list(_iter_canonical_case_rows(raw_dir))
+        if candidate_hits and canonical_rows:
+            root_law_names = sorted(
+                {
+                    str(row.get("root_law_name") or "").strip()
+                    for row in candidate_hits
+                    if str(row.get("root_law_name") or "").strip()
+                }
+            )
+
+            built_rows: list[dict[str, Any]] = []
+            for root_law_name in root_law_names:
+                built_rows.extend(
+                    build_root_relation_payloads(
+                        root_law_name=root_law_name,
+                        candidate_hits=candidate_hits,
+                        canonical_case_rows=canonical_rows,
+                    )
+                )
+
+            return _merge_relation_rows(built_rows)
+
     expanded_dir = Path(expanded_base_dir)
     rows: list[dict[str, Any]] = []
-
     for path in sorted(expanded_dir.rglob("relation_records.jsonl")):
         rows.extend(list(_iter_jsonl(path)))
-
     if rows:
         return _merge_relation_rows(rows)
 
-    if raw_related_base_dir is None:
-        return []
-
-    raw_dir = Path(raw_related_base_dir)
-    candidate_hits = list(_iter_candidate_hit_rows(raw_dir))
-    canonical_rows = list(_iter_canonical_case_rows(raw_dir))
-    if not candidate_hits or not canonical_rows:
-        return []
-
-    root_law_names = sorted(
-        {
-            str(row.get("root_law_name") or "").strip()
-            for row in candidate_hits
-            if str(row.get("root_law_name") or "").strip()
-        }
-    )
-
-    built_rows: list[dict[str, Any]] = []
-    for root_law_name in root_law_names:
-        built_rows.extend(
-            build_root_relation_payloads(
-                root_law_name=root_law_name,
-                candidate_hits=candidate_hits,
-                canonical_case_rows=canonical_rows,
-            )
-        )
-
-    return _merge_relation_rows(built_rows)
+    return []
 
 
 
