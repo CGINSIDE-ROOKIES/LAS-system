@@ -7,12 +7,15 @@
 
 import json
 
+import psycopg2.extensions
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
+from src.db import get_db
 from src.dependencies import get_rag_pipeline
 from src.generation.pipeline import RagPipeline
+from src.history import save_qa
 from src.retrieval.common import RetrievalError
 
 router = APIRouter(tags=["qa"])
@@ -64,12 +67,20 @@ class AskResponse(BaseModel):
 def ask(
     request: AskRequest,
     pipeline: RagPipeline = Depends(get_rag_pipeline),
+    conn: psycopg2.extensions.connection = Depends(get_db),
 ) -> AskResponse:
     """질문을 받아 RAG 파이프라인을 실행하고 답변을 반환합니다."""
     result = pipeline.run(
         request.question,
         doc_types=request.doc_types,
         law_names=request.law_names,
+    )
+    save_qa(
+        conn,
+        question=request.question,
+        answer=result.answer,
+        law_context_status=result.law_context_status,
+        retrieved_docs=result.retrieved_docs,
     )
     return AskResponse(
         answer=result.answer,
