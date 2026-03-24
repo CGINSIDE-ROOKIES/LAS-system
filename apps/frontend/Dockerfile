@@ -31,8 +31,15 @@ COPY --from=deps /app/apps/frontend/node_modules ./apps/frontend/node_modules
 COPY apps/frontend/ apps/frontend/
 COPY turbo.json package.json pnpm-workspace.yaml ./
 
-WORKDIR /app/apps/frontend
-RUN pnpm build
+RUN pnpm --filter frontend build \
+    && echo "=== standalone root ===" \
+    && ls -la apps/frontend/.next/standalone/ \
+    && echo "=== standalone node_modules (top-level) ===" \
+    && ls apps/frontend/.next/standalone/node_modules/ | head -20 \
+    && echo "=== standalone apps/frontend (should exist with experimental.outputFileTracingRoot) ===" \
+    && ls -la apps/frontend/.next/standalone/apps/frontend/ \
+    && echo "=== standalone node_modules (.pnpm should be present) ===" \
+    && ls apps/frontend/.next/standalone/node_modules/ | head -5
 
 # ── Stage 3: runtime ────────────────────────────────
 FROM node:20-alpine AS runner
@@ -40,6 +47,8 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
+# outputFileTracingRoot=monorepo root means standalone mirrors the full tree:
+#   node_modules/ (with .pnpm), apps/frontend/server.js, apps/frontend/.next/
 COPY --from=builder /app/apps/frontend/.next/standalone ./
 COPY --from=builder /app/apps/frontend/.next/static ./apps/frontend/.next/static
 COPY --from=builder /app/apps/frontend/public ./apps/frontend/public
