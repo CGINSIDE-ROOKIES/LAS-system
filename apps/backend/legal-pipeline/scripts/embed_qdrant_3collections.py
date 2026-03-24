@@ -37,6 +37,59 @@ RELATION_MODEL_SEARCH_PROFILES = {
         "retrieval_role": "fallback",
     },
 }
+QUERY_RETRIEVAL_PROFILES = {
+    "law_lookup": {
+        "description": "법령명/조문 중심 질의",
+        "collections": [
+            {"name": "law_article", "enabled": True, "priority": 1, "score_multiplier": 1.0},
+            {"name": "legal_case", "enabled": True, "priority": 2, "score_multiplier": 0.9},
+            {
+                "name": "legal_relation",
+                "enabled": True,
+                "priority": 3,
+                "score_multiplier": 0.85,
+                "relation_model_weights": {
+                    "law_to_case": 1.0,
+                    "case_to_case": 0.6,
+                },
+            },
+        ],
+    },
+    "case_lookup": {
+        "description": "사건번호/판례 중심 질의",
+        "collections": [
+            {"name": "legal_case", "enabled": True, "priority": 1, "score_multiplier": 1.0},
+            {
+                "name": "legal_relation",
+                "enabled": True,
+                "priority": 2,
+                "score_multiplier": 0.9,
+                "relation_model_weights": {
+                    "law_to_case": 0.8,
+                    "case_to_case": 1.0,
+                },
+            },
+            {"name": "law_article", "enabled": True, "priority": 3, "score_multiplier": 0.75},
+        ],
+    },
+    "citation_trace": {
+        "description": "판례 인용/계보 추적 질의",
+        "collections": [
+            {
+                "name": "legal_relation",
+                "enabled": True,
+                "priority": 1,
+                "score_multiplier": 1.0,
+                "relation_model_weights": {
+                    "law_to_case": 0.7,
+                    "case_to_case": 1.0,
+                },
+            },
+            {"name": "legal_case", "enabled": True, "priority": 2, "score_multiplier": 0.95},
+            {"name": "law_article", "enabled": False, "priority": 3, "score_multiplier": 0.0},
+        ],
+    },
+}
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -333,6 +386,39 @@ def _build_simple_import_rows(
     return rows
 
 
+def _build_retrieval_policy(
+    collection_manifests: Sequence[dict],
+) -> dict:
+    enabled_collections = {
+        str(item.get("collection_name") or "")
+        for item in collection_manifests
+        if not bool(item.get("skipped"))
+    }
+    query_profiles: dict[str, dict] = {}
+
+    for profile_name, profile in QUERY_RETRIEVAL_PROFILES.items():
+        configured_collections: list[dict] = []
+        for collection in profile["collections"]:
+            collection_entry = dict(collection)
+            collection_entry["available"] = collection_entry["name"] in enabled_collections
+            configured_collections.append(collection_entry)
+
+        query_profiles[profile_name] = {
+            "description": profile["description"],
+            "collections": configured_collections,
+        }
+
+    return {
+        "default_query_profile": "law_lookup",
+        "notes": [
+            "relation rows are supporting evidence and should not outrank primary corpus hits by default",
+            "case_to_case relations are intended for citation tracing and case-number-driven queries",
+        ],
+        "relation_model_profiles": RELATION_MODEL_SEARCH_PROFILES,
+        "query_profiles": query_profiles,
+    }
+
+
 def embed_law_article(
     model: SentenceTransformer,
     dataset_dir: Path,
@@ -515,6 +601,7 @@ def write_embedding_manifest(
         "dataset_dir": str(dataset_dir),
         "emb_dir": str(emb_dir),
         "collections": list(collection_manifests),
+        "retrieval_policy": _build_retrieval_policy(collection_manifests),
     }
     with manifest_path.open("w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)

@@ -1,7 +1,11 @@
 from pathlib import Path
 
 from src.common.io_utils import _write_jsonl
-from scripts.embed_qdrant_3collections import _build_meta, _scan_collection
+from scripts.embed_qdrant_3collections import (
+    _build_meta,
+    _build_retrieval_policy,
+    _scan_collection,
+)
 
 
 def test_scan_collection_tracks_relation_model_counts(tmp_path):
@@ -57,3 +61,20 @@ def test_build_meta_includes_relation_model_search_profile():
     assert meta["default_score_multiplier"] == 0.75
     assert meta["relation_model_priority"] == "secondary"
     assert meta["retrieval_role"] == "trace"
+
+
+def test_build_retrieval_policy_marks_collection_availability_and_weights():
+    policy = _build_retrieval_policy(
+        [
+            {"collection_name": "law_article", "skipped": False},
+            {"collection_name": "legal_case", "skipped": False},
+            {"collection_name": "legal_relation", "skipped": False},
+        ]
+    )
+
+    assert policy["default_query_profile"] == "law_lookup"
+    assert policy["relation_model_profiles"]["case_to_case"]["default_score_multiplier"] == 0.75
+    citation_profile = policy["query_profiles"]["citation_trace"]
+    assert citation_profile["collections"][0]["name"] == "legal_relation"
+    assert citation_profile["collections"][0]["relation_model_weights"]["case_to_case"] == 1.0
+    assert all(item["available"] is True for item in citation_profile["collections"][:2])
