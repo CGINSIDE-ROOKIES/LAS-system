@@ -20,6 +20,23 @@ CASE_DOC_TYPES = {"prec", "detc", "decc", "expc"}
 COLLECTIONS = ("law_article", "legal_case", "legal_relation")
 APPENDIX_VECTOR_PLACEHOLDER = "[NO_APPENDIX_LINKED]"
 LAW_ARTICLE_VECTOR_NAMES = ("body", "appendix")
+RELATION_MODEL_SEARCH_PROFILES = {
+    "law_to_case": {
+        "default_score_multiplier": 1.0,
+        "priority": "primary",
+        "retrieval_role": "expansion",
+    },
+    "case_to_case": {
+        "default_score_multiplier": 0.75,
+        "priority": "secondary",
+        "retrieval_role": "trace",
+    },
+    "unknown": {
+        "default_score_multiplier": 0.85,
+        "priority": "secondary",
+        "retrieval_role": "fallback",
+    },
+}
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -132,12 +149,15 @@ def _build_point_id(row: dict, duplicate_canonical_ids: set[str]) -> str:
 def _scan_collection(dataset_dir: Path, collection_name: str) -> dict:
     canonical_id_counter: Counter[str] = Counter()
     doc_type_counter: Counter[str] = Counter()
+    relation_model_counter: Counter[str] = Counter()
     row_count = 0
     text_row_count = 0
 
     for row in _iter_collection_rows(dataset_dir, collection_name):
         row_count += 1
         doc_type_counter[str(row.get("doc_type") or "")] += 1
+        if collection_name == "legal_relation":
+            relation_model_counter[str(row.get("relation_model") or "unknown")] += 1
         text = str(row.get("text") or "").strip()
         if collection_name == "law_article":
             appendix_text = str(row.get("appendix_vector_text") or APPENDIX_VECTOR_PLACEHOLDER).strip()
@@ -155,12 +175,19 @@ def _scan_collection(dataset_dir: Path, collection_name: str) -> dict:
         "canonical_id_counter": canonical_id_counter,
         "duplicate_canonical_ids": duplicate_canonical_ids,
         "doc_type_counter": doc_type_counter,
+        "relation_model_counter": relation_model_counter,
     }
+
+
+def _relation_model_profile(row: dict) -> dict:
+    relation_model = str(row.get("relation_model") or "unknown").strip() or "unknown"
+    return dict(RELATION_MODEL_SEARCH_PROFILES.get(relation_model, RELATION_MODEL_SEARCH_PROFILES["unknown"]))
 
 
 def _build_meta(collection_name: str, row: dict, point_id: str, text: str) -> dict:
     doc_type = row.get("doc_type")
     canonical_id = _canonical_id_from_row(row)
+    relation_profile = _relation_model_profile(row) if collection_name == "legal_relation" else {}
     meta = {
         "id": row.get("id"),
         "canonical_id": canonical_id,
@@ -188,10 +215,15 @@ def _build_meta(collection_name: str, row: dict, point_id: str, text: str) -> di
         "related_law_name": row.get("related_law_name"),
         "related_law_names": row.get("related_law_names"),
         "source_law_name": row.get("source_law_name"),
+        "relation_model": row.get("relation_model"),
+        "relation_type": row.get("relation_type"),
         "relation_types": row.get("relation_types"),
         "title": row.get("title"),
         "doc_id": row.get("doc_id"),
         "doc_number": row.get("doc_number"),
+        "source_canonical_case_id": row.get("source_canonical_case_id"),
+        "target_canonical_case_id": row.get("target_canonical_case_id"),
+        "referenced_case_number": row.get("referenced_case_number"),
         "doc_kind": row.get("doc_kind"),
         "detail_link": row.get("detail_link"),
         "target": row.get("target"),
@@ -206,6 +238,9 @@ def _build_meta(collection_name: str, row: dict, point_id: str, text: str) -> di
         "source_file_path": row.get("source_file_path"),
         "chunk_index": row.get("chunk_index"),
         "text_len": len(text),
+        "default_score_multiplier": relation_profile.get("default_score_multiplier"),
+        "relation_model_priority": relation_profile.get("priority"),
+        "retrieval_role": relation_profile.get("retrieval_role"),
     }
 
     if collection_name == "law_article":
@@ -455,6 +490,9 @@ def embed_simple_collection(
         "source_jsonl_path": str(source_path),
         "import_jsonl_path": str(import_path),
     }
+    if collection_name == "legal_relation":
+        manifest["relation_model_counts"] = dict(stats["relation_model_counter"])
+        manifest["relation_model_profiles"] = RELATION_MODEL_SEARCH_PROFILES
     with manifest_path.open("w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
     return manifest
