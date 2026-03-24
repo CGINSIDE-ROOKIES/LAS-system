@@ -31,7 +31,10 @@ COPY --from=deps /app/apps/frontend/node_modules ./apps/frontend/node_modules
 COPY apps/frontend/ apps/frontend/
 COPY turbo.json package.json pnpm-workspace.yaml ./
 
-RUN pnpm --filter frontend build
+RUN pnpm --filter frontend build \
+    && echo "=== standalone contents ===" \
+    && find apps/frontend/.next/standalone -maxdepth 3 -type f -name "server.js" \
+    && ls -la apps/frontend/.next/standalone/
 
 # ── Stage 3: runtime ────────────────────────────────
 FROM node:20-alpine AS runner
