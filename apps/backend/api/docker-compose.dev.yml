@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: las-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: las
+      POSTGRES_PASSWORD: las
+      POSTGRES_DB: las
+    ports:
+      - "5432:5432"
+    volumes:
+      - las-postgres-data:/var/lib/postgresql/data
+      - ./migrations/001_create_qa_history.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+volumes:
+  las-postgres-data:
