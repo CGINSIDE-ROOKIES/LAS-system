@@ -12,7 +12,7 @@ import traceback
 logger = logging.getLogger(__name__)
 
 import psycopg2.extensions
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 from src.db import get_db
 from src.dependencies import get_rag_pipeline
 from src.generation.pipeline import RagPipeline
-from src.history import save_qa
+from src.history import get_history, get_history_item, save_qa
 from src.retrieval.common import RetrievalError
 
 router = APIRouter(tags=["qa"])
@@ -31,6 +31,7 @@ _VALID_DOC_TYPES = {"law", "prec", "detc", "decc", "expc"}
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
+    session_id: str | None = None
     doc_types: list[str] | None = None
     law_names: list[str] | None = None
 
@@ -68,6 +69,30 @@ class AskResponse(BaseModel):
     law_context_status: str
 
 
+@router.get("/history")
+def history(
+    q: str | None = Query(default=None, description="질문/답변 검색어"),
+    session_id: str | None = Query(default=None, description="세션 ID 필터"),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    conn: psycopg2.extensions.connection = Depends(get_db),
+):
+    """Q&A 히스토리 목록을 반환합니다."""
+    return get_history(conn, q=q, session_id=session_id, limit=limit, offset=offset)
+
+
+@router.get("/history/{qa_id}")
+def history_item(
+    qa_id: str,
+    conn: psycopg2.extensions.connection = Depends(get_db),
+):
+    """단건 Q&A 히스토리를 반환합니다."""
+    item = get_history_item(conn, qa_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="히스토리를 찾을 수 없습니다.")
+    return item
+
+
 @router.post("/ask", response_model=AskResponse)
 def ask(
     request: AskRequest,
@@ -93,6 +118,7 @@ def ask(
             answer=result.answer,
             law_context_status=result.law_context_status,
             retrieved_docs=result.retrieved_docs,
+            session_id=request.session_id,
         )
     except Exception:
         logger.error("DB save failed in ask:\n%s", traceback.format_exc())
@@ -144,6 +170,7 @@ def ask_stream(
                     answer="".join(answer_parts),
                     law_context_status=meta.law_context_status,
                     retrieved_docs=meta.retrieved_docs,
+                    session_id=request.session_id,
                 )
             except Exception:
                 logger.error("DB save failed in ask_stream:\n%s", traceback.format_exc())
