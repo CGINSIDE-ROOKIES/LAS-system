@@ -1,4 +1,16 @@
 services:
+  postgres:
+    image: postgres:15
+    container_name: las-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-las}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-las}
+      POSTGRES_DB: ${POSTGRES_DB:-las}
+    volumes:
+      - las-postgres-data:/var/lib/postgresql/data
+      - ../apps/backend/api/migrations/001_create_qa_history.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
   backend-api:
     image: ghcr.io/cginside-rookies/las-system/backend-api:dev
     container_name: las-backend-api
@@ -6,6 +18,8 @@ services:
     ports:
       - "8000:8000"
     env_file: .env.backend-api
+    depends_on:
+      - postgres
 
   backend-doc-pipeline:
     image: ghcr.io/cginside-rookies/las-system/backend-doc-pipeline:dev
@@ -23,3 +37,6 @@ services:
       - "3000:3000"
     environment:
       - ALLOWED_FRAME_ORIGINS=${ALLOWED_FRAME_ORIGINS:-}
+
+volumes:
+  las-postgres-data:
