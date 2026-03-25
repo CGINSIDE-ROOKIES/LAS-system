@@ -156,40 +156,62 @@ export function ChatContainer() {
 
   const hasMessages = messages.length > 0;
 
-  return (
-    <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="shrink-0 border-b border-border px-6 py-4">
-        <h1 className="text-lg font-semibold text-foreground">법령 Q&A</h1>
-        <p className="text-sm text-muted-foreground">
-          노동법 및 하도급법 관련 질문에 대해 근거 기반 답변을 제공합니다.
-        </p>
-      </div>
-
-      {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-6 py-4">
-        {!hasMessages && (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center">
-              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-                <svg className="h-6 w-6 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+  if (!hasMessages) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center px-6">
+        <div className="w-full max-w-2xl">
+          {/* Logo / Title */}
+          <div className="mb-8 text-center">
+            {/* Icon with glow ring */}
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mx-auto mb-6 relative w-fit">
+              <div className="absolute inset-0 rounded-2xl bg-primary/20 blur-xl scale-150" />
+              <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/20 shadow-lg">
+                <svg className="h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
                 </svg>
               </div>
-              <h3 className="text-sm font-medium text-foreground">법률 질문을 입력해주세요</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                노동법, 하도급법 관련 질문에 대해 근거 조문과 함께 답변합니다.
-              </p>
             </div>
+
+            {/* Title */}
+            <h1
+              className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/60 bg-clip-text text-transparent"
+              style={{ animationDelay: "120ms" }}
+            >
+              무엇이 궁금하신가요?
+            </h1>
+
+            {/* Subtitle */}
+            <p
+              className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 text-sm text-muted-foreground leading-relaxed"
+              style={{ animationDelay: "220ms" }}
+            >
+              노동법 및 하도급법 관련 질문에 대해
+              <br />
+              근거 조문과 판례를 함께 제공합니다.
+            </p>
           </div>
-        )}
-        {hasMessages && (
-          <div className="space-y-4">
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
-            ))}
+
+          {/* Input */}
+          <div
+            className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both"
+            style={{ animationDelay: "340ms" }}
+          >
+            <QuestionInput onSubmit={streamAnswer} disabled={isStreaming} />
           </div>
-        )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Messages */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-6 py-4">
+        <div className="space-y-4">
+          {messages.map((msg) => (
+            <MessageBubble key={msg.id} message={msg} />
+          ))}
+        </div>
       </div>
 
       {/* Input */}
