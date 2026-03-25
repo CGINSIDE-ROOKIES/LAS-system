@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from src.collector.legal_doc_collector import DOC_TYPE_LABELS
+from src.common.law_meta import build_law_uid
 from src.common.io_utils import _iter_jsonl, _read_json
 from src.parser.legal_case_parser import parse_case_payload
 
@@ -68,6 +69,13 @@ def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 150) -> list[st
         start = max(0, end - overlap)
 
     return chunks
+
+
+def _truncate_text(text: str, limit: int = 320) -> str:
+    normalized = _normalize_space(text)
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: max(0, limit - 1)].rstrip() + "…"
 
 
 
@@ -221,24 +229,49 @@ def build_legal_case_records(
 
         related_law_names = list(row.get("source_law_names") or [])
         root_law_names = list(row.get("root_law_names") or [])
+        source_law_uids = list(row.get("source_law_uids") or [])
         first_related_law_name = related_law_names[0] if related_law_names else None
         first_root_law_name = root_law_names[0] if root_law_names else row.get("root_law_name")
+        first_source_law_uid = source_law_uids[0] if source_law_uids else None
+        root_law_uid = build_law_uid(None, None, first_root_law_name)
 
         for chunk_index, chunk in enumerate(chunks):
+            search_parts = [
+                DOC_TYPE_LABELS.get(target, target),
+                parsed.get("title"),
+                parsed.get("doc_number"),
+                first_related_law_name,
+                chunk,
+            ]
+            search_text = "\n".join(str(item).strip() for item in search_parts if str(item or "").strip()).strip()
+            display_text = "\n".join(
+                part
+                for part in (
+                    str(parsed.get("title") or "").strip(),
+                    str(parsed.get("doc_number") or "").strip(),
+                    _truncate_text(chunk),
+                )
+                if part
+            ).strip()
             records.append(
                 {
                     "id": f"case_chunk::{canonical_case_id}::{chunk_index}",
                     "canonical_id": canonical_case_id,
                     "canonical_case_id": canonical_case_id,
                     "text": chunk,
+                    "search_text": search_text or chunk,
+                    "display_text": display_text or _truncate_text(chunk),
                     "doc_type": target,
                     "doc_type_label": DOC_TYPE_LABELS.get(target, target),
                     "source_group": "02_related_legal_docs",
                     "root_law_name": first_root_law_name,
+                    "root_law_uid": root_law_uid,
                     "root_law_names": root_law_names,
                     "related_law_name": first_related_law_name,
                     "related_law_names": related_law_names,
                     "source_law_name": first_related_law_name,
+                    "source_law_uid": first_source_law_uid,
+                    "source_law_uids": source_law_uids,
                     "source_law_names": related_law_names,
                     "title": parsed.get("title"),
                     "doc_id": parsed.get("doc_id"),

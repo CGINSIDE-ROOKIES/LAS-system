@@ -190,125 +190,39 @@ def test_build_legal_relation_records_keeps_case_reference_out_of_law_case_rows(
     assert "cited_case" not in record["relation_types"]
     assert "referenced_case_numbers" not in record
     assert record["relation_confidence"] == 0.95
-    assert "관련 조문: 제43조의2" in record["text"]
+    assert "참조 사건번호: 2018다12345" in record["text"]
 
 
-def test_build_legal_relation_records_does_not_treat_amount_text_as_cited_case(tmp_path):
-    payload = {
-        "판례일련번호": "123456",
-        "사건명": "임금",
-        "사건번호": "2019다12345",
-        "선고일자": "2019.05.30",
-        "판례내용": "피고는 근로기준법 제43조의2에 따라 119만2666원과 66만4000원을 지급하여야 한다.",
-    }
-    raw_dir = tmp_path / "raw" / "02_related_legal_docs"
-    root = raw_dir / "근로기준법"
-    detail_path = root / "canonical" / "prec" / "case_prec_123456__detail.json"
-    _write_json(detail_path, payload)
-
+def test_build_legal_relation_records_sanitizes_existing_expanded_rows(tmp_path):
+    expanded_dir = tmp_path / "expanded" / "03_expanded_related_docs" / "근로기준법"
     _write_jsonl(
-        root / "candidate_hits.jsonl",
+        expanded_dir / "relation_records.jsonl",
         [
             {
-                "candidate_id": "cand1",
-                "canonical_case_id": "case::prec::123456",
-                "target": "prec",
+                "id": "relation::case::decc::10073::001872",
+                "canonical_case_id": "case::decc::10073",
+                "doc_type": "relation",
+                "doc_type_label": "행정심판례",
+                "source_group": "03_expanded_related_docs",
+                "target": "decc",
+                "title": "이행강제금 부과처분 취소청구",
+                "doc_id": "10073",
+                "doc_number": "2017-08376",
+                "detail_link": "/DRF/lawService.do?OC=matrix2012&target=decc&ID=10073&type=HTML&mobileYn=Y",
+                "law_name": "근로기준법",
                 "source_law_name": "근로기준법",
-                "source_law_uid": "law-001",
-                "doc_id": "123456",
-                "title": "임금",
-                "doc_number": "2019다12345",
-                "root_law_name": "근로기준법",
-                "source_file_path": "list1.json",
-            }
-        ],
-    )
-    _write_jsonl(
-        root / "canonical_cases.jsonl",
-        [
-            {
-                "id": "case::prec::123456",
-                "canonical_case_id": "case::prec::123456",
-                "canonical_id": "case::prec::123456",
-                "target": "prec",
-                "doc_type_label": "판례",
-                "doc_id": "123456",
-                "title": "임금",
-                "doc_number": "2019다12345",
-                "root_law_name": "근로기준법",
-                "source_law_names": ["근로기준법"],
-                "source_law_uids": ["law-001"],
-                "source_hit_count": 1,
-                "detail_available": True,
-                "detail_payload_path": str(detail_path),
+                "relation_types": ["search_hit", "cited_law"],
+                "text": "legacy relation",
             }
         ],
     )
 
-    records = build_legal_relation_records(raw_related_base_dir=raw_dir)
+    records = build_legal_relation_records(expanded_base_dir=tmp_path / "expanded" / "03_expanded_related_docs")
 
     assert len(records) == 1
     record = records[0]
-    assert "cited_case" not in record["relation_types"]
-    assert "referenced_case_numbers" not in record
-
-
-def test_build_legal_relation_records_keeps_all_article_refs_in_single_relation(tmp_path):
-    payload = {
-        "판례일련번호": "123456",
-        "사건명": "임금",
-        "사건번호": "2019다12345",
-        "선고일자": "2019.05.30",
-        "판례내용": "이 사건은 근로기준법 제23조, 30조 및 제43조의2를 함께 참조하였다.",
-    }
-    raw_dir = tmp_path / "raw" / "02_related_legal_docs"
-    root = raw_dir / "근로기준법"
-    detail_path = root / "canonical" / "prec" / "case_prec_123456__detail.json"
-    _write_json(detail_path, payload)
-
-    _write_jsonl(
-        root / "candidate_hits.jsonl",
-        [
-            {
-                "candidate_id": "cand1",
-                "canonical_case_id": "case::prec::123456",
-                "target": "prec",
-                "source_law_name": "근로기준법",
-                "source_law_uid": "law-001",
-                "doc_id": "123456",
-                "title": "임금",
-                "doc_number": "2019다12345",
-                "root_law_name": "근로기준법",
-                "source_file_path": "list1.json",
-            }
-        ],
-    )
-    _write_jsonl(
-        root / "canonical_cases.jsonl",
-        [
-            {
-                "id": "case::prec::123456",
-                "canonical_case_id": "case::prec::123456",
-                "canonical_id": "case::prec::123456",
-                "target": "prec",
-                "doc_type_label": "판례",
-                "doc_id": "123456",
-                "title": "임금",
-                "doc_number": "2019다12345",
-                "root_law_name": "근로기준법",
-                "source_law_names": ["근로기준법"],
-                "source_law_uids": ["law-001"],
-                "source_hit_count": 1,
-                "detail_available": True,
-                "detail_payload_path": str(detail_path),
-            }
-        ],
-    )
-
-    records = build_legal_relation_records(raw_related_base_dir=raw_dir)
-
-    assert len(records) == 1
-    record = records[0]
-    assert record["article_keys"] == ["23", "30", "43-2"]
-    assert record["article_no_displays"] == ["제23조", "제30조", "제43조의2"]
-    assert "관련 조문: 제23조, 제30조, 제43조의2" in record["text"]
+    assert record["relation_model"] == "law_to_case"
+    assert record["relation_type"] == "cited_law"
+    assert record["detail_link"] == "/DRF/lawService.do?target=decc&ID=10073&type=HTML&mobileYn=Y"
+    assert "OC=" not in record["text"]
+    assert "OC=" not in record["display_text"]

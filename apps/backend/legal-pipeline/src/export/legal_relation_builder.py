@@ -6,6 +6,7 @@ from typing import Any
 
 from src.common.io_utils import _iter_jsonl, _read_json, _write_jsonl
 from src.common.law_meta import build_law_uid
+from src.common.url_utils import sanitize_detail_link, sanitize_inline_urls
 from src.parser.legal_case_parser import (
     build_evidence_preview,
     extract_explicit_article_refs,
@@ -14,26 +15,46 @@ from src.parser.legal_case_parser import (
 )
 
 
-DEFAULT_RELATION_RULES = ("related_law", "cited_law")
-SUPPORTED_RELATION_RULES = frozenset(DEFAULT_RELATION_RULES)
-DEFAULT_EXPANDED_BASE_DIR = Path("data/expanded/03_expanded_related_docs")
-DEFAULT_RAW_RELATED_BASE_DIR = Path("data/raw/02_related_legal_docs")
+def _pick_primary_relation_type(relation_types: list[str]) -> str:
+    preferred = [item for item in relation_types if item != "search_hit"]
+    if preferred:
+        return preferred[0]
+    return relation_types[0] if relation_types else "search_hit"
 
 
-def normalize_relation_rules(relation_rules: list[str] | None) -> list[str]:
-    if not relation_rules:
-        return list(DEFAULT_RELATION_RULES)
+def _display_text(text: str, limit: int = 320) -> str:
+    normalized = " ".join(str(text or "").split()).strip()
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: max(0, limit - 1)].rstrip() + "…"
 
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for rule in relation_rules:
-        rule_name = str(rule or "").strip()
-        if not rule_name or rule_name not in SUPPORTED_RELATION_RULES or rule_name in seen:
-            continue
-        seen.add(rule_name)
-        normalized.append(rule_name)
 
-    return normalized or list(DEFAULT_RELATION_RULES)
+def _normalize_existing_relation_row(row: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(row)
+    relation_types = list(dict.fromkeys(normalized.get("relation_types", [])))
+    relation_model = str(normalized.get("relation_model") or "").strip() or "law_to_case"
+    law_name = str(normalized.get("law_name") or normalized.get("source_law_name") or "").strip() or None
+    source_law_name = str(normalized.get("source_law_name") or normalized.get("law_name") or "").strip() or None
+    root_law_name = str(normalized.get("root_law_name") or "").strip() or None
+
+    normalized["canonical_id"] = normalized.get("canonical_id") or normalized.get("canonical_case_id") or normalized.get("id")
+    normalized["relation_model"] = relation_model
+    normalized["relation_types"] = relation_types
+    normalized["relation_type"] = str(normalized.get("relation_type") or "").strip() or _pick_primary_relation_type(relation_types)
+    normalized["law_name"] = law_name
+    normalized["source_law_name"] = source_law_name
+    normalized["law_uid"] = normalized.get("law_uid") or build_law_uid(None, None, law_name)
+    normalized["source_law_uid"] = normalized.get("source_law_uid") or build_law_uid(None, None, source_law_name)
+    normalized["root_law_name"] = root_law_name
+    normalized["root_law_uid"] = normalized.get("root_law_uid") or build_law_uid(None, None, root_law_name)
+    normalized["detail_link"] = sanitize_detail_link(normalized.get("detail_link"))
+    normalized["evidence_preview"] = sanitize_inline_urls(normalized.get("evidence_preview"))
+    normalized["display_text"] = sanitize_inline_urls(normalized.get("display_text"))
+    normalized["text"] = sanitize_inline_urls(normalized.get("text"))
+    normalized["search_text"] = sanitize_inline_urls(normalized.get("search_text"))
+    normalized["embedding_text"] = sanitize_inline_urls(normalized.get("embedding_text"))
+    return normalized
+
 
 
 def _iter_candidate_hit_rows(raw_related_base_dir: Path):
@@ -71,6 +92,7 @@ def _load_detail_payload(row: dict[str, Any]) -> dict[str, Any]:
 
 def _build_relation_text(record: dict[str, Any]) -> str:
     lines = [
+        f"관계 모델: {record.get('relation_model') or ''}",
         f"법령명: {record.get('law_name') or ''}",
         f"문서 유형: {record.get('doc_type_label') or ''}",
         f"문서 제목: {record.get('title') or ''}",
@@ -112,7 +134,7 @@ def build_root_relation_payloads(
     relation_rules: list[str] | None = None,
     targets: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    relation_rules = normalize_relation_rules(relation_rules)
+    relation_rules = relation_rules or ["related_law", "cited_law", "cited_case"]
     allowed_targets = set(targets) if targets else None
 
     candidate_hits = [
@@ -171,19 +193,29 @@ def build_root_relation_payloads(
 
         relation_types = list(dict.fromkeys(relation_types))
         source_law_uid = str(hits[0].get("source_law_uid") or build_law_uid(None, None, law_name))
-        preview_anchor = law_name if law_name in matched_law_names else None
+        root_law_uid = str(hits[0].get("root_law_uid") or build_law_uid(None, None, root_law_name))
+        preview_anchor = law_name if law_name in matched_law_names else (referenced_case_numbers[0] if referenced_case_numbers else None)
         evidence_preview = build_evidence_preview(body_text, law_name=law_name, anchor=preview_anchor)
         article_keys = [item["article_key"] for item in article_refs]
         article_no_displays = [item["article_no_display"] for item in article_refs]
+        source_file_paths = sorted(
+            {
+                str(hit.get("source_file_path") or "").strip()
+                for hit in hits
+                if str(hit.get("source_file_path") or "").strip()
+            }
+        )
 
         relation_row = {
             "id": f"relation::{canonical_case_id}::{source_law_uid}",
             "canonical_case_id": canonical_case_id,
             "canonical_id": canonical_case_id,
             "relation_model": "law_to_case",
+            "relation_type": _pick_primary_relation_type(relation_types),
             "law_uid": source_law_uid,
             "law_name": law_name,
             "root_law_name": root_law_name,
+            "root_law_uid": root_law_uid,
             "matched_query_law_name": law_name,
             "doc_type": "relation",
             "doc_type_label": parsed.get("doc_type_label"),
@@ -196,23 +228,21 @@ def build_root_relation_payloads(
             "detail_link": parsed.get("detail_link"),
             "decision_date": parsed.get("decision_date"),
             "source_law_name": law_name,
+            "source_law_uid": source_law_uid,
             "related_law_names": [law_name],
             "relation_types": relation_types,
             "article_keys": article_keys,
             "article_no_displays": article_no_displays,
             "relation_confidence": _confidence(article_refs, matched_law_names, law_name),
             "evidence_preview": evidence_preview,
+            "display_text": _display_text(evidence_preview or body_text),
             "source_hit_count": len(hits),
-            "source_file_paths": sorted(
-                {
-                    str(hit.get("source_file_path") or "").strip()
-                    for hit in hits
-                    if str(hit.get("source_file_path") or "").strip()
-                }
-            ),
+            "source_file_path": source_file_paths[0] if source_file_paths else None,
+            "source_file_paths": source_file_paths,
         }
         relation_row["embedding_text"] = _build_relation_text(relation_row)
         relation_row["text"] = relation_row["embedding_text"]
+        relation_row["search_text"] = relation_row["embedding_text"]
         relation_rows.append(relation_row)
 
     return relation_rows
@@ -223,6 +253,7 @@ def _merge_relation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
 
     for row in rows:
+        row = _normalize_existing_relation_row(row)
         row_id = str(row.get("id") or "").strip()
         if not row_id:
             continue
@@ -232,6 +263,7 @@ def _merge_relation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             current = dict(row)
             current["root_law_names"] = set([str(row.get("root_law_name") or "").strip()]) if row.get("root_law_name") else set()
             current["relation_types"] = list(dict.fromkeys(row.get("relation_types", [])))
+            current["relation_type"] = _pick_primary_relation_type(current["relation_types"])
             current["article_keys"] = list(dict.fromkeys(row.get("article_keys", [])))
             current["article_no_displays"] = list(dict.fromkeys(row.get("article_no_displays", [])))
             current["source_file_paths"] = list(dict.fromkeys(row.get("source_file_paths", [])))
@@ -242,18 +274,29 @@ def _merge_relation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if row.get("root_law_name"):
             current["root_law_names"].add(str(row.get("root_law_name")).strip())
         current["relation_types"] = list(dict.fromkeys(list(current.get("relation_types", [])) + list(row.get("relation_types", []))))
+        current["relation_type"] = _pick_primary_relation_type(current["relation_types"])
         current["article_keys"] = list(dict.fromkeys(list(current.get("article_keys", [])) + list(row.get("article_keys", []))))
         current["article_no_displays"] = list(dict.fromkeys(list(current.get("article_no_displays", [])) + list(row.get("article_no_displays", []))))
         current["source_file_paths"] = list(dict.fromkeys(list(current.get("source_file_paths", [])) + list(row.get("source_file_paths", []))))
         current["relation_confidence"] = max(float(current.get("relation_confidence") or 0), float(row.get("relation_confidence") or 0))
         if not current.get("evidence_preview") and row.get("evidence_preview"):
             current["evidence_preview"] = row.get("evidence_preview")
+        if not current.get("source_file_path") and row.get("source_file_path"):
+            current["source_file_path"] = row.get("source_file_path")
+        if not current.get("detail_link") and row.get("detail_link"):
+            current["detail_link"] = row.get("detail_link")
 
     results: list[dict[str, Any]] = []
     for current in merged.values():
         current["root_law_names"] = sorted(item for item in current["root_law_names"] if item)
-        current["text"] = _build_relation_text(current)
+        current["detail_link"] = sanitize_detail_link(current.get("detail_link"))
+        current["evidence_preview"] = sanitize_inline_urls(current.get("evidence_preview"))
+        current["text"] = sanitize_inline_urls(_build_relation_text(current))
         current["embedding_text"] = current["text"]
+        current["search_text"] = current["text"]
+        current["display_text"] = sanitize_inline_urls(
+            _display_text(str(current.get("evidence_preview") or current["text"]))
+        )
         results.append(current)
 
     results.sort(key=lambda row: str(row.get("id") or ""))
@@ -291,6 +334,10 @@ def build_legal_relation_records(
             return _merge_relation_rows(built_rows)
 
     expanded_dir = Path(expanded_base_dir)
+    if raw_related_base_dir is not None and expanded_dir == Path("data/expanded/03_expanded_related_docs"):
+        raw_dir = Path(raw_related_base_dir)
+        if raw_dir.name == "02_related_legal_docs" and raw_dir.parent.name == "raw":
+            expanded_dir = raw_dir.parent.parent / "expanded" / "03_expanded_related_docs"
     rows: list[dict[str, Any]] = []
     for path in sorted(expanded_dir.rglob("relation_records.jsonl")):
         rows.extend(list(_iter_jsonl(path)))

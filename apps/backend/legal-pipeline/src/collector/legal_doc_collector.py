@@ -10,6 +10,7 @@ from src.common.io_utils import (
     _write_jsonl,
 )
 from src.common.law_meta import build_law_uid, normalize_identifier_token
+from src.common.url_utils import sanitize_detail_link
 from src.common.payload_utils import (
     _ensure_success_payload,
     _first_non_empty,
@@ -376,7 +377,7 @@ def build_doc_ref(
         "doc_id": str(doc_id) if doc_id is not None else None,
         "title": str(title) if title is not None else None,
         "doc_number": str(doc_number) if doc_number is not None else None,
-        "detail_link": str(detail_link) if detail_link is not None else None,
+        "detail_link": sanitize_detail_link(str(detail_link)) if detail_link is not None else None,
         "doc_kind": str(doc_kind) if doc_kind is not None else None,
         "raw_item": item,
     }
