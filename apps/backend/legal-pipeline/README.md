@@ -122,6 +122,12 @@ docker compose \
   up -d
 ```
 
+OpenSearch Dashboards 확인:
+
+```text
+http://localhost:5601
+```
+
 로컬 서버 사용 시 환경변수 예시:
 
 ```bash
