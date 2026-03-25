@@ -6,9 +6,13 @@ API 레이어는 RagPipeline.run() / RagPipeline.stream()만 호출하면 된다
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Any, Iterator
+
+logger = logging.getLogger(__name__)
 
 from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError
 from ..retrieval.context import build_llm_context_rows, build_llm_context_text
@@ -148,6 +152,7 @@ class RagPipeline:
         rcfg = self._cfg.retrieval
         candidate_k = max(rcfg.top_k, rcfg.candidate_k)
 
+        t0 = time.perf_counter()
         collection_rows = [
             search_qdrant(
                 question, candidate_k,
@@ -208,7 +213,10 @@ class RagPipeline:
             max_total_chars=rcfg.max_total_chars,
         )
         context_text = build_llm_context_text(question, contexts, law_context_added)
-
+        logger.info(
+            "retrieval 완료: %.2fs | docs=%d | law_context_status=%s",
+            time.perf_counter() - t0, len(llm_rows), law_context_status,
+        )
         return llm_rows, context_text, law_context_status, law_context_added
 
     def _build_result(
@@ -256,7 +264,9 @@ class RagPipeline:
             max_input_chars=self._cfg.max_input_chars,
             law_context_status=law_context_status,
         )
+        t_gen = time.perf_counter()
         result = self._generation.generate(prompt, system_prompt=system_prompt)
+        logger.info("generation 완료: %.2fs", time.perf_counter() - t_gen)
         return self._build_result(result.answer, llm_rows, law_context_status)
 
     def stream(

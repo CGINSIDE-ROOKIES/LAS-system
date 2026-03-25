@@ -2,7 +2,7 @@ name: CI/CD — dev
 
 on:
   push:
-    branches: [dev]
+    branches: [dev, feature/cicd]
 
 env:
   REGISTRY: ghcr.io

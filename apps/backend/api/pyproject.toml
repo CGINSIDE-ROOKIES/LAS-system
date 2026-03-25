@@ -7,8 +7,16 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "python-dotenv>=1.0.0",
+    "psycopg2-binary>=2.9",
     "rag-pipeline",
+    "torch>=2.0.0",
 ]
 
 [tool.uv.sources]
 rag-pipeline = { path = "../rag", editable = true }
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

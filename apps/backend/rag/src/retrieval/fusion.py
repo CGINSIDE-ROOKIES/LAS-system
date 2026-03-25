@@ -114,6 +114,51 @@ def fuse_rrf(
     add_rows(qdrant_rows, "qdrant")
     add_rows(os_rows, "opensearch_bm25")
 
+    def _tie_break_sort_key(row: dict[str, object]) -> tuple[float, int, int, str]:
+        sources_obj = row.get("sources", [])
+        source_count = 0
+        best_rank = 10**9
+        if isinstance(sources_obj, list):
+            backends: set[str] = set()
+            for s in sources_obj:
+                if not isinstance(s, dict):
+                    continue
+                backend = str(s.get("backend", "") or "")
+                if backend:
+                    backends.add(backend)
+                rank = int(s.get("rank", 0) or 0)
+                if rank > 0:
+                    best_rank = min(best_rank, rank)
+            source_count = len(backends)
+        if best_rank == 10**9:
+            best_rank = 10**8
+        source_id = str(
+            row.get("source_id_normalized", "") or row.get("source_id_raw", "") or ""
+        )
+        return (-float(row["rrf_score"]), -source_count, best_rank, source_id)
+
+    ranked = sorted(merged.values(), key=_tie_break_sort_key)
+    out: list[dict[str, object]] = []
+    for i, row in enumerate(ranked[: max(1, top_k)], start=1):
+        source_id_raw = str(row.get("source_id_raw", "") or "")
+        source_id_normalized = str(row.get("source_id_normalized", "") or "")
+        source_id = source_id_normalized or source_id_raw
+        out.append(
+            {
+                "rank": i,
+                "score": round(float(row["rrf_score"]), 6),
+                "source_id": source_id,
+                "source_id_raw": source_id_raw,
+                "source_id_normalized": source_id_normalized,
+                "doc_type": row.get("doc_type", ""),
+                "law_name": row.get("law_name", ""),
+                "text": row.get("text", ""),
+                "snippet": row.get("snippet", ""),
+                "sources": row.get("sources", []),
+            }
+        )
+    return out
+
 
 # ── 다중 리스트 RRF 융합 ──────────────────────────────────────────────────────
 
@@ -195,62 +240,6 @@ def fuse_rrf_multi(
         return (-float(row["rrf_score"]), -source_count, best_rank, source_id)
 
     ranked = sorted(merged.values(), key=_tie_break_sort_key)
-    out: list[dict[str, object]] = []
-    for i, row in enumerate(ranked[: max(1, top_k)], start=1):
-        source_id_raw = str(row.get("source_id_raw", "") or "")
-        source_id_normalized = str(row.get("source_id_normalized", "") or "")
-        source_id = source_id_normalized or source_id_raw
-        out.append(
-            {
-                "rank": i,
-                "score": round(float(row["rrf_score"]), 6),
-                "source_id": source_id,
-                "source_id_raw": source_id_raw,
-                "source_id_normalized": source_id_normalized,
-                "doc_type": row.get("doc_type", ""),
-                "law_name": row.get("law_name", ""),
-                "text": row.get("text", ""),
-                "snippet": row.get("snippet", ""),
-                "sources": row.get("sources", []),
-            }
-        )
-    return out
-
-    def _tie_break_sort_key(row: dict[str, object]) -> tuple[float, int, int, str]:
-        sources_obj = row.get("sources", [])
-        source_count = 0
-        best_rank = 10**9
-
-        if isinstance(sources_obj, list):
-            backends: set[str] = set()
-            for s in sources_obj:
-                if not isinstance(s, dict):
-                    continue
-                backend = str(s.get("backend", "") or "")
-                if backend:
-                    backends.add(backend)
-                rank = int(s.get("rank", 0) or 0)
-                if rank > 0:
-                    best_rank = min(best_rank, rank)
-            source_count = len(backends)
-
-        if best_rank == 10**9:
-            best_rank = 10**8
-
-        source_id = str(
-            row.get("source_id_normalized", "")
-            or row.get("source_id_raw", "")
-            or ""
-        )
-        return (
-            -float(row["rrf_score"]),
-            -source_count,
-            best_rank,
-            source_id,
-        )
-
-    ranked = sorted(merged.values(), key=_tie_break_sort_key)
-
     out: list[dict[str, object]] = []
     for i, row in enumerate(ranked[: max(1, top_k)], start=1):
         source_id_raw = str(row.get("source_id_raw", "") or "")
