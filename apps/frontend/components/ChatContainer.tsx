@@ -4,7 +4,17 @@ import { MessageBubble, ChatMessage } from "./MessageBubble";
 import { askStream } from "@/lib/api-client";
 import { ERROR_MESSAGES, sseErrorMessage } from "@/lib/errors";
 
-export function ChatContainer() {
+export type Citation = {
+  article: string;  // e.g. "근로기준법 제17조"
+  content: string;
+  lawName: string;  // e.g. "근로기준법"
+};
+
+interface ChatContainerProps {
+  onCitationsChange?: (citations: Citation[]) => void;
+}
+
+export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -50,6 +60,59 @@ export function ChatContainer() {
           );
           scrollToBottom();
         } else if (event.type === "done") {
+          const parsedCitations: Citation[] = event.retrieved_docs
+            .filter((doc) => doc.doc_type === "law")
+            .map((doc) => {
+              // source_id: law::{law_name}::{article_no}::{chunk}
+              const parts = (doc.source_id || "").split("::");
+              const sourceArticleNo = parts[2] ?? "";
+              let articleLabel: string;
+              if (sourceArticleNo) {
+                articleLabel = `${doc.law_name} 제${sourceArticleNo}조`;
+              } else {
+                const noMatch = (doc.text || doc.snippet).match(/조문번호:\s*(제?\d[\d조의]*)/);
+                if (noMatch) {
+                  const extracted = noMatch[1];
+                  articleLabel = extracted.startsWith("제")
+                    ? `${doc.law_name} ${extracted}`
+                    : `${doc.law_name} 제${extracted}조`;
+                } else {
+                  articleLabel = doc.law_name;
+                }
+              }
+
+              const raw = doc.text || doc.snippet;
+              let content = raw;
+              const metaIdx = raw.indexOf("조문제목:");
+              if (metaIdx !== -1) {
+                const afterMeta = raw.slice(metaIdx + "조문제목:".length);
+                const contentMatch = afterMeta.match(/제\d/);
+                if (contentMatch?.index !== undefined) {
+                  content = afterMeta.slice(contentMatch.index).trim();
+                }
+              } else {
+                const stripped = raw.replace(/^법령명:[^\n]*조문번호:[^\n]*\s*/i, "").trim();
+                content = stripped;
+              }
+              content = content
+                .replace(/\[\[([\s\S]*?)\]\]/g, (_, inner) =>
+                  inner
+                    .split(/,\s*'/)
+                    .map((s: string) => s.replace(/^'|'$/g, "").trim())
+                    .filter(Boolean)
+                    .join("\n")
+                )
+                .replace(/([\u2460-\u2473\u2474-\u2487①-⑳])\s+\1/g, "$1")
+                .replace(/(\d+\.)\s+\1/g, "$1")
+                .trim();
+
+              if (content.length < 20) return null;
+              return { article: articleLabel, content, lawName: doc.law_name };
+            })
+            .filter((c): c is Citation => c !== null);
+
+          onCitationsChange?.(parsedCitations);
+
           setMessages((prev) =>
             prev.map((m) =>
               m.id === aiId
@@ -60,64 +123,7 @@ export function ChatContainer() {
                     answerData: {
                       summary: m.content,
                       detail: "",
-                      citations: (event.retrieved_docs
-                        .filter((doc) => doc.doc_type === "law")
-                        .map((doc) => {
-                          // source_id: law::{law_name}::{article_no}::{chunk}
-                          const parts = (doc.source_id || "").split("::");
-                          const sourceArticleNo = parts[2] ?? "";
-                          let articleLabel: string;
-                          if (sourceArticleNo) {
-                            // source_id에 숫자만 있는 경우 (e.g. "9" → "제9조")
-                            articleLabel = `${doc.law_name} 제${sourceArticleNo}조`;
-                          } else {
-                            // 텍스트의 "조문번호:" 필드에서 추출 (e.g. "제13조의4", "제22조")
-                            const noMatch = (doc.text || doc.snippet).match(/조문번호:\s*(제?\d[\d조의]*)/);
-                            if (noMatch) {
-                              const extracted = noMatch[1];
-                              articleLabel = extracted.startsWith("제")
-                                ? `${doc.law_name} ${extracted}`
-                                : `${doc.law_name} 제${extracted}조`;
-                            } else {
-                              articleLabel = doc.law_name;
-                            }
-                          }
-
-                          // text(전체) 또는 snippet에서 메타데이터 헤더 제거
-                          const raw = doc.text || doc.snippet;
-                          let content = raw;
-                          const metaIdx = raw.indexOf("조문제목:");
-                          if (metaIdx !== -1) {
-                            const afterMeta = raw.slice(metaIdx + "조문제목:".length);
-                            const contentMatch = afterMeta.match(/제\d/);
-                            if (contentMatch?.index !== undefined) {
-                              content = afterMeta.slice(contentMatch.index).trim();
-                            }
-                          } else {
-                            // 조문제목 없는 경우: "법령명: X 조문번호: N " 앞부분 제거
-                            const stripped = raw.replace(/^법령명:[^\n]*조문번호:[^\n]*\s*/i, "").trim();
-                            content = stripped;
-                          }
-                          // 적재 시 중복 패턴 제거
-                          content = content
-                            // [['a', 'b', 'c']] 형태의 Python list 직렬화 → 줄바꿈 텍스트로
-                            .replace(/\[\[([\s\S]*?)\]\]/g, (_, inner) =>
-                              inner
-                                .split(/,\s*'/)
-                                .map((s: string) => s.replace(/^'|'$/g, "").trim())
-                                .filter(Boolean)
-                                .join("\n")
-                            )
-                            // ① ①→①, 1. 1.→1.
-                            .replace(/([\u2460-\u2473\u2474-\u2487①-⑳])\s+\1/g, "$1")
-                            .replace(/(\d+\.)\s+\1/g, "$1")
-                            .trim();
-
-                          // 실질 내용 없는 항목(장/절 제목만 있는 경우) 제외
-                          if (content.length < 20) return null;
-
-                          return { article: articleLabel, content };
-                        }).filter((c): c is { article: string; content: string } => c !== null)),
+                      citations: parsedCitations,
                       references: [],
                     },
                   }
