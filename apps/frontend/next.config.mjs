@@ -1,3 +1,8 @@
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
+
 /** @type {import('next').NextConfig} */
 const allowedFrameOrigins = process.env.ALLOWED_FRAME_ORIGINS
   ? process.env.ALLOWED_FRAME_ORIGINS.split(",").map((o) => o.trim())
@@ -10,6 +15,9 @@ const frameAncestors =
 
 const nextConfig = {
   output: "standalone",
+  experimental: {
+    outputFileTracingRoot: path.join(__dirname, "../../"),
+  },
   async headers() {
     return [
       {

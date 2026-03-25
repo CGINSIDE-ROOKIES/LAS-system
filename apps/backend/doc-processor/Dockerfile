@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git default-jdk-headless \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /build
+WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
 COPY doc_processor/ doc_processor/
@@ -25,9 +25,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY --from=builder /build/.venv /app/.venv
-COPY --from=builder /build/doc_processor/ /app/doc_processor/
-COPY --from=builder /build/pyproject.toml /app/pyproject.toml
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/doc_processor/ /app/doc_processor/
+COPY --from=builder /app/pyproject.toml /app/pyproject.toml
 COPY langgraph.json /app/langgraph.json
 COPY ci/ /app/ci/
 
