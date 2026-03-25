@@ -56,6 +56,8 @@ def get_history(
     *,
     q: str | None = None,
     session_id: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> dict[str, Any]:
@@ -69,6 +71,12 @@ def get_history(
     if session_id:
         conditions.append("h.session_id = %s")
         params.append(session_id)
+    if date_from:
+        conditions.append("h.created_at >= %s")
+        params.append(date_from)
+    if date_to:
+        conditions.append("h.created_at < %s")
+        params.append(date_to)
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
