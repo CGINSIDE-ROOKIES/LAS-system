@@ -7,6 +7,7 @@
 
 import json
 import logging
+import time
 import traceback
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,8 @@ def ask(
     conn: psycopg2.extensions.connection = Depends(get_db),
 ) -> AskResponse:
     """질문을 받아 RAG 파이프라인을 실행하고 답변을 반환합니다."""
+    t0 = time.perf_counter()
+    logger.info("ask 요청: %s", request.question[:80])
     try:
         result = pipeline.run(
             request.question,
@@ -117,6 +120,7 @@ def ask(
             law_names=request.law_names,
         )
     except RetrievalError as exc:
+        logger.error("ask RetrievalError: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception:
         logger.error("INTERNAL_ERROR in ask:\n%s", traceback.format_exc())
@@ -132,6 +136,7 @@ def ask(
         )
     except Exception:
         logger.error("DB save failed in ask:\n%s", traceback.format_exc())
+    logger.info("ask 완료: %.2fs | law_context_status=%s", time.perf_counter() - t0, result.law_context_status)
     return AskResponse(
         answer=result.answer,
         retrieved_docs=[RetrievedDoc(**doc) for doc in result.retrieved_docs],
@@ -147,6 +152,8 @@ def ask_stream(
 ) -> StreamingResponse:
     """질문을 받아 RAG 파이프라인을 실행하고 답변을 SSE로 스트리밍합니다."""
     def generate():
+        t0 = time.perf_counter()
+        logger.info("ask_stream 요청: %s", request.question[:80])
         answer_parts: list[str] = []
         meta = None
         try:
@@ -165,6 +172,7 @@ def ask_stream(
             }
             yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
         except RetrievalError as exc:
+            logger.error("ask_stream RetrievalError: %s", exc)
             yield f"data: {json.dumps({'type': 'error', 'code': 'PIPELINE_ERROR', 'error': str(exc)}, ensure_ascii=False)}\n\n"
             return
         except Exception:
@@ -173,6 +181,7 @@ def ask_stream(
             return
 
         if meta is not None:
+            logger.info("ask_stream 완료: %.2fs | law_context_status=%s", time.perf_counter() - t0, meta.law_context_status)
             try:
                 save_qa(
                     conn,
