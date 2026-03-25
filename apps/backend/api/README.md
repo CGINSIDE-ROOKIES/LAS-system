@@ -4,7 +4,8 @@ Legal AI Assistant FastAPI 백엔드 서버.
 
 ## 사전 준비
 
-- `apps/backend/rag/`의 Docker 스토어(Qdrant/OpenSearch)가 실행 중이어야 한다.
+- OpenSearch가 로컬 Docker에서 실행 중이어야 한다.
+- Qdrant는 외부 서버에 컬렉션(`law_article`, `legal_case`, `legal_relation`)이 준비되어 있어야 한다.
 - `.env` 파일에 환경변수가 설정되어 있어야 한다.
 
 ## 실행
@@ -13,7 +14,7 @@ Legal AI Assistant FastAPI 백엔드 서버.
 
 ```bash
 cd apps/backend/api
-cp ../rag/.env.example .env   # 최초 1회 — LLM 환경변수 추가 필요 (하단 참조)
+cp ../rag/.env.example .env   # 최초 1회 — QDRANT_URL, GEMINI_API_KEY 등 채워야 함
 
 uv run uvicorn main:app --reload                    # 개발 서버
 uv run uvicorn main:app --host 0.0.0.0 --port 8000  # 운영 서버
@@ -21,34 +22,26 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000  # 운영 서버
 
 ## 환경변수
 
-`.env` 파일에 아래 항목을 설정한다. Qdrant/OpenSearch 항목은 `../rag/.env.example`을 복사해 채운다.
+`.env` 파일에 아래 항목을 설정한다. 전체 항목은 `../rag/.env.example` 참조.
 
 ```env
-# Qdrant
-QDRANT_URL=http://localhost:6333
-QDRANT_COLLECTION=las_legal_docs
+# Qdrant — 외부 서버 IP로 변경 필요
+QDRANT_URL=http://<서버IP>:6333
+QDRANT_COLLECTIONS=law_article,legal_case,legal_relation
 # QDRANT_API_KEY=
 
-# OpenSearch
+# OpenSearch — 로컬 Docker
 OPENSEARCH_URL=http://localhost:9200
 OPENSEARCH_INDEX=las_legal_docs
-# OPENSEARCH_API_KEY=
-# OPENSEARCH_USERNAME=
-# OPENSEARCH_PASSWORD=
 
-# 임베딩 모델
-EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+# 임베딩 모델 (768차원)
+EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-mpnet-base-v2
 
-# LLM — openai_compat (기본값)
-LLM_PROVIDER=openai_compat
-LLM_CHAT_COMPLETIONS_URL=http://...
-LLM_MODEL=...
-LLM_API_KEY=...
-
-# LLM — Gemini 사용 시
-# LLM_PROVIDER=gemini
-# GEMINI_API_KEY=...
-# GEMINI_MODEL=gemini-1.5-flash
+# LLM — Gemini
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-flash-latest
+LLM_MAX_TOKENS=4096
 ```
 
 ## 엔드포인트

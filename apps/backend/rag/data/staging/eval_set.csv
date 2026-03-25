@@ -22,3 +22,8 @@ query,intent,gold_law,gold_article,expected_doc_type,notes
 고용보험료 부과처분 관련 행정심판례의 판단 기준은 무엇인가요,case_law,,,decc,
 도산등사실인정 거부처분 관련 행정심판례 기준은 무엇인가요,case_law,,,decc,
 근로시간 휴게 관련 법령해석례의 판단 기준은 무엇인가요,case_law,,,expc,
+근로기준법 관련 연관 판례는 어떤 것이 있나요,case_law,근로기준법,,relation,
+하도급거래법 위반 사건에서 법원이 적용한 판례 근거는 무엇인가요,case_law,하도급거래 공정화에 관한 법률,,relation,
+최저임금법과 관련된 법원 판단 연관 사례가 있나요,case_law,최저임금법,,relation,
+산업재해보상보험법 관련 법원 판단 사례는 무엇인가요,case_law,산업재해보상보험법,,relation,
+연장근로 관련 판례와 법령해석례는 어떤 것이 있나요,mixed,근로기준법,제53조,mixed,allowed_doc_types=law|prec|decc|relation

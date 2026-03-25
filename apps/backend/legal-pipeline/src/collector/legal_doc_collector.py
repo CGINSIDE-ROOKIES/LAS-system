@@ -46,7 +46,6 @@ DOC_TYPE_LABELS = {
     "detc": "헌재결정례",
     "expc": "법령해석례",
     "decc": "행정심판례",
-    "opinion_pending": "의견제시사례(보류)",
 }
 
 ID_KEYS_BY_TARGET = {

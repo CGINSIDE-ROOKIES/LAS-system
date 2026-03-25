@@ -6,7 +6,7 @@ applies_to:
   collection_group: related_legal_docs
 
 runtime:
-  api_base_url: "http://www.law.go.kr/DRF"
+  api_base_url: "https://www.law.go.kr/DRF"
   auth_param: OC
   preferred_type: JSON
   timeout_sec: 30

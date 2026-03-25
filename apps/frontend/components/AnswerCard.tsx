@@ -39,7 +39,7 @@ export function AnswerCard({ data }: AnswerCardProps) {
           {data.citations.map((c, i) => (
             <div key={i} className="rounded-md border border-border bg-card p-3">
               <div className="mb-1 text-xs font-semibold text-primary">{c.article}</div>
-              <p className="text-xs leading-relaxed text-legal-citation-foreground">{c.content}</p>
+              <p className="text-xs leading-relaxed text-legal-citation-foreground whitespace-pre-wrap line-clamp-6">{c.content}</p>
             </div>
           ))}
         </div>

@@ -1,4 +1,3 @@
-from langchain_community.embeddings import OpenVINOEmbeddings
 from langchain_qdrant import QdrantVectorStore, RetrievalMode
 
 from doc_processor.core.env_loader import load_env_str
@@ -7,13 +6,31 @@ from doc_processor.core.env_loader import load_env_str
 # EMBEDDINGS
 ###################################################################################################
 
-_EMBED_MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-
-ov_embeddings = OpenVINOEmbeddings(
-    model_name_or_path=_EMBED_MODEL,
-    model_kwargs={"device": "GPU"},
-    encode_kwargs={"mean_pooling": True, "normalize_embeddings": True},
+_EMBED_MODEL = load_env_str(
+    "EMBEDDING_MODEL",
+    default="sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
 )
+_EMBED_BACKEND = load_env_str("EMBEDDING_BACKEND", default="cpu")  # "cpu" or "openvino"
+_EMBED_DEVICE = load_env_str("EMBEDDING_DEVICE", default="CPU")    # OpenVINO device: "CPU", "GPU"
+
+
+def _build_embeddings():
+    if _EMBED_BACKEND == "openvino":
+        from langchain_community.embeddings import OpenVINOEmbeddings
+        return OpenVINOEmbeddings(
+            model_name_or_path=_EMBED_MODEL,
+            model_kwargs={"device": _EMBED_DEVICE},
+            encode_kwargs={"mean_pooling": True, "normalize_embeddings": True},
+        )
+    else:
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        return HuggingFaceEmbeddings(
+            model_name=_EMBED_MODEL,
+            encode_kwargs={"normalize_embeddings": True},
+        )
+
+
+embeddings = _build_embeddings()
 
 ###################################################################################################
 # QDRANT
@@ -23,7 +40,7 @@ _QDRANT_URL = load_env_str("QDRANT_URL", default="http://cg-rookies:6333")
 _COLLECTION = load_env_str("QDRANT_COLLECTION", default="law_article")
 
 qdrant = QdrantVectorStore.from_existing_collection(
-    embedding=ov_embeddings,
+    embedding=embeddings,
     collection_name=_COLLECTION,
     url=_QDRANT_URL,
     retrieval_mode=RetrievalMode.DENSE,

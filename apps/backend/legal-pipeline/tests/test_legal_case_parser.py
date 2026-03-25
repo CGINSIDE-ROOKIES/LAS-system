@@ -24,8 +24,6 @@ def test_parse_case_payload_from_prec_json_fixture():
     assert parsed["decision_date"] == "2019.05.30"
     assert "근로기준법 제43조의2" in parsed["body_text"]
 
-
-
 def test_parse_case_payload_from_expc_html_fixture_uses_fallback_meta():
     payload = json.loads((FIXTURE_DIR / "expc_detail_html.json").read_text(encoding="utf-8"))
 

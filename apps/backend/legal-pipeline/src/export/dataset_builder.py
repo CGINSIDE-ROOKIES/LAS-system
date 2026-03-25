@@ -1137,7 +1137,7 @@ def build_relation_records(
     from src.export.legal_relation_builder import build_legal_relation_records
     from src.export.law_to_law_relation_builder import build_law_to_law_relation_records
 
-    records = build_legal_relation_records(
+    law_case_records = build_legal_relation_records(
         expanded_base_dir=expanded_base_dir,
         raw_related_base_dir=raw_related_base_dir,
     )
@@ -1151,6 +1151,14 @@ def build_relation_records(
 
     records.sort(key=lambda row: str(row.get("id") or ""))
     return records
+
+
+def build_case_reference_audit_records(
+    raw_related_base_dir: str | Path = "data/raw/02_related_legal_docs",
+) -> list[dict[str, Any]]:
+    from src.export.legal_case_relation_builder import build_case_reference_audit_records as _build_case_reference_audit_records
+
+    return _build_case_reference_audit_records(raw_related_base_dir=raw_related_base_dir)
 
 
 def build_and_write_datasets(
@@ -1192,6 +1200,9 @@ def build_and_write_datasets(
         expanded_base_dir=expanded_base_dir,
         normalized_base_dir=normalized_base_dir,
         include_law_to_law_relations=include_law_to_law_relations,
+    )
+    case_reference_audit_records = build_case_reference_audit_records(
+        raw_related_base_dir=raw_related_base_dir,
     )
 
     appendix_manifest: dict[str, Any] | None = None
@@ -1237,12 +1248,23 @@ def build_and_write_datasets(
 
     write_jsonl(legal_corpus_records, output_dir / "legal_corpus.jsonl")
     write_jsonl(relation_records, output_dir / "legal_relations.jsonl")
+    write_jsonl(case_reference_audit_records, output_dir / "case_reference_audit.jsonl")
+
+    case_reference_audit_manifest = {
+        "audit_record_count": len(case_reference_audit_records),
+        "resolved_count": sum(1 for row in case_reference_audit_records if row.get("resolution_status") == "resolved"),
+        "ambiguous_count": sum(1 for row in case_reference_audit_records if row.get("resolution_status") == "ambiguous"),
+        "unresolved_external_count": sum(
+            1 for row in case_reference_audit_records if row.get("resolution_status") == "unresolved_external"
+        ),
+    }
 
     manifest = {
         "legal_corpus_count": len(legal_corpus_records),
         "legal_relations_count": len(relation_records),
         "law_record_count": len(law_records),
         "related_doc_record_count": len(related_records),
+        "case_reference_audit_manifest": case_reference_audit_manifest,
         "appendix_dataset_manifest": appendix_manifest,
         "article_appendix_manifest": article_appendix_manifest,
         "merge_appendices_into_law_article": merge_appendices_into_law_article,

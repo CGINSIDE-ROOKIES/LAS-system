@@ -5,12 +5,12 @@ from src.collector.legal_doc_collector import (
 )
 
 
-def test_resolve_selected_targets_uses_scope_and_skips_pending():
+def test_resolve_selected_targets_uses_scope_and_skips_unsupported_target():
     scope = {
         "outputs": [
             {
                 "file_id": "02_related_legal_docs",
-                "doc_types": ["prec", "expc", "opinion_pending"],
+                "doc_types": ["prec", "expc"],
                 "include_law_family_levels": ["법", "시행령", "시행규칙"],
                 "exclude_doc_kinds": ["예규", "훈령", "고시"],
             }
@@ -23,10 +23,10 @@ def test_resolve_selected_targets_uses_scope_and_skips_pending():
         }
     }
 
-    selected, skipped = resolve_selected_targets(scope, registry)
+    selected, skipped = resolve_selected_targets(scope, registry, explicit_targets=["prec", "expc", "legacy_target"])
 
     assert selected == ["prec", "expc"]
-    assert skipped == [{"target": "opinion_pending", "reason": "unsupported_target"}]
+    assert skipped == [{"target": "legacy_target", "reason": "unsupported_target"}]
 
 
 def test_get_family_law_entries_filters_by_classified_level():

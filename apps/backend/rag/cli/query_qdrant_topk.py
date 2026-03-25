@@ -132,26 +132,54 @@ def run_single_query(args: argparse.Namespace, question: str) -> int:
     qdrant_url = require_env_or_arg(
         args.qdrant_url, "QDRANT_URL", "http://localhost:6333"
     )
-    collection = require_env_or_arg(args.collection, "QDRANT_COLLECTION")
+    # 콤마 구분 복수 컬렉션 지원 (CLI 인자 > QDRANT_COLLECTIONS > QDRANT_COLLECTION 순)
+    raw_collections = (
+        args.collections
+        or os.getenv("QDRANT_COLLECTIONS", "")
+        or os.getenv("QDRANT_COLLECTION", "")
+    ).strip()
+    if not raw_collections:
+        raise SystemExit("Missing required setting: --collections or QDRANT_COLLECTIONS")
+    collections = [c.strip() for c in raw_collections.split(",") if c.strip()]
+
     model_name = require_env_or_arg(
         args.embedding_model, "EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL
     )
     api_key = args.qdrant_api_key or os.getenv("QDRANT_API_KEY", "").strip() or None
 
-    # Qdrant에서 유사 벡터 Top-K 검색
-    rows = search_qdrant(
-        question,
-        args.top_k,
-        qdrant_url=qdrant_url,
-        collection=collection,
-        timeout=args.timeout,
-        embedding_model=model_name,
-        api_key=api_key,
-        doc_types=args.doc_type or None,  # 빈 리스트는 None으로 변환 (필터 미적용)
-        law_names=args.law_name or None,
-        dedup=True,  # 중복 문서 제거
-        fetch_multiplier=2,  # dedup 여유분 확보를 위해 top_k * 2 만큼 먼저 가져옴
-    )
+    # --vector-name-map "law_article=body,legal_case=" 파싱
+    vector_name_map: dict[str, str | None] = {}
+    raw_map = args.vector_name_map or os.getenv("QDRANT_VECTOR_NAME_MAP", "law_article=body")
+    for entry in raw_map.split(","):
+        entry = entry.strip()
+        if "=" in entry:
+            col, _, name = entry.partition("=")
+            vector_name_map[col.strip()] = name.strip() or None
+
+    # 컬렉션별 검색 후 score 기준 병합
+    all_rows: list[dict] = []
+    for collection in collections:
+        rows = search_qdrant(
+            question,
+            args.top_k,
+            qdrant_url=qdrant_url,
+            collection=collection,
+            timeout=args.timeout,
+            embedding_model=model_name,
+            api_key=api_key,
+            doc_types=args.doc_type or None,
+            law_names=args.law_name or None,
+            dedup=True,
+            fetch_multiplier=2,
+            vector_name=vector_name_map.get(collection, None),
+        )
+        all_rows.extend(rows)
+
+    # score 내림차순 정렬 후 top_k 로 자르고 rank 재부여
+    all_rows.sort(key=lambda r: float(r.get("score") or 0.0), reverse=True)
+    rows = all_rows[: max(1, args.top_k)]
+    for i, row in enumerate(rows, start=1):
+        row["rank"] = i
 
     # 규범적 질의라면 law 문서 점수 가산 후 재정렬
     rows = _apply_law_boost(
@@ -198,10 +226,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--qdrant-url", default="", help="기본: QDRANT_URL 또는 http://localhost:6333"
     )
-    p.add_argument("--collection", default="", help="기본: QDRANT_COLLECTION 환경변수")
+    p.add_argument("--collections", default="", help="콤마 구분 컬렉션 목록 (기본: QDRANT_COLLECTIONS 환경변수)")
     p.add_argument("--qdrant-api-key", default="", help="기본: QDRANT_API_KEY 환경변수")
     p.add_argument(
         "--embedding-model", default="", help=f"기본: {DEFAULT_EMBEDDING_MODEL}"
+    )
+    p.add_argument(
+        "--vector-name-map",
+        default="",
+        help="컬렉션별 named vector 매핑 (예: law_article=body,legal_case=) 기본: law_article=body",
     )
 
     # 필터링 (복수 지정 가능: --doc-type law --doc-type faq)
