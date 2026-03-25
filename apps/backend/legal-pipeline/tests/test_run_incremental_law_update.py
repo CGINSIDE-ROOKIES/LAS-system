@@ -1,6 +1,10 @@
 import json
 
-from scripts.run_incremental_law_update import _build_filtered_appendix_asset_base_dir
+from scripts.run_incremental_law_update import (
+    _build_filtered_appendix_asset_base_dir,
+    _build_opensearch_incremental_command,
+    _build_qdrant_incremental_commands,
+)
 from src.common.io_utils import _write_json
 
 
@@ -29,3 +33,43 @@ def test_build_filtered_appendix_asset_base_dir_excludes_changed_families(tmp_pa
     finally:
         if temp_dir is not None:
             temp_dir.cleanup()
+
+
+def test_build_qdrant_incremental_commands_includes_embed_and_optional_dry_run(tmp_path):
+    commands = _build_qdrant_incremental_commands(
+        reg_dt="20260325",
+        base_dir=tmp_path,
+        patch_dir=tmp_path / "dataset" / "patches" / "20260325",
+        skip_embed=False,
+        upload_dry_run=True,
+    )
+
+    assert commands[0][1] == "scripts/embed_qdrant_incremental.py"
+    assert commands[0][-1] == "20260325"
+    assert commands[1][1] == "scripts/upload/load_qdrant_incremental.py"
+    assert commands[1][-1] == "--dry-run"
+
+
+def test_build_opensearch_incremental_command_respects_skip_and_dry_run(tmp_path):
+    assert (
+        _build_opensearch_incremental_command(
+            reg_dt="20260325",
+            base_dir=tmp_path,
+            patch_dir=tmp_path / "dataset" / "patches" / "20260325",
+            skip_opensearch_upload=True,
+            opensearch_dry_run=False,
+        )
+        is None
+    )
+
+    command = _build_opensearch_incremental_command(
+        reg_dt="20260325",
+        base_dir=tmp_path,
+        patch_dir=tmp_path / "dataset" / "patches" / "20260325",
+        skip_opensearch_upload=False,
+        opensearch_dry_run=True,
+    )
+
+    assert command is not None
+    assert command[1] == "scripts/upload/load_opensearch_incremental.py"
+    assert command[-1] == "--dry-run"

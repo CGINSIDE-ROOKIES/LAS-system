@@ -9,10 +9,26 @@ from src.common.law_meta import build_law_uid
 from src.common.url_utils import sanitize_detail_link, sanitize_inline_urls
 from src.parser.legal_case_parser import (
     build_evidence_preview,
+    extract_case_number_refs,
     extract_explicit_article_refs,
     find_related_law_names,
     parse_case_payload,
 )
+
+
+DEFAULT_RELATION_RULES = ["related_law", "cited_law", "cited_case"]
+
+
+def normalize_relation_rules(rules: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for rule in rules or []:
+        value = str(rule or "").strip()
+        if not value or value in seen or value not in DEFAULT_RELATION_RULES:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized or list(DEFAULT_RELATION_RULES)
 
 
 def _pick_primary_relation_type(relation_types: list[str]) -> str:
@@ -53,6 +69,11 @@ def _normalize_existing_relation_row(row: dict[str, Any]) -> dict[str, Any]:
     normalized["text"] = sanitize_inline_urls(normalized.get("text"))
     normalized["search_text"] = sanitize_inline_urls(normalized.get("search_text"))
     normalized["embedding_text"] = sanitize_inline_urls(normalized.get("embedding_text"))
+    normalized["_referenced_case_numbers"] = [
+        str(item).strip()
+        for item in (normalized.get("_referenced_case_numbers") or [])
+        if str(item).strip()
+    ]
     return normalized
 
 
@@ -104,6 +125,14 @@ def _build_relation_text(record: dict[str, Any]) -> str:
     if article_displays:
         lines.append(f"관련 조문: {', '.join(article_displays)}")
 
+    referenced_case_numbers = [
+        str(item).strip()
+        for item in (record.get("_referenced_case_numbers") or [])
+        if str(item).strip()
+    ]
+    if referenced_case_numbers:
+        lines.append(f"참조 사건번호: {', '.join(referenced_case_numbers)}")
+
     evidence_preview = str(record.get("evidence_preview") or "").strip()
     if evidence_preview:
         lines.append("근거 일부:")
@@ -134,7 +163,7 @@ def build_root_relation_payloads(
     relation_rules: list[str] | None = None,
     targets: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    relation_rules = relation_rules or ["related_law", "cited_law", "cited_case"]
+    relation_rules = normalize_relation_rules(relation_rules)
     allowed_targets = set(targets) if targets else None
 
     candidate_hits = [
@@ -184,6 +213,11 @@ def build_root_relation_payloads(
         matched_law_names = find_related_law_names(body_text, family_law_names) if body_text else []
         article_refs_map = extract_explicit_article_refs(body_text, family_law_names) if body_text else {}
         article_refs = article_refs_map.get(law_name, [])
+        referenced_case_numbers = (
+            extract_case_number_refs(body_text, exclude_numbers=[parsed.get("doc_number")])
+            if body_text and "cited_case" in relation_rules
+            else []
+        )
 
         relation_types: list[str] = ["search_hit"]
         if law_name in matched_law_names and "cited_law" in relation_rules:
@@ -240,9 +274,15 @@ def build_root_relation_payloads(
             "source_file_path": source_file_paths[0] if source_file_paths else None,
             "source_file_paths": source_file_paths,
         }
-        relation_row["embedding_text"] = _build_relation_text(relation_row)
+        relation_row["embedding_text"] = _build_relation_text(
+            {
+                **relation_row,
+                "_referenced_case_numbers": referenced_case_numbers,
+            }
+        )
         relation_row["text"] = relation_row["embedding_text"]
         relation_row["search_text"] = relation_row["embedding_text"]
+        relation_row["_referenced_case_numbers"] = referenced_case_numbers
         relation_rows.append(relation_row)
 
     return relation_rows
@@ -267,6 +307,7 @@ def _merge_relation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             current["article_keys"] = list(dict.fromkeys(row.get("article_keys", [])))
             current["article_no_displays"] = list(dict.fromkeys(row.get("article_no_displays", [])))
             current["source_file_paths"] = list(dict.fromkeys(row.get("source_file_paths", [])))
+            current["_referenced_case_numbers"] = list(dict.fromkeys(row.get("_referenced_case_numbers", [])))
             merged[row_id] = current
             continue
 
@@ -278,6 +319,9 @@ def _merge_relation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         current["article_keys"] = list(dict.fromkeys(list(current.get("article_keys", [])) + list(row.get("article_keys", []))))
         current["article_no_displays"] = list(dict.fromkeys(list(current.get("article_no_displays", [])) + list(row.get("article_no_displays", []))))
         current["source_file_paths"] = list(dict.fromkeys(list(current.get("source_file_paths", [])) + list(row.get("source_file_paths", []))))
+        current["_referenced_case_numbers"] = list(
+            dict.fromkeys(list(current.get("_referenced_case_numbers", [])) + list(row.get("_referenced_case_numbers", [])))
+        )
         current["relation_confidence"] = max(float(current.get("relation_confidence") or 0), float(row.get("relation_confidence") or 0))
         if not current.get("evidence_preview") and row.get("evidence_preview"):
             current["evidence_preview"] = row.get("evidence_preview")
@@ -297,6 +341,7 @@ def _merge_relation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         current["display_text"] = sanitize_inline_urls(
             _display_text(str(current.get("evidence_preview") or current["text"]))
         )
+        current.pop("_referenced_case_numbers", None)
         results.append(current)
 
     results.sort(key=lambda row: str(row.get("id") or ""))

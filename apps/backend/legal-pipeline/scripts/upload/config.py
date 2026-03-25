@@ -16,12 +16,29 @@ QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") or None
 QDRANT_TIMEOUT_SEC = float(os.getenv("QDRANT_TIMEOUT_SEC", "30"))
 
+# OpenSearch connection
+OPENSEARCH_URL = os.getenv("OPENSEARCH_URL", "http://localhost:9200")
+OPENSEARCH_API_KEY = os.getenv("OPENSEARCH_API_KEY") or None
+OPENSEARCH_USERNAME = os.getenv("OPENSEARCH_USERNAME") or None
+OPENSEARCH_PASSWORD = os.getenv("OPENSEARCH_PASSWORD") or None
+OPENSEARCH_TIMEOUT_SEC = float(os.getenv("OPENSEARCH_TIMEOUT_SEC", "60"))
+OPENSEARCH_ENABLE_NORI_POS_FILTER = os.getenv("OPENSEARCH_ENABLE_NORI_POS_FILTER", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
 # Current embedding output layout
 HANDOFF_DIR = Path(os.getenv("QDRANT_HANDOFF_DIR", PROJECT_ROOT / "data" / "handoff" / "qdrant_3collections"))
 EMB_DIR = Path(os.getenv("QDRANT_EMB_DIR", PROJECT_ROOT / "data" / "emb" / "qdrant_3collections"))
 IMPORT_DIR = HANDOFF_DIR / "import"
 SOURCE_DIR = HANDOFF_DIR / "source"
 EMBEDDING_MANIFEST_PATH = HANDOFF_DIR / "qdrant_embedding_manifest.json"
+OPENSEARCH_BULK_DIR = Path(os.getenv("OPENSEARCH_BULK_DIR", PROJECT_ROOT / "data" / "handoff" / "opensearch_bulk"))
+OPENSEARCH_INCREMENTAL_DIR = Path(
+    os.getenv("OPENSEARCH_INCREMENTAL_DIR", PROJECT_ROOT / "data" / "handoff" / "opensearch_incremental")
+)
 
 DEFAULT_VECTOR_DIM = 768
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
@@ -96,6 +113,12 @@ def _build_collection_config(name: str) -> dict[str, Any]:
 COLLECTIONS = {
     name: _build_collection_config(name)
     for name in ("law_article", "legal_case", "legal_relation")
+}
+
+COLLECTION_OPENSEARCH_INDEX_NAMES = {
+    "law_article": os.getenv("OPENSEARCH_INDEX_LAW_ARTICLE", "law_article"),
+    "legal_case": os.getenv("OPENSEARCH_INDEX_LEGAL_CASE", "legal_case"),
+    "legal_relation": os.getenv("OPENSEARCH_INDEX_LEGAL_RELATION", "legal_relation"),
 }
 
 

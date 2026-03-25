@@ -22,11 +22,10 @@ from src.common.law_meta import (
     normalize_classified_level,
     normalize_kind_name,
 )
-from src.common.io_utils import _iter_jsonl, _read_json, _write_json
+from src.common.io_utils import _iter_jsonl, _read_json, _write_json, write_jsonl
 from src.common.payload_utils import _first_non_empty, _walk_objects
 from src.common.url_utils import sanitize_detail_link
 from src.export.qdrant_point_id import build_qdrant_point_id, duplicate_canonical_ids
-from src.export.jsonl_builder import write_jsonl
 
 TextVariant = Literal["best", "raw", "normalized"]
 
@@ -1141,6 +1140,7 @@ def build_relation_records(
         expanded_base_dir=expanded_base_dir,
         raw_related_base_dir=raw_related_base_dir,
     )
+    records = list(law_case_records)
     if not records:
         records = _build_relation_records_legacy(
             expanded_base_dir=expanded_base_dir,

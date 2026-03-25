@@ -51,6 +51,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-law-to-law-relations", action="store_true")
     parser.add_argument("--skip-embed", action="store_true")
     parser.add_argument("--upload-dry-run", action="store_true")
+    parser.add_argument("--skip-opensearch-upload", action="store_true")
+    parser.add_argument("--opensearch-dry-run", action="store_true")
     return parser.parse_args()
 
 
@@ -58,6 +60,64 @@ def _run_subprocess(cmd: list[str]) -> None:
     result = subprocess.run(cmd, cwd=REPO_ROOT, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"command failed: {' '.join(cmd)}")
+
+
+def _build_qdrant_incremental_commands(
+    *,
+    reg_dt: str,
+    base_dir: Path,
+    patch_dir: Path,
+    skip_embed: bool,
+    upload_dry_run: bool,
+) -> list[list[str]]:
+    if skip_embed:
+        return []
+
+    commands = [
+        [
+            sys.executable,
+            "scripts/embed_qdrant_incremental.py",
+            "--dataset-patch-dir",
+            str(patch_dir),
+            "--delta-batch-id",
+            reg_dt,
+        ]
+    ]
+    if upload_dry_run:
+        commands.append(
+            [
+                sys.executable,
+                "scripts/upload/load_qdrant_incremental.py",
+                "--patch-dir",
+                str(base_dir / "handoff" / "qdrant_incremental" / reg_dt),
+                "--dry-run",
+            ]
+        )
+    return commands
+
+
+def _build_opensearch_incremental_command(
+    *,
+    reg_dt: str,
+    base_dir: Path,
+    patch_dir: Path,
+    skip_opensearch_upload: bool,
+    opensearch_dry_run: bool,
+) -> list[str] | None:
+    if skip_opensearch_upload:
+        return None
+
+    command = [
+        sys.executable,
+        "scripts/upload/load_opensearch_incremental.py",
+        "--dataset-patch-dir",
+        str(patch_dir),
+        "--output-dir",
+        str(base_dir / "handoff" / "opensearch_incremental" / reg_dt),
+    ]
+    if opensearch_dry_run:
+        command.append("--dry-run")
+    return command
 
 
 def _build_filtered_appendix_asset_base_dir(
@@ -200,28 +260,24 @@ def main() -> None:
         delta_batch_id=args.reg_dt,
     )
 
-    if not args.skip_embed:
-        _run_subprocess(
-            [
-                sys.executable,
-                "scripts/embed_qdrant_incremental.py",
-                "--dataset-patch-dir",
-                str(patch_dir),
-                "--delta-batch-id",
-                args.reg_dt,
-            ]
-        )
+    for command in _build_qdrant_incremental_commands(
+        reg_dt=args.reg_dt,
+        base_dir=base_dir,
+        patch_dir=patch_dir,
+        skip_embed=args.skip_embed,
+        upload_dry_run=args.upload_dry_run,
+    ):
+        _run_subprocess(command)
 
-        if args.upload_dry_run:
-            _run_subprocess(
-                [
-                    sys.executable,
-                    "scripts/upload/load_qdrant_incremental.py",
-                    "--patch-dir",
-                    str(base_dir / "handoff" / "qdrant_incremental" / args.reg_dt),
-                    "--dry-run",
-                ]
-            )
+    opensearch_command = _build_opensearch_incremental_command(
+        reg_dt=args.reg_dt,
+        base_dir=base_dir,
+        patch_dir=patch_dir,
+        skip_opensearch_upload=args.skip_opensearch_upload,
+        opensearch_dry_run=args.opensearch_dry_run,
+    )
+    if opensearch_command is not None:
+        _run_subprocess(opensearch_command)
 
     summary = {
         "reg_dt": args.reg_dt,
@@ -230,6 +286,11 @@ def main() -> None:
         "family_results": family_results,
         "dataset_manifest": dataset_manifest,
         "patch_manifest": patch_manifest,
+        "skip_embed": args.skip_embed,
+        "upload_dry_run": args.upload_dry_run,
+        "skip_opensearch_upload": args.skip_opensearch_upload,
+        "opensearch_dry_run": args.opensearch_dry_run,
+        "opensearch_output_dir": str(base_dir / "handoff" / "opensearch_incremental" / args.reg_dt),
     }
     _write_json(base_dir / "manifest" / f"incremental_update_{args.reg_dt}.json", summary)
 
