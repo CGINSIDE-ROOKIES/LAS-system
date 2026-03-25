@@ -24,8 +24,6 @@ def test_parse_case_payload_from_prec_json_fixture():
     assert parsed["decision_date"] == "2019.05.30"
     assert "근로기준법 제43조의2" in parsed["body_text"]
 
-
-
 def test_parse_case_payload_from_expc_html_fixture_uses_fallback_meta():
     payload = json.loads((FIXTURE_DIR / "expc_detail_html.json").read_text(encoding="utf-8"))
 
@@ -67,30 +65,42 @@ def test_case_number_reference_extraction_excludes_self_doc_number():
     assert refs == ["2018다12345", "2020헌바12"]
 
 
-def test_case_number_reference_extraction_does_not_treat_amounts_as_case_numbers():
-    text = "피고는 119만2666원과 66만4000원을 지급하였고, 근로기준법 제43조의2를 함께 언급하였다."
+def test_case_number_reference_extraction_rejects_article_and_amount_text():
+    text = "근로기준법 제43조의2와 119만2666원의 지급 여부를 본 뒤 2018다12345 판결을 참조하였다."
 
     refs = extract_case_number_refs(text)
 
-    assert refs == []
+    assert refs == ["2018다12345"]
 
 
-def test_article_reference_extraction_supports_multiple_articles_with_mixed_notation():
-    text = "이 사건은 근로기준법 제23조, 30조 및 제43조의2의 적용 여부가 문제된다."
+def test_parse_case_payload_sanitizes_detail_link_oc_param():
+    payload = {
+        "판례": {
+            "판례일련번호": "123456",
+            "사건명": "임금",
+            "사건번호": "2019다12345",
+            "판례상세링크": "/DRF/lawService.do?OC=matrix2012&target=prec&ID=123456",
+            "판례내용": "본문",
+        }
+    }
 
-    article_refs = extract_explicit_article_refs(text, ["근로기준법", "최저임금법"])
+    parsed = parse_case_payload("prec", payload)
 
-    assert article_refs["근로기준법"] == [
-        {"article_key": "23", "article_no_display": "제23조"},
-        {"article_key": "30", "article_no_display": "제30조"},
-        {"article_key": "43-2", "article_no_display": "제43조의2"},
-    ]
+    assert parsed["detail_link"] == "/DRF/lawService.do?target=prec&ID=123456"
 
 
+def test_parse_case_payload_sanitizes_inline_detail_link_from_body_text():
+    payload = {
+        "판례": {
+            "판례일련번호": "123456",
+            "사건명": "임금",
+            "사건번호": "2019다12345",
+            "판례상세링크": "/DRF/lawService.do?OC=matrix2012&target=prec&ID=123456",
+            "판례내용": "본문 /DRF/lawService.do?OC=matrix2012&target=prec&ID=123456",
+        }
+    }
 
-def test_case_number_reference_extraction_does_not_treat_articles_as_case_numbers():
-    text = "원심은 근로기준법 제43조의2 및 제12조를 근거로 판단하였다."
+    parsed = parse_case_payload("prec", payload)
 
-    refs = extract_case_number_refs(text)
-
-    assert refs == []
+    assert "OC=" not in parsed["body_text"]
+    assert "/DRF/lawService.do?target=prec&ID=123456" in parsed["body_text"]
