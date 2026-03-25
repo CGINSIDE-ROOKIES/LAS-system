@@ -6,6 +6,10 @@
 """
 
 import json
+import logging
+import traceback
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -102,6 +106,7 @@ def ask_stream(
         except RetrievalError as exc:
             yield f"data: {json.dumps({'type': 'error', 'code': 'PIPELINE_ERROR', 'error': str(exc)}, ensure_ascii=False)}\n\n"
         except Exception:
+            logger.error("INTERNAL_ERROR in ask_stream:\n%s", traceback.format_exc())
             yield f"data: {json.dumps({'type': 'error', 'code': 'INTERNAL_ERROR', 'error': '서버 오류가 발생했습니다.'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
