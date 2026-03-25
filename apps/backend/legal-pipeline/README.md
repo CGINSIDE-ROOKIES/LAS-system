@@ -112,6 +112,87 @@ uv run apps/backend/legal-pipeline/scripts/embed_qdrant_3collections.py \
   - Qdrant 적재용 import JSONL
 - `data/handoff/qdrant_3collections/qdrant_embedding_manifest.json`
 
+### 3-4. OpenSearch 인덱스 생성 / 전체 적재
+
+로컬에서 Qdrant/OpenSearch를 같이 띄우려면:
+
+```bash
+docker compose \
+  -f apps/backend/legal-pipeline/docker-compose.local-search.yml \
+  up -d
+```
+
+로컬 서버 사용 시 환경변수 예시:
+
+```bash
+export QDRANT_URL="http://localhost:6333"
+export OPENSEARCH_URL="http://localhost:9200"
+export OPENSEARCH_INDEX_LAW_ARTICLE="law_article"
+export OPENSEARCH_INDEX_LEGAL_CASE="legal_case"
+export OPENSEARCH_INDEX_LEGAL_RELATION="legal_relation"
+```
+
+`OPENSEARCH_ENABLE_NORI_POS_FILTER` 는 기본 비활성화다. 로컬이나 일부 OpenSearch 배포에서 `nori_part_of_speech` 필터를 지원하지 않을 수 있으므로, 별도 확인 전에는 비워 두는 것을 권장한다.
+
+필요 환경변수 예시:
+
+```bash
+export OPENSEARCH_URL="http://cg-rookies.ragdoll-ule.ts.net:9200"
+export OPENSEARCH_INDEX_LAW_ARTICLE="law_article"
+export OPENSEARCH_INDEX_LEGAL_CASE="legal_case"
+export OPENSEARCH_INDEX_LEGAL_RELATION="legal_relation"
+```
+
+인덱스 생성:
+
+```bash
+uv run apps/backend/legal-pipeline/scripts/upload/index_opensearch.py
+```
+
+전체 적재:
+
+```bash
+uv run apps/backend/legal-pipeline/scripts/upload/load_opensearch.py
+```
+
+dry-run 시 bulk NDJSON만 생성:
+
+```bash
+uv run apps/backend/legal-pipeline/scripts/upload/load_opensearch.py --dry-run
+```
+
+### 3-5. 증분 업데이트 + OpenSearch 반영
+
+증분 patch 기준 OpenSearch 반영:
+
+```bash
+uv run apps/backend/legal-pipeline/scripts/upload/load_opensearch_incremental.py \
+  --dataset-patch-dir data/dataset/patches/<REG_DT>
+```
+
+메인 증분 워크플로우에서 OpenSearch까지 함께 실행:
+
+```bash
+uv run apps/backend/legal-pipeline/scripts/run_incremental_law_update.py \
+  --reg-dt <REG_DT>
+```
+
+OpenSearch 반영 없이 증분 데이터만 만들려면:
+
+```bash
+uv run apps/backend/legal-pipeline/scripts/run_incremental_law_update.py \
+  --reg-dt <REG_DT> \
+  --skip-opensearch-upload
+```
+
+OpenSearch payload만 검증하려면:
+
+```bash
+uv run apps/backend/legal-pipeline/scripts/run_incremental_law_update.py \
+  --reg-dt <REG_DT> \
+  --opensearch-dry-run
+```
+
 ## 4. 최종 실행 시 생성되는 `data/` 폴더 구조
 
 아래는 **full run + embedding 이후** 기준 권장 구조다.
@@ -170,16 +251,30 @@ data/
 │       ├── *.meta.jsonl
 │       └── *.manifest.json
 ├── handoff/
-│   └── qdrant_3collections/
-│       ├── source/
-│       │   ├── law_article.jsonl
-│       │   ├── legal_case.jsonl
-│       │   └── legal_relation.jsonl
-│       ├── import/
-│       │   ├── law_article_for_import.jsonl
-│       │   ├── legal_case_for_import.jsonl
-│       │   └── legal_relation_for_import.jsonl
-│       └── qdrant_embedding_manifest.json
+│   ├── qdrant_3collections/
+│   │   ├── source/
+│   │   │   ├── law_article.jsonl
+│   │   │   ├── legal_case.jsonl
+│   │   │   └── legal_relation.jsonl
+│   │   ├── import/
+│   │   │   ├── law_article_for_import.jsonl
+│   │   │   ├── legal_case_for_import.jsonl
+│   │   │   └── legal_relation_for_import.jsonl
+│   │   └── qdrant_embedding_manifest.json
+│   ├── opensearch_bulk/
+│   │   ├── law_article.bulk.ndjson
+│   │   ├── legal_case.bulk.ndjson
+│   │   ├── legal_relation.bulk.ndjson
+│   │   └── opensearch_bulk_manifest.json
+│   └── opensearch_incremental/
+│       └── <REG_DT>/
+│           ├── law_article.upsert.ndjson
+│           ├── law_article.delete.ndjson
+│           ├── legal_case.upsert.ndjson
+│           ├── legal_case.delete.ndjson
+│           ├── legal_relation.upsert.ndjson
+│           ├── legal_relation.delete.ndjson
+│           └── opensearch_incremental_manifest.json
 └── manifest/
     ├── full_collection_summary.json
     ├── current_law_collection_summary.json
