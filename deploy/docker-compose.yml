@@ -4,7 +4,7 @@ services:
     container_name: las-backend-api
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8000:8001"
     env_file: .env.backend-api
 
   backend-doc-pipeline:
