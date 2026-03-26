@@ -1,7 +1,7 @@
 services:
   backend-api:
     build:
-      context: ../apps/backend
+      context: apps/backend
       dockerfile: api/Dockerfile
     restart: unless-stopped
     environment:
@@ -30,7 +30,7 @@ services:
 
   backend-doc-pipeline:
     build:
-      context: ../apps/backend
+      context: apps/backend
       dockerfile: doc-processor/Dockerfile
     restart: unless-stopped
     environment:
@@ -53,7 +53,7 @@ services:
 
   frontend:
     build:
-      context: ../apps/frontend
+      context: apps/frontend
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
