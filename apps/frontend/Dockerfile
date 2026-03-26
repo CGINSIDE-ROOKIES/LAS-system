@@ -51,13 +51,13 @@ COPY --from=deps /app/apps/frontend/node_modules ./apps/frontend/node_modules
 # Copy all frontend sources (.dockerignore excludes node_modules and .next)
 COPY . ./apps/frontend/
 
-RUN apps/frontend/node_modules/.bin/next build apps/frontend \
+RUN cd apps/frontend && node_modules/.bin/next build \
     && echo "=== standalone root ===" \
-    && ls -la apps/frontend/.next/standalone/ \
+    && ls -la .next/standalone/ \
     && echo "=== standalone apps/frontend ===" \
-    && ls -la apps/frontend/.next/standalone/apps/frontend/ \
+    && ls -la .next/standalone/apps/frontend/ \
     && echo "=== standalone node_modules (.pnpm check) ===" \
-    && ls apps/frontend/.next/standalone/node_modules/ | head -5
+    && ls .next/standalone/node_modules/ | head -5
 
 # ── Stage 3: runtime ────────────────────────────────
 FROM node:20-alpine AS runner
