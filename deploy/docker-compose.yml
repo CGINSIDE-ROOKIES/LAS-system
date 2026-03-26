@@ -1,25 +1,60 @@
 services:
   backend-api:
-    image: ghcr.io/cginside-rookies/las-system/backend-api:dev
-    container_name: las-backend-api
+    build:
+      context: apps/backend
+      dockerfile: api/Dockerfile
     restart: unless-stopped
-    ports:
-      - "8000:8000"
-    env_file: .env.backend-api
+    environment:
+      - MIDM_LLM_URL=${MIDM_LLM_URL:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-flash-latest}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-mpnet-base-v2}
+      - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-cpu}
+      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-CPU}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - QDRANT_COLLECTIONS=${QDRANT_COLLECTIONS:-law_article,legal_case,legal_relation}
+      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+      - QDRANT_VECTOR_NAME_MAP=${QDRANT_VECTOR_NAME_MAP:-}
+      - OPENSEARCH_URL=${OPENSEARCH_URL:-http://opensearch:9200}
+      - OPENSEARCH_INDEX=${OPENSEARCH_INDEX:-las_legal_docs}
+      - OPENSEARCH_USERNAME=${OPENSEARCH_USERNAME:-}
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - LLM_CHAT_COMPLETIONS_URL=${LLM_CHAT_COMPLETIONS_URL:-}
+      - LLM_MODEL=${LLM_MODEL:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-4096}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://user:password@postgres:5432/las}
 
   backend-doc-pipeline:
-    image: ghcr.io/cginside-rookies/las-system/backend-doc-pipeline:dev
-    container_name: las-doc-pipeline
+    build:
+      context: apps/backend/doc-processor
+      dockerfile: Dockerfile
     restart: unless-stopped
-    ports:
-      - "8123:8123"
-    env_file: .env.doc-pipeline
+    environment:
+      - MIDM_LLM_URL=${MIDM_LLM_URL:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-flash-latest}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-mpnet-base-v2}
+      - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-cpu}
+      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-CPU}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - QDRANT_COLLECTION=${QDRANT_COLLECTION:-law_article}
+      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+      - QDRANT_VECTOR_NAME_MAP=${QDRANT_VECTOR_NAME_MAP:-}
+      - OPENSEARCH_URL=${OPENSEARCH_URL:-http://opensearch:9200}
+      - OPENSEARCH_INDEX=${OPENSEARCH_INDEX:-las_legal_docs}
+      - OPENSEARCH_USERNAME=${OPENSEARCH_USERNAME:-}
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
 
   frontend:
-    image: ghcr.io/cginside-rookies/las-system/frontend:dev
-    container_name: las-frontend
+    build:
+      context: apps/frontend
+      dockerfile: Dockerfile
     restart: unless-stopped
-    ports:
-      - "3000:3000"
     environment:
       - ALLOWED_FRAME_ORIGINS=${ALLOWED_FRAME_ORIGINS:-}
