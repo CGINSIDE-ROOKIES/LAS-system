@@ -1,79 +1,62 @@
-# Build context: apps/frontend
-# The pnpm-lock.yaml here is the old monorepo root lockfile (importers: '.' = turbo,
-# 'apps/frontend' = this app, 'packages/*' = shared packages). We reconstruct that
-# workspace structure inside Docker since packages/ is outside the build context.
+# Build context: apps/frontend (context path is relative to project root in Coolify)
+#
+# Workspace root = apps/frontend (pnpm-workspace.yaml lives here).
+# Workspace packages at ../../packages/* — in Docker that resolves to /app/packages/*.
+# outputFileTracingRoot = path.join(__dirname, "../../") = /app/, so the standalone
+# output mirrors /app/ and server.js ends up at apps/frontend/server.js inside it.
+#
 # ── Stage 1: deps ────────────────────────────────────
 FROM node:20-alpine AS deps
 
 RUN corepack enable && corepack prepare pnpm@9.12.3 --activate
 
-# Workspace root: lockfile importers expect '.' = turbo-only root
-WORKDIR /app
+# Place the app at apps/frontend so that ../../packages/* resolves to /app/packages/*
+# (matching outputFileTracingRoot and the lockfile's ../../packages/* importer paths)
+WORKDIR /app/apps/frontend
 
-# Root package.json matches the lockfile's '.' importer (just turbo)
-RUN printf '{"private":true,"devDependencies":{"turbo":"^2.1.3"}}\n' > package.json
-
-# pnpm-workspace.yaml mirrors the original monorepo layout
-RUN printf 'packages:\n  - "apps/frontend"\n  - "packages/*"\n' > pnpm-workspace.yaml
-
-# Lockfile was moved from monorepo root; it still encodes the root-relative structure
-COPY pnpm-lock.yaml ./
-
-# @las/tsconfig is the only workspace devDep the frontend uses.
-# It is pure JSON config; reproduce the actual file contents here.
-RUN mkdir -p packages/tsconfig && \
+# Create workspace package stubs at the path pnpm expects (../../ from WORKDIR)
+# @las/tsconfig is a devDep used by tsc; reproduce its actual JSON files here.
+RUN mkdir -p /app/packages/tsconfig && \
     printf '{"name":"@las/tsconfig","version":"0.0.1","private":true}\n' \
-        > packages/tsconfig/package.json && \
+        > /app/packages/tsconfig/package.json && \
     printf '{"$schema":"https://json.schemastore.org/tsconfig","compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"Bundler","strict":true,"skipLibCheck":true,"esModuleInterop":true,"resolveJsonModule":true,"forceConsistentCasingInFileNames":true}}\n' \
-        > packages/tsconfig/base.json && \
+        > /app/packages/tsconfig/base.json && \
     printf '{"extends":"./base.json","compilerOptions":{"jsx":"preserve","allowJs":false,"noEmit":true,"incremental":true,"lib":["dom","dom.iterable","esnext"],"plugins":[{"name":"next"}]}}\n' \
-        > packages/tsconfig/react-next.json
+        > /app/packages/tsconfig/react-next.json
 
-# Stub the other workspace packages so pnpm can resolve the full lockfile
-RUN mkdir -p packages/eslint-config && \
+# Stub the other workspace packages (no deps from frontend, just need to exist)
+RUN mkdir -p /app/packages/eslint-config && \
     printf '{"name":"@las/eslint-config","version":"0.0.1","private":true,"type":"module"}\n' \
-        > packages/eslint-config/package.json && \
-    mkdir -p packages/ui && \
+        > /app/packages/eslint-config/package.json && \
+    mkdir -p /app/packages/ui && \
     printf '{"name":"@las/ui","version":"0.0.1","private":true,"type":"module","main":"./src/index.tsx","types":"./src/index.tsx","peerDependencies":{"react":"^18.3.1"}}\n' \
-        > packages/ui/package.json
+        > /app/packages/ui/package.json
 
-# Frontend package.json goes to the 'apps/frontend' importer path expected by lockfile
-COPY package.json apps/frontend/package.json
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 
 RUN pnpm install --frozen-lockfile
 
 # ── Stage 2: build ───────────────────────────────────
 FROM node:20-alpine AS builder
 
-RUN corepack enable && corepack prepare pnpm@9.12.3 --activate
-
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 WORKDIR /app
 
-# Restore installed modules (order matters: copy before source so layers don't conflict)
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/frontend/node_modules ./apps/frontend/node_modules
+# Restore workspace packages (symlinks in node_modules point to /app/packages/*)
 COPY --from=deps /app/packages ./packages
+COPY --from=deps /app/apps/frontend/node_modules ./apps/frontend/node_modules
 
-# Copy all frontend sources into the workspace sub-path (.dockerignore excludes node_modules/.next)
-COPY . apps/frontend/
+# Copy all frontend sources (.dockerignore excludes node_modules and .next)
+COPY . ./apps/frontend/
 
-# Reconstruct workspace root files (not present in build context)
-RUN printf '{"private":true,"devDependencies":{"turbo":"^2.1.3"}}\n' > package.json && \
-    printf 'packages:\n  - "apps/frontend"\n  - "packages/*"\n' > pnpm-workspace.yaml
-COPY turbo.json ./
-COPY pnpm-lock.yaml ./
-
-RUN pnpm --filter @las/frontend build \
+RUN apps/frontend/node_modules/.bin/next build apps/frontend \
     && echo "=== standalone root ===" \
     && ls -la apps/frontend/.next/standalone/ \
-    && echo "=== standalone node_modules (top-level) ===" \
-    && ls apps/frontend/.next/standalone/node_modules/ | head -20 \
-    && echo "=== standalone apps/frontend (should exist with experimental.outputFileTracingRoot) ===" \
+    && echo "=== standalone apps/frontend ===" \
     && ls -la apps/frontend/.next/standalone/apps/frontend/ \
-    && echo "=== standalone node_modules (.pnpm should be present) ===" \
+    && echo "=== standalone node_modules (.pnpm check) ===" \
     && ls apps/frontend/.next/standalone/node_modules/ | head -5
 
 # ── Stage 3: runtime ────────────────────────────────
@@ -82,8 +65,7 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-# outputFileTracingRoot=../../ from apps/frontend/next.config.mjs resolves to /app/,
-# so standalone mirrors the full workspace tree: node_modules/, apps/frontend/server.js, etc.
+# standalone mirrors /app/ — contains node_modules/, apps/frontend/server.js, etc.
 COPY --from=builder /app/apps/frontend/.next/standalone ./
 COPY --from=builder /app/apps/frontend/.next/static ./apps/frontend/.next/static
 COPY --from=builder /app/apps/frontend/public ./apps/frontend/public
