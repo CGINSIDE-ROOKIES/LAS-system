@@ -62,6 +62,16 @@ export async function deleteHistoryItem(id: string): Promise<void> {
   if (!res.ok) await throwApiError(res);
 }
 
+export async function deleteHistoryItems(ids: string[]): Promise<{ deleted: number }> {
+  const res = await fetch(`${getApiBaseUrl()}/api/v1/qa/history`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) await throwApiError(res);
+  return res.json();
+}
+
 // ── Q&A ──────────────────────────────────────────────────────────────────────
 
 export interface AskRequest {

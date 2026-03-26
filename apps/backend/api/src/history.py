@@ -158,6 +158,21 @@ def delete_history_item(
         return cur.rowcount > 0
 
 
+def delete_history_items(
+    conn: psycopg2.extensions.connection,
+    qa_ids: list[str],
+) -> int:
+    """여러 Q&A 히스토리를 한 번에 삭제한다. 실제 삭제된 건수를 반환한다."""
+    if not qa_ids:
+        return 0
+    with conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM qa_history WHERE id = ANY(%s::uuid[])",
+            (qa_ids,),
+        )
+        return cur.rowcount
+
+
 def get_history_item(
     conn: psycopg2.extensions.connection,
     qa_id: str,
