@@ -31,8 +31,8 @@ def save_qa(
         if retrieved_docs:
             cur.executemany(
                 """
-                INSERT INTO qa_sources (qa_id, source_id, doc_type, law_name, rank, score)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO qa_sources (qa_id, source_id, doc_type, law_name, article_no, rank, score)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 [
                     (
@@ -40,6 +40,7 @@ def save_qa(
                         doc.get("source_id"),
                         doc.get("doc_type"),
                         doc.get("law_name"),
+                        doc.get("article_no") or None,
                         doc.get("rank"),
                         doc.get("score"),
                     )
@@ -105,7 +106,7 @@ def get_history(
         if qa_ids:
             cur.execute(
                 """
-                SELECT qa_id, source_id, doc_type, law_name, rank, score
+                SELECT qa_id, source_id, doc_type, law_name, article_no, rank, score
                 FROM qa_sources
                 WHERE qa_id = ANY(%s::uuid[])
                 ORDER BY qa_id, rank
@@ -119,8 +120,9 @@ def get_history(
                         "source_id": src[1],
                         "doc_type": src[2],
                         "law_name": src[3],
-                        "rank": src[4],
-                        "score": src[5],
+                        "article_no": src[4],
+                        "rank": src[5],
+                        "score": src[6],
                     })
 
     items = [
@@ -159,7 +161,7 @@ def get_history_item(
 
         cur.execute(
             """
-            SELECT source_id, doc_type, law_name, rank, score
+            SELECT source_id, doc_type, law_name, article_no, rank, score
             FROM qa_sources
             WHERE qa_id = %s
             ORDER BY rank
@@ -171,8 +173,9 @@ def get_history_item(
                 "source_id": src[0],
                 "doc_type": src[1],
                 "law_name": src[2],
-                "rank": src[3],
-                "score": src[4],
+                "article_no": src[3],
+                "rank": src[4],
+                "score": src[5],
             }
             for src in cur.fetchall()
         ]
