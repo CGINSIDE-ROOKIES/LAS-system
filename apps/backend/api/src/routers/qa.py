@@ -59,6 +59,7 @@ class RetrievedDoc(BaseModel):
     source_id: str
     doc_type: str
     law_name: str
+    article_no: str = ""
     score: float | None
     snippet: str
     text: str = ""

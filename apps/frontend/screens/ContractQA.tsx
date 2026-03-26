@@ -77,6 +77,7 @@ function mapDocToSource(doc: ApiDoc): Source {
     type: DOC_TYPE_MAP[doc.doc_type] ?? "law",
     title: doc.law_name,
     excerpt: doc.snippet,
+    article: doc.article_no ? `제${doc.article_no}조` : undefined,
   };
 }
 

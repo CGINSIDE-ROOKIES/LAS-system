@@ -65,6 +65,7 @@ export interface RetrievedDoc {
   source_id: string;
   doc_type: string;
   law_name: string;
+  article_no: string;
   score: number | null;
   snippet: string;
   text?: string;

@@ -63,12 +63,9 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
           const parsedCitations: Citation[] = event.retrieved_docs
             .filter((doc) => doc.doc_type === "law")
             .map((doc) => {
-              // source_id: law::{law_name}::{article_no}::{chunk}
-              const parts = (doc.source_id || "").split("::");
-              const sourceArticleNo = parts[2] ?? "";
               let articleLabel: string;
-              if (sourceArticleNo) {
-                articleLabel = `${doc.law_name} 제${sourceArticleNo}조`;
+              if (doc.article_no) {
+                articleLabel = `${doc.law_name} 제${doc.article_no}조`;
               } else {
                 const noMatch = (doc.text || doc.snippet).match(/조문번호:\s*(제?\d[\d조의]*)/);
                 if (noMatch) {
@@ -122,7 +119,6 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
                     isStreaming: false,
                     answerData: {
                       summary: m.content,
-                      detail: "",
                       citations: parsedCitations,
                       references: [],
                     },
