@@ -16,6 +16,17 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
   Search,
@@ -32,7 +43,7 @@ import {
 import { format, addDays } from "date-fns";
 import { ko } from "date-fns/locale";
 import { cn } from "@/lib/utils";
-import { getHistory, HistoryItem } from "@/lib/api-client";
+import { deleteHistoryItem, getHistory, HistoryItem } from "@/lib/api-client";
 
 const LIMIT = 20;
 
@@ -40,6 +51,12 @@ function deriveCitations(item: HistoryItem): string[] {
   return item.sources
     .filter((s) => s.doc_type === "law")
     .map((s) => s.article_no ? `${s.law_name} ${s.article_no}` : s.law_name);
+}
+
+function extractArticleContent(text: string): string {
+  const match = text.match(/제\d+조/);
+  if (match?.index !== undefined) return text.slice(match.index);
+  return text;
 }
 
 function deriveRelatedLaws(item: HistoryItem): string[] {
@@ -56,6 +73,8 @@ const History = () => {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
 
   const fetchHistory = useCallback(async (offset: number, append = false) => {
     if (append) setIsLoadingMore(true);
@@ -96,15 +115,36 @@ const History = () => {
     });
   };
 
+  const toggleSources = (id: string) => {
+    setExpandedSources((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
   const handleCopy = (answer: string) => {
     navigator.clipboard.writeText(answer);
     toast.success("답변이 클립보드에 복사되었습니다.");
   };
 
-  const handleDelete = (id: string) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
-    setTotal((prev) => prev - 1);
-    toast.success("히스토리가 삭제되었습니다.");
+  const handleDelete = async (id: string) => {
+    setDeletingIds((prev) => new Set(prev).add(id));
+    try {
+      await deleteHistoryItem(id);
+      setItems((prev) => prev.filter((item) => item.id !== id));
+      setTotal((prev) => prev - 1);
+      toast.success("히스토리가 삭제되었습니다.");
+    } catch (e) {
+      console.error("[LAS:HISTORY] 삭제 실패:", e);
+      toast.error("삭제에 실패했습니다. 다시 시도해주세요.");
+    } finally {
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   };
 
   const handleFollowUp = (question: string) => {
@@ -301,17 +341,48 @@ const History = () => {
                                   </div>
 
                                   {citations.length > 0 && (
-                                    <div className="space-y-2">
-                                      <h4 className="text-sm font-medium text-foreground">근거 조문</h4>
-                                      <div className="flex flex-wrap gap-2">
-                                        {citations.map((c) => (
-                                          <Badge key={c} variant="outline" className="border-primary/30 bg-primary/5">
-                                            <Scale className="mr-1 h-3 w-3" />
-                                            {c}
-                                          </Badge>
-                                        ))}
-                                      </div>
-                                    </div>
+                                    <Collapsible
+                                      open={expandedSources.has(item.id)}
+                                      onOpenChange={() => toggleSources(item.id)}
+                                    >
+                                      <CollapsibleTrigger asChild>
+                                        <button
+                                          className="flex w-full items-center justify-between text-sm font-medium text-foreground hover:text-primary"
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          <span className="flex items-center gap-1.5">
+                                            <Scale className="h-3.5 w-3.5" />
+                                            근거 조문
+                                            <span className="text-xs font-normal text-muted-foreground">({citations.length})</span>
+                                          </span>
+                                          {expandedSources.has(item.id)
+                                            ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+                                            : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                                          }
+                                        </button>
+                                      </CollapsibleTrigger>
+                                      <CollapsibleContent>
+                                        <div className="mt-2 space-y-2" onClick={(e) => e.stopPropagation()}>
+                                          {item.sources
+                                            .filter((s) => s.doc_type === "law")
+                                            .map((s, idx) => {
+                                              const label = s.article_no ? `${s.law_name} ${s.article_no}` : s.law_name;
+                                              const raw = s.text || s.snippet;
+                                              const content = raw ? extractArticleContent(raw) : null;
+                                              return (
+                                                <div key={`${item.id}-src-${idx}`} className="rounded-md border border-primary/20 bg-primary/5 p-3 text-sm">
+                                                  <p className="mb-1.5 font-medium text-foreground">{label}</p>
+                                                  {content ? (
+                                                    <p className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">{content}</p>
+                                                  ) : (
+                                                    <p className="text-xs text-muted-foreground/50">조문 내용이 저장되지 않았습니다.</p>
+                                                  )}
+                                                </div>
+                                              );
+                                            })}
+                                        </div>
+                                      </CollapsibleContent>
+                                    </Collapsible>
                                   )}
 
                                   {relatedLaws.length > 0 && (
@@ -342,15 +413,41 @@ const History = () => {
                                       <MessageSquarePlus className="mr-1 h-3 w-3" />
                                       후속 질문
                                     </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="ml-auto text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                      onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
-                                    >
-                                      <Trash2 className="mr-1 h-3 w-3" />
-                                      삭제
-                                    </Button>
+                                    <AlertDialog>
+                                      <AlertDialogTrigger asChild>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="ml-auto text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                          disabled={deletingIds.has(item.id)}
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          {deletingIds.has(item.id) ? (
+                                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                          ) : (
+                                            <Trash2 className="mr-1 h-3 w-3" />
+                                          )}
+                                          삭제
+                                        </Button>
+                                      </AlertDialogTrigger>
+                                      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                                        <AlertDialogHeader>
+                                          <AlertDialogTitle>히스토리 삭제</AlertDialogTitle>
+                                          <AlertDialogDescription>
+                                            이 대화 내역을 삭제하시겠습니까? 삭제 후 복구할 수 없습니다.
+                                          </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                          <AlertDialogCancel>취소</AlertDialogCancel>
+                                          <AlertDialogAction
+                                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                            onClick={() => handleDelete(item.id)}
+                                          >
+                                            삭제
+                                          </AlertDialogAction>
+                                        </AlertDialogFooter>
+                                      </AlertDialogContent>
+                                    </AlertDialog>
                                   </div>
                                 </CardContent>
                               </div>
