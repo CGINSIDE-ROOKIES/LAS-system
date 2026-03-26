@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 from src.db import get_db
 from src.dependencies import get_rag_pipeline
 from src.generation.pipeline import RagPipeline
-from src.history import get_history, get_history_item, save_qa
+from src.history import delete_history_item, get_history, get_history_item, save_qa
 from src.retrieval.common import RetrievalError
 
 router = APIRouter(tags=["qa"])
@@ -91,6 +91,17 @@ def history(
         limit=limit,
         offset=offset,
     )
+
+
+@router.delete("/history/{qa_id}", status_code=204)
+def delete_history(
+    qa_id: str,
+    conn: psycopg2.extensions.connection = Depends(get_db),
+):
+    """단건 Q&A 히스토리를 삭제합니다."""
+    deleted = delete_history_item(conn, qa_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="히스토리를 찾을 수 없습니다.")
 
 
 @router.get("/history/{qa_id}")

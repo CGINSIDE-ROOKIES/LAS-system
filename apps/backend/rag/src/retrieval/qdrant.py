@@ -24,7 +24,7 @@ def _normalize_qdrant_results(rows: list[dict[str, Any]]) -> list[dict[str, Any]
             {
                 "rank": i,
                 "score": row.get("score"),
-                "source_id": payload.get("source_id", ""),
+                "source_id": payload.get("id", "") or str(row.get("id", "")),
                 "doc_type": payload.get("doc_type", ""),
                 "law_name": payload.get("law_name", ""),
                 "article_no": payload.get("article_no_display", ""),
