@@ -20,9 +20,9 @@ from pydantic import BaseModel, Field, field_validator
 
 from src.db import get_db
 from src.dependencies import get_rag_pipeline
-from src.generation.pipeline import RagPipeline
+from rag_pipeline.generation.pipeline import RagPipeline
 from src.history import delete_history_item, delete_history_items, get_history, get_history_item, save_qa
-from src.retrieval.common import RetrievalError
+from rag_pipeline.retrieval.common import RetrievalError
 
 router = APIRouter(tags=["qa"])
 

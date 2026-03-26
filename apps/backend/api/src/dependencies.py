@@ -12,7 +12,7 @@
 
 from functools import lru_cache
 
-from src.generation.pipeline import RagPipeline
+from rag_pipeline.generation.pipeline import RagPipeline
 
 
 @lru_cache(maxsize=1)
