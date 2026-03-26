@@ -233,6 +233,7 @@ class RagPipeline:
                 "source_id": str(row.get("source_id", "") or ""),
                 "doc_type": str(row.get("doc_type", "") or ""),
                 "law_name": str(row.get("law_name", "") or ""),
+                "article_no": str(row.get("article_no", "") or ""),
                 "score": row.get("score"),
                 "snippet": str(row.get("snippet", "") or "")[:snippet_max] if snippet_max > 0 else str(row.get("snippet", "") or ""),
                 "text": str(row.get("text", "") or ""),

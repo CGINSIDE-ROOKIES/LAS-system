@@ -1,13 +1,16 @@
+import { useState } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
-import { ChatContainer } from "@/components/ChatContainer";
+import { ChatContainer, Citation } from "@/components/ChatContainer";
 import { LawReferencePanel } from "@/components/LawReferencePanel";
 import { LawGraphPanel } from "@/components/LawGraphPanel";
 
 const Index = () => {
+  const [citations, setCitations] = useState<Citation[]>([]);
+
   return (
     <SidebarProvider>
-      <div className="flex min-h-screen w-full">
+      <div className="flex h-screen w-full overflow-hidden">
         <AppSidebar />
         <div className="flex flex-1 flex-col">
           {/* Minimal header with sidebar trigger only */}
@@ -19,13 +22,13 @@ const Index = () => {
           <div className="flex flex-1 overflow-hidden">
             {/* Left: Chat */}
             <div className="flex flex-1 flex-col border-r border-border">
-              <ChatContainer />
+              <ChatContainer onCitationsChange={setCitations} />
             </div>
 
             {/* Right: Reference + Graph */}
             <div className="hidden w-[380px] shrink-0 flex-col lg:flex">
               <div className="flex-1 overflow-hidden border-b border-border">
-                <LawReferencePanel />
+                <LawReferencePanel citations={citations} />
               </div>
               <div className="h-[280px] shrink-0">
                 <LawGraphPanel />

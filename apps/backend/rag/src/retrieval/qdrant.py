@@ -27,6 +27,7 @@ def _normalize_qdrant_results(rows: list[dict[str, Any]]) -> list[dict[str, Any]
                 "source_id": payload.get("source_id", ""),
                 "doc_type": payload.get("doc_type", ""),
                 "law_name": payload.get("law_name", ""),
+                "article_no": payload.get("article_no_display", ""),
                 "text": text,
                 "snippet": text.replace("\n", " ")[:SNIPPET_MAX_LEN],
             }

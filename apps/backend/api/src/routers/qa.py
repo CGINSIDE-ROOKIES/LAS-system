@@ -59,6 +59,7 @@ class RetrievedDoc(BaseModel):
     source_id: str
     doc_type: str
     law_name: str
+    article_no: str = ""
     score: float | None
     snippet: str
     text: str = ""
@@ -125,17 +126,18 @@ def ask(
     except Exception:
         logger.error("INTERNAL_ERROR in ask:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail="서버 오류가 발생했습니다.")
-    try:
-        save_qa(
-            conn,
-            question=request.question,
-            answer=result.answer,
-            law_context_status=result.law_context_status,
-            retrieved_docs=result.retrieved_docs,
-            session_id=request.session_id,
-        )
-    except Exception:
-        logger.error("DB save failed in ask:\n%s", traceback.format_exc())
+    if result.answer.strip():
+        try:
+            save_qa(
+                conn,
+                question=request.question,
+                answer=result.answer,
+                law_context_status=result.law_context_status,
+                retrieved_docs=result.retrieved_docs,
+                session_id=request.session_id,
+            )
+        except Exception:
+            logger.error("DB save failed in ask:\n%s", traceback.format_exc())
     logger.info("ask 완료: %.2fs | law_context_status=%s", time.perf_counter() - t0, result.law_context_status)
     return AskResponse(
         answer=result.answer,
@@ -182,17 +184,19 @@ def ask_stream(
 
         if meta is not None:
             logger.info("ask_stream 완료: %.2fs | law_context_status=%s", time.perf_counter() - t0, meta.law_context_status)
-            try:
-                save_qa(
-                    conn,
-                    question=request.question,
-                    answer="".join(answer_parts),
-                    law_context_status=meta.law_context_status,
-                    retrieved_docs=meta.retrieved_docs,
-                    session_id=request.session_id,
-                )
-            except Exception:
-                logger.error("DB save failed in ask_stream:\n%s", traceback.format_exc())
+            answer = "".join(answer_parts)
+            if answer.strip():
+                try:
+                    save_qa(
+                        conn,
+                        question=request.question,
+                        answer=answer,
+                        law_context_status=meta.law_context_status,
+                        retrieved_docs=meta.retrieved_docs,
+                        session_id=request.session_id,
+                    )
+                except Exception:
+                    logger.error("DB save failed in ask_stream:\n%s", traceback.format_exc())
 
     return StreamingResponse(
         generate(),
