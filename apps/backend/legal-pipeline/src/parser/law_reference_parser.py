@@ -9,16 +9,25 @@ ARTICLE_PATTERN = re.compile(r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?")
 ARTICLE_RANGE_PATTERN = re.compile(
     r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*(?:부터|내지)\s*제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*(?:까지)?"
 )
+ARTICLE_BLOCK_PATTERN = (
+    r"제\s*\d+\s*조(?:\s*의\s*\d+)?"
+    r"(?:\s*(?:부터|내지)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:까지)?)?"
+    r"(?:\s*(?:,|및|와|과|또는|혹은|·)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?)*"
+)
+SINGLE_ARTICLE_BLOCK_PATTERN = (
+    r"제\s*\d+\s*조(?:\s*의\s*\d+)?"
+    r"(?:\s*(?:부터|내지)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:까지)?)?"
+)
+LAW_NAME_TOKEN_PATTERN = r"(?!및\b|또는\b|혹은\b|와\b|과\b|전조\b|동조\b|같은\b|이\b)[가-힣0-9·ㆍ()]+"
 EXPLICIT_LAW_WITH_ARTICLE_PATTERN = re.compile(
-    r"(?P<law_name>[가-힣][가-힣0-9·ㆍ() ]{0,80}?(?:법|영|규칙|조례|규정|훈령|예규|고시))\s*"
-    r"(?P<article_block>제\s*\d+\s*조(?:\s*의\s*\d+)?(?:\s*(?:부터|내지)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:까지)?)?(?:\s*(?:,|및|와|과|또는|혹은|·)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?)*)"
+    rf"(?<![가-힣0-9])(?P<law_name>{LAW_NAME_TOKEN_PATTERN}(?:\s+{LAW_NAME_TOKEN_PATTERN}){{0,7}})\s*(?P<article_block>{ARTICLE_BLOCK_PATTERN})"
 )
 RELATIVE_SCOPE_WITH_ARTICLE_PATTERN = re.compile(
     r"(?P<prefix>이|같은)\s*(?P<scope>법|영|규칙|조례)\s*"
-    r"(?P<article_block>제\s*\d+\s*조(?:\s*의\s*\d+)?(?:\s*(?:부터|내지)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:까지)?)?(?:\s*(?:,|및|와|과|또는|혹은|·)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?)*)"
+    rf"(?P<article_block>{SINGLE_ARTICLE_BLOCK_PATTERN})"
 )
 BARE_ARTICLE_BLOCK_PATTERN = re.compile(
-    r"(?<![가-힣0-9])(?P<article_block>제\s*\d+\s*조(?:\s*의\s*\d+)?(?:\s*(?:부터|내지)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:까지)?)?(?:\s*(?:,|및|와|과|또는|혹은|·)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?)*)"
+    rf"(?<![가-힣0-9])(?P<article_block>{ARTICLE_BLOCK_PATTERN})"
 )
 RELATIVE_ARTICLE_PATTERNS = {
     "previous_article": re.compile(r"전\s*조"),
@@ -33,6 +42,15 @@ def _normalize_space(text: str) -> str:
 
 def _normalize_name(text: str) -> str:
     return re.sub(r"\s+", "", str(text or "")).strip()
+
+
+def _looks_like_law_name(text: str) -> bool:
+    candidate = _normalize_space(text)
+    if not candidate:
+        return False
+    if candidate in {"이 법", "같은 법", "이 영", "같은 영", "이 규칙", "같은 규칙", "이 조례", "같은 조례"}:
+        return False
+    return candidate.endswith(("법", "법률", "시행령", "대통령령", "령", "시행규칙", "규칙", "부령", "조례", "규정", "훈령", "예규", "고시"))
 
 
 def _article_ref(main_no: str, branch_no: str | None) -> dict[str, str]:
@@ -301,7 +319,7 @@ def parse_law_article_references(
     for match in EXPLICIT_LAW_WITH_ARTICLE_PATTERN.finditer(raw_text):
         candidate_law_name = _normalize_space(match.group("law_name"))
         article_refs = extract_article_refs(match.group("article_block"))
-        if not candidate_law_name or not article_refs:
+        if not candidate_law_name or not article_refs or not _looks_like_law_name(candidate_law_name):
             continue
         candidates, resolution_status = _resolve_law_name_candidates(
             candidate_law_name,

@@ -40,6 +40,35 @@ def _article_text(article: dict[str, Any]) -> str:
     return "\n".join(part for part in parts if part).strip()
 
 
+def _article_reference_text(article: dict[str, Any]) -> str:
+    parts: list[str] = []
+
+    article_text = str(article.get("article_text_raw") or article.get("article_text") or "").strip()
+    if article_text:
+        parts.append(article_text)
+
+    for paragraph in article.get("paragraphs", []) if isinstance(article.get("paragraphs"), list) else []:
+        if not isinstance(paragraph, dict):
+            continue
+        paragraph_text = str(paragraph.get("paragraph_text_raw") or paragraph.get("paragraph_text") or "").strip()
+        if paragraph_text:
+            parts.append(paragraph_text)
+        for item in paragraph.get("items", []) if isinstance(paragraph.get("items"), list) else []:
+            if not isinstance(item, dict):
+                continue
+            item_text = str(item.get("item_text_raw") or item.get("item_text") or "").strip()
+            if item_text:
+                parts.append(item_text)
+            for subitem in item.get("subitems", []) if isinstance(item.get("subitems"), list) else []:
+                if not isinstance(subitem, dict):
+                    continue
+                subitem_text = str(subitem.get("subitem_text_raw") or subitem.get("subitem_text") or "").strip()
+                if subitem_text:
+                    parts.append(subitem_text)
+
+    return "\n".join(part for part in parts if part).strip()
+
+
 def _relation_text(row: dict[str, Any]) -> str:
     lines = [
         f"관계 모델: {row.get('relation_model') or ''}",
@@ -154,11 +183,12 @@ def build_law_to_law_relation_records(
                     or ""
                 ).strip()
                 body_text = _article_text(article)
-                if not body_text:
+                reference_text = _article_reference_text(article)
+                if not reference_text:
                     continue
 
                 parsed_refs = parse_law_article_references(
-                    body_text,
+                    reference_text,
                     source_law_name=source["law_name"],
                     source_law_level=payload.get("classified_level") or payload.get("kind_name"),
                     source_article_key=article_key or None,
@@ -175,10 +205,10 @@ def build_law_to_law_relation_records(
                 )
                 matched_law_names = [
                     law_name
-                    for law_name in find_related_law_names(body_text, family_law_names)
+                    for law_name in find_related_law_names(reference_text, family_law_names)
                     if law_name and law_name != source["law_name"]
                 ]
-                article_refs_map = extract_explicit_article_refs(body_text, family_law_names)
+                article_refs_map = extract_explicit_article_refs(reference_text, family_law_names)
 
                 refs_by_target: dict[str, list[dict[str, Any]]] = defaultdict(list)
                 for reference in parsed_refs:
