@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import Counter
 from pathlib import Path
 from typing import Iterable, Iterator, Sequence
 
 import numpy as np
+import torch
 from sentence_transformers import SentenceTransformer
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -24,11 +26,26 @@ MODEL_NAME = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 EMBEDDING_PASSAGE_PREFIX = ""
 NORMALIZE_EMBEDDINGS = True
 EMBEDDING_DTYPE = "float32"
-DEFAULT_BATCH_SIZE = 32
+DEFAULT_BATCH_SIZE = 256
 CASE_DOC_TYPES = {"prec", "detc", "decc", "expc"}
 COLLECTIONS = ("law_article", "legal_case", "legal_relation")
 APPENDIX_VECTOR_PLACEHOLDER = "[NO_APPENDIX_LINKED]"
 LAW_ARTICLE_VECTOR_NAMES = ("body", "appendix")
+
+# EMBED_DEVICE=cpu_mp|mps|auto  (auto: detect MPS, fall back to cpu_mp)
+_DEVICE_ENV = os.getenv("EMBED_DEVICE", "auto").lower()
+
+
+def _resolve_device() -> str:
+    if _DEVICE_ENV == "auto":
+        if torch.backends.mps.is_available():
+            return "mps"
+        return "cpu_mp"
+    return _DEVICE_ENV
+
+
+DEVICE_MODE = _resolve_device()
+
 RELATION_MODEL_SEARCH_PROFILES = {
     "law_to_case": {
         "default_score_multiplier": 1.0,
@@ -333,6 +350,29 @@ def _iter_simple_rows(dataset_dir: Path, collection_name: str) -> list[dict]:
     return list(_iter_collection_rows(dataset_dir, collection_name))
 
 
+def _encode(
+    model: SentenceTransformer,
+    pool: dict | None,
+    texts: list[str],
+    batch_size: int,
+) -> np.ndarray:
+    """Encode texts using the appropriate backend (multi-process CPU or MPS)."""
+    if pool is not None:
+        embeddings = SentenceTransformer.encode_multi_process(texts, pool, batch_size=batch_size)
+        if NORMALIZE_EMBEDDINGS:
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            embeddings = embeddings / np.where(norms == 0, 1.0, norms)
+        return embeddings.astype(np.float32)
+    return model.encode(
+        texts,
+        batch_size=batch_size,
+        show_progress_bar=True,
+        convert_to_numpy=True,
+        normalize_embeddings=NORMALIZE_EMBEDDINGS,
+        precision=EMBEDDING_DTYPE,
+    )
+
+
 def _build_law_article_import_rows(
     metas: Sequence[dict],
     body_texts: Sequence[str],
@@ -420,13 +460,14 @@ def embed_law_article(
     dataset_dir: Path,
     emb_dir: Path,
     handoff_dir: Path,
+    pool: dict | None,
     *,
     batch_size: int,
 ) -> dict:
     collection_name = "law_article"
     rows = _iter_law_article_rows(dataset_dir)
-    stats = _scan_collection(dataset_dir, collection_name)
-    duplicate_canonical_ids: set[str] = stats["duplicate_canonical_ids"]
+    canonical_id_counter: Counter[str] = Counter(_canonical_id_from_row(r) for r in rows)
+    duplicate_canonical_ids: set[str] = {cid for cid, n in canonical_id_counter.items() if n > 1}
 
     metas: list[dict] = []
     body_texts: list[str] = []
@@ -448,22 +489,8 @@ def embed_law_article(
     if not body_texts:
         raise ValueError("[law_article] no texts found to embed")
 
-    body_embeddings = model.encode(
-        body_texts,
-        batch_size=batch_size,
-        show_progress_bar=True,
-        convert_to_numpy=True,
-        normalize_embeddings=NORMALIZE_EMBEDDINGS,
-        precision=EMBEDDING_DTYPE,
-    ).astype(np.float32)
-    appendix_embeddings = model.encode(
-        appendix_texts,
-        batch_size=batch_size,
-        show_progress_bar=True,
-        convert_to_numpy=True,
-        normalize_embeddings=NORMALIZE_EMBEDDINGS,
-        precision=EMBEDDING_DTYPE,
-    ).astype(np.float32)
+    body_embeddings = _encode(model, pool, body_texts, batch_size)
+    appendix_embeddings = _encode(model, pool, appendix_texts, batch_size)
 
     emb_dir.mkdir(parents=True, exist_ok=True)
     body_npy_path = emb_dir / f"{collection_name}.body.npy"
@@ -506,12 +533,18 @@ def embed_simple_collection(
     emb_dir: Path,
     handoff_dir: Path,
     collection_name: str,
+    pool: dict | None,
     *,
     batch_size: int,
 ) -> dict:
     rows = _iter_simple_rows(dataset_dir, collection_name)
-    stats = _scan_collection(dataset_dir, collection_name)
-    duplicate_canonical_ids: set[str] = stats["duplicate_canonical_ids"]
+    canonical_id_counter: Counter[str] = Counter(_canonical_id_from_row(r) for r in rows)
+    duplicate_canonical_ids: set[str] = {cid for cid, n in canonical_id_counter.items() if n > 1}
+    relation_model_counter: Counter[str] = (
+        Counter(str(r.get("relation_model") or "unknown") for r in rows)
+        if collection_name == "legal_relation"
+        else Counter()
+    )
 
     metas: list[dict] = []
     texts: list[str] = []
@@ -536,14 +569,7 @@ def embed_simple_collection(
             "reason": "no texts found to embed",
         }
 
-    embeddings = model.encode(
-        texts,
-        batch_size=batch_size,
-        show_progress_bar=True,
-        convert_to_numpy=True,
-        normalize_embeddings=NORMALIZE_EMBEDDINGS,
-        precision=EMBEDDING_DTYPE,
-    ).astype(np.float32)
+    embeddings = _encode(model, pool, texts, batch_size)
 
     emb_dir.mkdir(parents=True, exist_ok=True)
     npy_path = emb_dir / f"{collection_name}.npy"
@@ -573,7 +599,7 @@ def embed_simple_collection(
         "import_jsonl_path": str(import_path),
     }
     if collection_name == "legal_relation":
-        manifest["relation_model_counts"] = dict(stats["relation_model_counter"])
+        manifest["relation_model_counts"] = dict(relation_model_counter)
         manifest["relation_model_profiles"] = RELATION_MODEL_SEARCH_PROFILES
     with manifest_path.open("w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
@@ -644,36 +670,49 @@ def main() -> None:
     if not dataset_dir.exists():
         raise FileNotFoundError(f"dataset_dir not found: {dataset_dir}")
 
-    model = SentenceTransformer(MODEL_NAME)
+    print(f"[embed] device_mode={DEVICE_MODE}")
 
-    collection_manifests: list[dict] = []
-    collection_manifests.append(
-        embed_law_article(
-            model=model,
-            dataset_dir=dataset_dir,
-            emb_dir=emb_dir,
-            handoff_dir=handoff_dir,
-            batch_size=batch_size,
-        )
-    )
-    for collection_name in ("legal_case", "legal_relation"):
+    if DEVICE_MODE == "mps":
+        model = SentenceTransformer(MODEL_NAME, device="mps")
+        pool = None
+    else:  # cpu_mp
+        model = SentenceTransformer(MODEL_NAME)
+        pool = model.start_multi_process_pool(target_devices=["cpu"] * 4)
+
+    try:
+        collection_manifests: list[dict] = []
         collection_manifests.append(
-            embed_simple_collection(
+            embed_law_article(
                 model=model,
                 dataset_dir=dataset_dir,
                 emb_dir=emb_dir,
                 handoff_dir=handoff_dir,
-                collection_name=collection_name,
+                pool=pool,
                 batch_size=batch_size,
             )
         )
+        for collection_name in ("legal_case", "legal_relation"):
+            collection_manifests.append(
+                embed_simple_collection(
+                    model=model,
+                    dataset_dir=dataset_dir,
+                    emb_dir=emb_dir,
+                    handoff_dir=handoff_dir,
+                    collection_name=collection_name,
+                    pool=pool,
+                    batch_size=batch_size,
+                )
+            )
 
-    write_embedding_manifest(
-        handoff_dir=handoff_dir,
-        dataset_dir=dataset_dir,
-        emb_dir=emb_dir,
-        collection_manifests=collection_manifests,
-    )
+        write_embedding_manifest(
+            handoff_dir=handoff_dir,
+            dataset_dir=dataset_dir,
+            emb_dir=emb_dir,
+            collection_manifests=collection_manifests,
+        )
+    finally:
+        if pool is not None:
+            model.stop_multi_process_pool(pool)
 
 
 if __name__ == "__main__":
