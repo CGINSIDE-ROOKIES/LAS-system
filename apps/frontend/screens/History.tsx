@@ -36,18 +36,10 @@ import { getHistory, HistoryItem } from "@/lib/api-client";
 
 const LIMIT = 20;
 
-function parseArticleLabel(sourceId: string, lawName: string): string {
-  // source_id 형식: law::{law_name}::{article_no}::{chunk}
-  const parts = sourceId.split("::");
-  const articleNo = parts[2] ?? "";
-  if (articleNo) return `${lawName} 제${articleNo}조`;
-  return lawName;
-}
-
 function deriveCitations(item: HistoryItem): string[] {
   return item.sources
     .filter((s) => s.doc_type === "law")
-    .map((s) => parseArticleLabel(s.source_id, s.law_name));
+    .map((s) => s.article_no ? `${s.law_name} ${s.article_no}` : s.law_name);
 }
 
 function deriveRelatedLaws(item: HistoryItem): string[] {

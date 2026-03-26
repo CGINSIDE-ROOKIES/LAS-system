@@ -65,7 +65,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
             .map((doc) => {
               let articleLabel: string;
               if (doc.article_no) {
-                articleLabel = `${doc.law_name} 제${doc.article_no}조`;
+                articleLabel = `${doc.law_name} ${doc.article_no}`;
               } else {
                 const noMatch = (doc.text || doc.snippet).match(/조문번호:\s*(제?\d[\d조의]*)/);
                 if (noMatch) {

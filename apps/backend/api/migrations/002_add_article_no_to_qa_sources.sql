@@ -1,0 +1,1 @@
+ALTER TABLE qa_sources ADD COLUMN IF NOT EXISTS article_no TEXT;

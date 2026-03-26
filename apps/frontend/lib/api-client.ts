@@ -6,6 +6,7 @@ export interface HistorySource {
   source_id: string;
   doc_type: string;
   law_name: string;
+  article_no: string | null;
   rank: number;
   score: number | null;
 }
