@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Popover,
   PopoverContent,
@@ -16,6 +17,17 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
   Search,
@@ -32,7 +44,7 @@ import {
 import { format, addDays } from "date-fns";
 import { ko } from "date-fns/locale";
 import { cn } from "@/lib/utils";
-import { getHistory, HistoryItem } from "@/lib/api-client";
+import { deleteHistoryItem, deleteHistoryItems, getHistory, HistoryItem } from "@/lib/api-client";
 
 const LIMIT = 20;
 
@@ -40,6 +52,12 @@ function deriveCitations(item: HistoryItem): string[] {
   return item.sources
     .filter((s) => s.doc_type === "law")
     .map((s) => s.article_no ? `${s.law_name} ${s.article_no}` : s.law_name);
+}
+
+function extractArticleContent(text: string): string {
+  const match = text.match(/제\d+조/);
+  if (match?.index !== undefined) return text.slice(match.index);
+  return text;
 }
 
 function deriveRelatedLaws(item: HistoryItem): string[] {
@@ -56,6 +74,13 @@ const History = () => {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+
+  // 다중 선택
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   const fetchHistory = useCallback(async (offset: number, append = false) => {
     if (append) setIsLoadingMore(true);
@@ -96,15 +121,75 @@ const History = () => {
     });
   };
 
+  const toggleSources = (id: string) => {
+    setExpandedSources((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === items.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(items.map((i) => i.id)));
+    }
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
   const handleCopy = (answer: string) => {
     navigator.clipboard.writeText(answer);
     toast.success("답변이 클립보드에 복사되었습니다.");
   };
 
-  const handleDelete = (id: string) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
-    setTotal((prev) => prev - 1);
-    toast.success("히스토리가 삭제되었습니다.");
+  const handleDelete = async (id: string) => {
+    setDeletingIds((prev) => new Set(prev).add(id));
+    try {
+      await deleteHistoryItem(id);
+      setItems((prev) => prev.filter((item) => item.id !== id));
+      setTotal((prev) => prev - 1);
+      toast.success("히스토리가 삭제되었습니다.");
+    } catch (e) {
+      console.error("[LAS:HISTORY] 삭제 실패:", e);
+      toast.error("삭제에 실패했습니다. 다시 시도해주세요.");
+    } finally {
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    setIsBulkDeleting(true);
+    const ids = [...selectedIds];
+    try {
+      const { deleted } = await deleteHistoryItems(ids);
+      setItems((prev) => prev.filter((item) => !selectedIds.has(item.id)));
+      setTotal((prev) => prev - deleted);
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      toast.success(`${deleted}개의 히스토리가 삭제되었습니다.`);
+    } catch (e) {
+      console.error("[LAS:HISTORY] 일괄 삭제 실패:", e);
+      toast.error("삭제에 실패했습니다. 다시 시도해주세요.");
+    } finally {
+      setIsBulkDeleting(false);
+    }
   };
 
   const handleFollowUp = (question: string) => {
@@ -121,6 +206,7 @@ const History = () => {
 
   const hasMore = items.length < total;
   const hasFilter = !!(searchQuery || startDate || endDate);
+  const allSelected = items.length > 0 && selectedIds.size === items.length;
 
   return (
     <SidebarProvider>
@@ -134,11 +220,22 @@ const History = () => {
           <div className="flex-1 overflow-auto bg-muted/30 p-6">
             <div className="mx-auto max-w-4xl space-y-6">
               {/* Header */}
-              <div>
-                <h1 className="text-2xl font-semibold text-foreground">히스토리</h1>
-                <p className="text-sm text-muted-foreground">
-                  이전 법률 Q&A 대화 내역을 확인합니다.
-                </p>
+              <div className="flex items-start justify-between">
+                <div>
+                  <h1 className="text-2xl font-semibold text-foreground">히스토리</h1>
+                  <p className="text-sm text-muted-foreground">
+                    이전 법률 Q&A 대화 내역을 확인합니다.
+                  </p>
+                </div>
+                {!isLoading && items.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+                  >
+                    {selectMode ? "취소" : "선택"}
+                  </Button>
+                )}
               </div>
 
               {/* Search & Filters */}
@@ -244,48 +341,71 @@ const History = () => {
                   ) : (
                     items.map((item) => {
                       const isExpanded = expandedItems.has(item.id);
+                      const isSelected = selectedIds.has(item.id);
                       const citations = deriveCitations(item);
                       const relatedLaws = deriveRelatedLaws(item);
 
                       return (
                         <Collapsible
                           key={item.id}
-                          open={isExpanded}
-                          onOpenChange={() => toggleExpand(item.id)}
+                          open={!selectMode && isExpanded}
+                          onOpenChange={() => !selectMode && toggleExpand(item.id)}
                         >
-                          <Card className={cn("transition-all duration-200", isExpanded && "ring-1 ring-primary/20")}>
+                          <Card
+                            className={cn(
+                              "transition-all duration-200",
+                              !selectMode && isExpanded && "ring-1 ring-primary/20",
+                              selectMode && isSelected && "ring-2 ring-primary",
+                              selectMode && "cursor-pointer"
+                            )}
+                            onClick={() => selectMode && toggleSelect(item.id)}
+                          >
                             <CollapsibleTrigger asChild>
-                              <CardContent className="cursor-pointer p-4">
-                                <div className="flex items-start justify-between gap-4">
-                                  <div className="flex-1 space-y-2">
-                                    <p className="font-medium text-foreground">{item.question}</p>
-
-                                    {!isExpanded && (
-                                      <p className="line-clamp-2 text-sm text-muted-foreground">
-                                        {item.answer}
-                                      </p>
-                                    )}
-
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      {citations.slice(0, 2).map((c) => (
-                                        <Badge key={c} variant="outline" className="text-xs">
-                                          {c}
-                                        </Badge>
-                                      ))}
-                                      {citations.length > 2 && (
-                                        <span className="text-xs text-muted-foreground">
-                                          +{citations.length - 2}개
-                                        </span>
-                                      )}
-                                      <span className="text-xs text-muted-foreground">
-                                        {format(new Date(item.created_at), "yyyy.MM.dd HH:mm", { locale: ko })}
-                                      </span>
+                              <CardContent className={cn("p-4", !selectMode && "cursor-pointer")}>
+                                <div className="flex items-start gap-3">
+                                  {/* 체크박스 (선택 모드) */}
+                                  {selectMode && (
+                                    <div className="mt-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                      <Checkbox
+                                        checked={isSelected}
+                                        onCheckedChange={() => toggleSelect(item.id)}
+                                      />
                                     </div>
-                                  </div>
+                                  )}
 
-                                  <Button variant="ghost" size="icon" className="shrink-0">
-                                    {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                  </Button>
+                                  <div className="flex flex-1 items-start justify-between gap-4">
+                                    <div className="flex-1 space-y-2">
+                                      <p className="font-medium text-foreground">{item.question}</p>
+
+                                      {!isExpanded && (
+                                        <p className="line-clamp-2 text-sm text-muted-foreground">
+                                          {item.answer}
+                                        </p>
+                                      )}
+
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        {citations.slice(0, 2).map((c) => (
+                                          <Badge key={c} variant="outline" className="text-xs">
+                                            {c}
+                                          </Badge>
+                                        ))}
+                                        {citations.length > 2 && (
+                                          <span className="text-xs text-muted-foreground">
+                                            +{citations.length - 2}개
+                                          </span>
+                                        )}
+                                        <span className="text-xs text-muted-foreground">
+                                          {format(new Date(item.created_at), "yyyy.MM.dd HH:mm", { locale: ko })}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {!selectMode && (
+                                      <Button variant="ghost" size="icon" className="shrink-0">
+                                        {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                      </Button>
+                                    )}
+                                  </div>
                                 </div>
                               </CardContent>
                             </CollapsibleTrigger>
@@ -301,17 +421,48 @@ const History = () => {
                                   </div>
 
                                   {citations.length > 0 && (
-                                    <div className="space-y-2">
-                                      <h4 className="text-sm font-medium text-foreground">근거 조문</h4>
-                                      <div className="flex flex-wrap gap-2">
-                                        {citations.map((c) => (
-                                          <Badge key={c} variant="outline" className="border-primary/30 bg-primary/5">
-                                            <Scale className="mr-1 h-3 w-3" />
-                                            {c}
-                                          </Badge>
-                                        ))}
-                                      </div>
-                                    </div>
+                                    <Collapsible
+                                      open={expandedSources.has(item.id)}
+                                      onOpenChange={() => toggleSources(item.id)}
+                                    >
+                                      <CollapsibleTrigger asChild>
+                                        <button
+                                          className="flex w-full items-center justify-between text-sm font-medium text-foreground hover:text-primary"
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          <span className="flex items-center gap-1.5">
+                                            <Scale className="h-3.5 w-3.5" />
+                                            근거 조문
+                                            <span className="text-xs font-normal text-muted-foreground">({citations.length})</span>
+                                          </span>
+                                          {expandedSources.has(item.id)
+                                            ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+                                            : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                                          }
+                                        </button>
+                                      </CollapsibleTrigger>
+                                      <CollapsibleContent>
+                                        <div className="mt-2 space-y-2" onClick={(e) => e.stopPropagation()}>
+                                          {item.sources
+                                            .filter((s) => s.doc_type === "law")
+                                            .map((s, idx) => {
+                                              const label = s.article_no ? `${s.law_name} ${s.article_no}` : s.law_name;
+                                              const raw = s.text || s.snippet;
+                                              const content = raw ? extractArticleContent(raw) : null;
+                                              return (
+                                                <div key={`${item.id}-src-${idx}`} className="rounded-md border border-primary/20 bg-primary/5 p-3 text-sm">
+                                                  <p className="mb-1.5 font-medium text-foreground">{label}</p>
+                                                  {content ? (
+                                                    <p className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">{content}</p>
+                                                  ) : (
+                                                    <p className="text-xs text-muted-foreground/50">조문 내용이 저장되지 않았습니다.</p>
+                                                  )}
+                                                </div>
+                                              );
+                                            })}
+                                        </div>
+                                      </CollapsibleContent>
+                                    </Collapsible>
                                   )}
 
                                   {relatedLaws.length > 0 && (
@@ -342,15 +493,41 @@ const History = () => {
                                       <MessageSquarePlus className="mr-1 h-3 w-3" />
                                       후속 질문
                                     </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="ml-auto text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                      onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
-                                    >
-                                      <Trash2 className="mr-1 h-3 w-3" />
-                                      삭제
-                                    </Button>
+                                    <AlertDialog>
+                                      <AlertDialogTrigger asChild>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="ml-auto text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                          disabled={deletingIds.has(item.id)}
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          {deletingIds.has(item.id) ? (
+                                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                          ) : (
+                                            <Trash2 className="mr-1 h-3 w-3" />
+                                          )}
+                                          삭제
+                                        </Button>
+                                      </AlertDialogTrigger>
+                                      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                                        <AlertDialogHeader>
+                                          <AlertDialogTitle>히스토리 삭제</AlertDialogTitle>
+                                          <AlertDialogDescription>
+                                            이 대화 내역을 삭제하시겠습니까? 삭제 후 복구할 수 없습니다.
+                                          </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                          <AlertDialogCancel>취소</AlertDialogCancel>
+                                          <AlertDialogAction
+                                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                            onClick={() => handleDelete(item.id)}
+                                          >
+                                            삭제
+                                          </AlertDialogAction>
+                                        </AlertDialogFooter>
+                                      </AlertDialogContent>
+                                    </AlertDialog>
                                   </div>
                                 </CardContent>
                               </div>
@@ -385,6 +562,63 @@ const History = () => {
           </div>
         </div>
       </div>
+
+      {/* 다중 선택 액션바 */}
+      {selectMode && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+          <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-lg">
+            <div
+              className="flex cursor-pointer items-center gap-2"
+              onClick={toggleSelectAll}
+            >
+              <Checkbox checked={allSelected} />
+              <span className="text-sm text-muted-foreground whitespace-nowrap">
+                {selectedIds.size > 0 ? `${selectedIds.size}개 선택됨` : "전체 선택"}
+              </span>
+            </div>
+
+            <div className="h-4 w-px bg-border" />
+
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={selectedIds.size === 0 || isBulkDeleting}
+                >
+                  {isBulkDeleting ? (
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  ) : (
+                    <Trash2 className="mr-1 h-3 w-3" />
+                  )}
+                  삭제
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>히스토리 삭제</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    선택한 {selectedIds.size}개의 대화 내역을 삭제하시겠습니까? 삭제 후 복구할 수 없습니다.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>취소</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    onClick={handleBulkDelete}
+                  >
+                    삭제
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
+            <Button variant="ghost" size="sm" onClick={exitSelectMode}>
+              취소
+            </Button>
+          </div>
+        </div>
+      )}
     </SidebarProvider>
   );
 };

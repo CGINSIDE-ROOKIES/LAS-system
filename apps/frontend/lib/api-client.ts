@@ -9,6 +9,8 @@ export interface HistorySource {
   article_no: string | null;
   rank: number;
   score: number | null;
+  snippet: string | null;
+  text: string | null;
 }
 
 export interface HistoryItem {
@@ -49,6 +51,23 @@ export async function getHistory(params?: {
 
 export async function getHistoryItem(id: string): Promise<HistoryItem> {
   const res = await fetch(`${getApiBaseUrl()}/api/v1/qa/history/${id}`);
+  if (!res.ok) await throwApiError(res);
+  return res.json();
+}
+
+export async function deleteHistoryItem(id: string): Promise<void> {
+  const res = await fetch(`${getApiBaseUrl()}/api/v1/qa/history/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) await throwApiError(res);
+}
+
+export async function deleteHistoryItems(ids: string[]): Promise<{ deleted: number }> {
+  const res = await fetch(`${getApiBaseUrl()}/api/v1/qa/history`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
   if (!res.ok) await throwApiError(res);
   return res.json();
 }

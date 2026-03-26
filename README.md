@@ -75,13 +75,12 @@ AI 기반 법무지원 시스템 프로젝트입니다.
 
 ### Frontend
 
-> 프로젝트 루트에서 실행합니다.
-
 ```bash
 corepack enable
 corepack prepare pnpm@9.12.3 --activate
+cd apps/frontend
 pnpm install
-pnpm --filter @las/frontend dev
+pnpm dev
 ```
 
 ### Backend
