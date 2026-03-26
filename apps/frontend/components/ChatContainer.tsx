@@ -1,10 +1,37 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { QuestionInput } from "./QuestionInput";
 import { MessageBubble, ChatMessage } from "./MessageBubble";
+import { Button } from "@/components/ui/button";
 import { askStream } from "@/lib/api-client";
 import { ERROR_MESSAGES, sseErrorMessage } from "@/lib/errors";
+import { SquarePen } from "lucide-react";
 
-export function ChatContainer() {
+export type Citation = {
+  article: string;  // e.g. "근로기준법 제17조"
+  content: string;
+  lawName: string;  // e.g. "근로기준법"
+};
+
+interface ChatContainerProps {
+  onCitationsChange?: (citations: Citation[]) => void;
+}
+
+const STORAGE_KEY = "las_chat_messages";
+
+function loadMessages(): ChatMessage[] {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: ChatMessage[] = JSON.parse(raw);
+    return parsed.map((m) =>
+      m.isStreaming ? { ...m, isStreaming: false, content: m.content || "응답이 중단되었습니다." } : m
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -22,14 +49,29 @@ export function ChatContainer() {
   }, [messages, scrollToBottom]);
 
   useEffect(() => {
+    const stored = loadMessages();
+    if (stored.length > 0) setMessages(stored);
+  }, []);
+
+  useEffect(() => {
     return () => { abortRef.current?.abort(); };
   }, []);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+    } catch {
+      // sessionStorage 용량 초과 등 무시
+    }
+  }, [messages]);
 
   const streamAnswer = useCallback(async (userQuestion: string) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     const timeoutId = setTimeout(() => controller.abort("timeout"), 60_000);
+    const t0 = performance.now();
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -42,6 +84,7 @@ export function ChatContainer() {
     setMessages((prev) => [...prev, userMsg, aiMsg]);
     setIsStreaming(true);
 
+    console.log("[LAS:QA] 질문 전송:", userQuestion.slice(0, 80));
     try {
       for await (const event of askStream({ question: userQuestion }, controller.signal)) {
         if (event.type === "chunk") {
@@ -50,6 +93,59 @@ export function ChatContainer() {
           );
           scrollToBottom();
         } else if (event.type === "done") {
+          const parsedCitations: Citation[] = event.retrieved_docs
+            .filter((doc) => doc.doc_type === "law")
+            .map((doc) => {
+              let articleLabel: string;
+              if (doc.article_no) {
+                articleLabel = `${doc.law_name} ${doc.article_no}`;
+              } else {
+                const noMatch = (doc.text || doc.snippet).match(/조문번호:\s*(제?\d[\d조의]*)/);
+                if (noMatch) {
+                  const extracted = noMatch[1];
+                  articleLabel = extracted.startsWith("제")
+                    ? `${doc.law_name} ${extracted}`
+                    : `${doc.law_name} 제${extracted}조`;
+                } else {
+                  articleLabel = doc.law_name;
+                }
+              }
+
+              const raw = doc.text || doc.snippet;
+              let content = raw;
+              const metaIdx = raw.indexOf("조문제목:");
+              if (metaIdx !== -1) {
+                const afterMeta = raw.slice(metaIdx + "조문제목:".length);
+                const contentMatch = afterMeta.match(/제\d/);
+                if (contentMatch?.index !== undefined) {
+                  content = afterMeta.slice(contentMatch.index).trim();
+                }
+              } else {
+                const stripped = raw.replace(/^법령명:[^\n]*조문번호:[^\n]*\s*/i, "").trim();
+                content = stripped;
+              }
+              content = content
+                .replace(/\[\[([\s\S]*?)\]\]/g, (_, inner) =>
+                  inner
+                    .split(/,\s*'/)
+                    .map((s: string) => s.replace(/^'|'$/g, "").trim())
+                    .filter(Boolean)
+                    .join("\n")
+                )
+                .replace(/([\u2460-\u2473\u2474-\u2487①-⑳])\s+\1/g, "$1")
+                .replace(/(\d+\.)\s+\1/g, "$1")
+                .trim();
+
+              if (content.length < 20) return null;
+              return { article: articleLabel, content, lawName: doc.law_name };
+            })
+            .filter((c): c is Citation => c !== null);
+
+          console.log(
+            `[LAS:QA] 스트림 완료: ${((performance.now() - t0) / 1000).toFixed(2)}s | docs=${event.retrieved_docs.length} | law_context_status=${event.law_context_status}`
+          );
+          onCitationsChange?.(parsedCitations);
+
           setMessages((prev) =>
             prev.map((m) =>
               m.id === aiId
@@ -59,65 +155,7 @@ export function ChatContainer() {
                     isStreaming: false,
                     answerData: {
                       summary: m.content,
-                      detail: "",
-                      citations: (event.retrieved_docs
-                        .filter((doc) => doc.doc_type === "law")
-                        .map((doc) => {
-                          // source_id: law::{law_name}::{article_no}::{chunk}
-                          const parts = (doc.source_id || "").split("::");
-                          const sourceArticleNo = parts[2] ?? "";
-                          let articleLabel: string;
-                          if (sourceArticleNo) {
-                            // source_id에 숫자만 있는 경우 (e.g. "9" → "제9조")
-                            articleLabel = `${doc.law_name} 제${sourceArticleNo}조`;
-                          } else {
-                            // 텍스트의 "조문번호:" 필드에서 추출 (e.g. "제13조의4", "제22조")
-                            const noMatch = (doc.text || doc.snippet).match(/조문번호:\s*(제?\d[\d조의]*)/);
-                            if (noMatch) {
-                              const extracted = noMatch[1];
-                              articleLabel = extracted.startsWith("제")
-                                ? `${doc.law_name} ${extracted}`
-                                : `${doc.law_name} 제${extracted}조`;
-                            } else {
-                              articleLabel = doc.law_name;
-                            }
-                          }
-
-                          // text(전체) 또는 snippet에서 메타데이터 헤더 제거
-                          const raw = doc.text || doc.snippet;
-                          let content = raw;
-                          const metaIdx = raw.indexOf("조문제목:");
-                          if (metaIdx !== -1) {
-                            const afterMeta = raw.slice(metaIdx + "조문제목:".length);
-                            const contentMatch = afterMeta.match(/제\d/);
-                            if (contentMatch?.index !== undefined) {
-                              content = afterMeta.slice(contentMatch.index).trim();
-                            }
-                          } else {
-                            // 조문제목 없는 경우: "법령명: X 조문번호: N " 앞부분 제거
-                            const stripped = raw.replace(/^법령명:[^\n]*조문번호:[^\n]*\s*/i, "").trim();
-                            content = stripped;
-                          }
-                          // 적재 시 중복 패턴 제거
-                          content = content
-                            // [['a', 'b', 'c']] 형태의 Python list 직렬화 → 줄바꿈 텍스트로
-                            .replace(/\[\[([\s\S]*?)\]\]/g, (_, inner) =>
-                              inner
-                                .split(/,\s*'/)
-                                .map((s: string) => s.replace(/^'|'$/g, "").trim())
-                                .filter(Boolean)
-                                .join("\n")
-                            )
-                            // ① ①→①, 1. 1.→1.
-                            .replace(/([\u2460-\u2473\u2474-\u2487①-⑳])\s+\1/g, "$1")
-                            .replace(/(\d+\.)\s+\1/g, "$1")
-                            .trim();
-
-                          // 실질 내용 없는 항목(장/절 제목만 있는 경우) 제외
-                          if (content.length < 20) return null;
-
-                          return { article: articleLabel, content };
-                        }).filter((c): c is { article: string; content: string } => c !== null)),
+                      citations: parsedCitations,
                       references: [],
                     },
                   }
@@ -125,6 +163,7 @@ export function ChatContainer() {
             )
           );
         } else if (event.type === "error") {
+          console.error("[LAS:QA] SSE 에러:", event.code, event.error);
           setMessages((prev) =>
             prev.map((m) =>
               m.id === aiId ? { ...m, isStreaming: false, content: sseErrorMessage(event.code) } : m
@@ -136,12 +175,13 @@ export function ChatContainer() {
       const error = err as Error;
       if (error.name === "AbortError" && error.message !== "timeout") return;
 
-      const errorContent =
-        error.message === "timeout"
-          ? ERROR_MESSAGES.TIMEOUT
-          : error.name === "TypeError"
-          ? ERROR_MESSAGES.NETWORK
-          : ERROR_MESSAGES.SERVER;
+      const isTimeout = error.message === "timeout";
+      console.error("[LAS:QA]", isTimeout ? "타임아웃" : "에러:", error.message);
+      const errorContent = isTimeout
+        ? ERROR_MESSAGES.TIMEOUT
+        : error.name === "TypeError"
+        ? ERROR_MESSAGES.NETWORK
+        : ERROR_MESSAGES.SERVER;
 
       setMessages((prev) =>
         prev.map((m) =>
@@ -154,42 +194,79 @@ export function ChatContainer() {
     }
   }, [scrollToBottom]);
 
+  const handleNewChat = useCallback(() => {
+    abortRef.current?.abort();
+    setMessages([]);
+    sessionStorage.removeItem(STORAGE_KEY);
+    onCitationsChange?.([]);
+  }, [onCitationsChange]);
+
   const hasMessages = messages.length > 0;
+
+  if (!hasMessages) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center px-6">
+        <div className="w-full max-w-2xl">
+          {/* Logo / Title */}
+          <div className="mb-8 text-center">
+            {/* Icon with glow ring */}
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mx-auto mb-6 relative w-fit">
+              <div className="absolute inset-0 rounded-2xl bg-primary/20 blur-xl scale-150" />
+              <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/20 shadow-lg">
+                <svg className="h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                </svg>
+              </div>
+            </div>
+
+            {/* Title */}
+            <h1
+              className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/60 bg-clip-text text-transparent"
+              style={{ animationDelay: "120ms" }}
+            >
+              무엇이 궁금하신가요?
+            </h1>
+
+            {/* Subtitle */}
+            <p
+              className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 text-sm text-muted-foreground leading-relaxed"
+              style={{ animationDelay: "220ms" }}
+            >
+              노동법 및 하도급법 관련 질문에 대해
+              <br />
+              근거 조문과 판례를 함께 제공합니다.
+            </p>
+          </div>
+
+          {/* Input */}
+          <div
+            className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both"
+            style={{ animationDelay: "340ms" }}
+          >
+            <QuestionInput onSubmit={streamAnswer} disabled={isStreaming} />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="shrink-0 border-b border-border px-6 py-4">
-        <h1 className="text-lg font-semibold text-foreground">법령 Q&A</h1>
-        <p className="text-sm text-muted-foreground">
-          노동법 및 하도급법 관련 질문에 대해 근거 기반 답변을 제공합니다.
-        </p>
+      <div className="flex h-10 shrink-0 items-center justify-end border-b border-border px-4">
+        <Button variant="ghost" size="sm" onClick={handleNewChat} disabled={isStreaming}>
+          <SquarePen className="mr-1.5 h-3.5 w-3.5" />
+          새 대화
+        </Button>
       </div>
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-6 py-4">
-        {!hasMessages && (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center">
-              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-                <svg className="h-6 w-6 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-                </svg>
-              </div>
-              <h3 className="text-sm font-medium text-foreground">법률 질문을 입력해주세요</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                노동법, 하도급법 관련 질문에 대해 근거 조문과 함께 답변합니다.
-              </p>
-            </div>
-          </div>
-        )}
-        {hasMessages && (
-          <div className="space-y-4">
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
-            ))}
-          </div>
-        )}
+        <div className="space-y-4">
+          {messages.map((msg) => (
+            <MessageBubble key={msg.id} message={msg} />
+          ))}
+        </div>
       </div>
 
       {/* Input */}

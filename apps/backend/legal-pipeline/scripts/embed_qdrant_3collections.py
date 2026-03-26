@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Iterable, Iterator, Sequence
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.export.qdrant_point_id import (
+    build_qdrant_point_id,
+    canonical_id_from_row,
+)
 
 
 MODEL_NAME = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
@@ -20,6 +29,84 @@ CASE_DOC_TYPES = {"prec", "detc", "decc", "expc"}
 COLLECTIONS = ("law_article", "legal_case", "legal_relation")
 APPENDIX_VECTOR_PLACEHOLDER = "[NO_APPENDIX_LINKED]"
 LAW_ARTICLE_VECTOR_NAMES = ("body", "appendix")
+RELATION_MODEL_SEARCH_PROFILES = {
+    "law_to_case": {
+        "default_score_multiplier": 1.0,
+        "priority": "primary",
+        "retrieval_role": "expansion",
+    },
+    "law_to_law": {
+        "default_score_multiplier": 0.95,
+        "priority": "primary",
+        "retrieval_role": "linkage",
+    },
+    "case_to_case": {
+        "default_score_multiplier": 0.75,
+        "priority": "secondary",
+        "retrieval_role": "trace",
+    },
+    "unknown": {
+        "default_score_multiplier": 0.85,
+        "priority": "secondary",
+        "retrieval_role": "fallback",
+    },
+}
+QUERY_RETRIEVAL_PROFILES = {
+    "law_lookup": {
+        "description": "법령명/조문 중심 질의",
+        "collections": [
+            {"name": "law_article", "enabled": True, "priority": 1, "score_multiplier": 1.0},
+            {"name": "legal_case", "enabled": True, "priority": 2, "score_multiplier": 0.9},
+            {
+                "name": "legal_relation",
+                "enabled": True,
+                "priority": 3,
+                "score_multiplier": 0.85,
+                "relation_model_weights": {
+                    "law_to_case": 1.0,
+                    "law_to_law": 0.95,
+                    "case_to_case": 0.6,
+                },
+            },
+        ],
+    },
+    "case_lookup": {
+        "description": "사건번호/판례 중심 질의",
+        "collections": [
+            {"name": "legal_case", "enabled": True, "priority": 1, "score_multiplier": 1.0},
+            {
+                "name": "legal_relation",
+                "enabled": True,
+                "priority": 2,
+                "score_multiplier": 0.9,
+                "relation_model_weights": {
+                    "law_to_case": 0.8,
+                    "law_to_law": 0.7,
+                    "case_to_case": 1.0,
+                },
+            },
+            {"name": "law_article", "enabled": True, "priority": 3, "score_multiplier": 0.75},
+        ],
+    },
+    "citation_trace": {
+        "description": "판례 인용/계보 추적 질의",
+        "collections": [
+            {
+                "name": "legal_relation",
+                "enabled": True,
+                "priority": 1,
+                "score_multiplier": 1.0,
+                "relation_model_weights": {
+                    "law_to_case": 0.7,
+                    "law_to_law": 0.5,
+                    "case_to_case": 1.0,
+                },
+            },
+            {"name": "legal_case", "enabled": True, "priority": 2, "score_multiplier": 0.95},
+            {"name": "law_article", "enabled": False, "priority": 3, "score_multiplier": 0.0},
+        ],
+    },
+}
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -97,51 +184,25 @@ def _iter_collection_rows(dataset_dir: Path, collection_name: str) -> Iterator[d
 
 
 def _canonical_id_from_row(row: dict) -> str:
-    value = row.get("canonical_id") or row.get("canonical_case_id") or row.get("id")
-    if value in (None, ""):
-        raise ValueError("row.id or canonical_id is required")
-    return str(value)
-
-
-def _point_id_context_digest(row: dict) -> str:
-    basis = {
-        "root_law_name": row.get("root_law_name"),
-        "related_law_name": row.get("related_law_name"),
-        "related_law_names": row.get("related_law_names"),
-        "relation_model": row.get("relation_model"),
-        "source_law_name": row.get("source_law_name"),
-        "source_canonical_case_id": row.get("source_canonical_case_id"),
-        "target_canonical_case_id": row.get("target_canonical_case_id"),
-        "referenced_case_number": row.get("referenced_case_number"),
-        "source_group": row.get("source_group"),
-        "source_file_path": row.get("source_file_path"),
-        "chunk_index": row.get("chunk_index"),
-        "doc_id": row.get("doc_id"),
-        "doc_number": row.get("doc_number"),
-        "title": row.get("title"),
-        "target": row.get("target"),
-    }
-    raw = json.dumps(basis, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.blake2b(raw.encode("utf-8"), digest_size=8).hexdigest()
+    return canonical_id_from_row(row)
 
 
 def _build_point_id(row: dict, duplicate_canonical_ids: set[str]) -> str:
-    canonical_id = _canonical_id_from_row(row)
-    if canonical_id not in duplicate_canonical_ids:
-        return canonical_id
-    digest = _point_id_context_digest(row)
-    return f"{canonical_id}::ctx::{digest}"
+    return build_qdrant_point_id(row, duplicate_canonical_ids)
 
 
 def _scan_collection(dataset_dir: Path, collection_name: str) -> dict:
     canonical_id_counter: Counter[str] = Counter()
     doc_type_counter: Counter[str] = Counter()
+    relation_model_counter: Counter[str] = Counter()
     row_count = 0
     text_row_count = 0
 
     for row in _iter_collection_rows(dataset_dir, collection_name):
         row_count += 1
         doc_type_counter[str(row.get("doc_type") or "")] += 1
+        if collection_name == "legal_relation":
+            relation_model_counter[str(row.get("relation_model") or "unknown")] += 1
         text = str(row.get("text") or "").strip()
         if collection_name == "law_article":
             appendix_text = str(row.get("appendix_vector_text") or APPENDIX_VECTOR_PLACEHOLDER).strip()
@@ -159,12 +220,19 @@ def _scan_collection(dataset_dir: Path, collection_name: str) -> dict:
         "canonical_id_counter": canonical_id_counter,
         "duplicate_canonical_ids": duplicate_canonical_ids,
         "doc_type_counter": doc_type_counter,
+        "relation_model_counter": relation_model_counter,
     }
+
+
+def _relation_model_profile(row: dict) -> dict:
+    relation_model = str(row.get("relation_model") or "unknown").strip() or "unknown"
+    return dict(RELATION_MODEL_SEARCH_PROFILES.get(relation_model, RELATION_MODEL_SEARCH_PROFILES["unknown"]))
 
 
 def _build_meta(collection_name: str, row: dict, point_id: str, text: str) -> dict:
     doc_type = row.get("doc_type")
     canonical_id = _canonical_id_from_row(row)
+    relation_profile = _relation_model_profile(row) if collection_name == "legal_relation" else {}
     meta = {
         "id": row.get("id"),
         "canonical_id": canonical_id,
@@ -200,13 +268,7 @@ def _build_meta(collection_name: str, row: dict, point_id: str, text: str) -> di
         "doc_number": row.get("doc_number"),
         "source_canonical_case_id": row.get("source_canonical_case_id"),
         "target_canonical_case_id": row.get("target_canonical_case_id"),
-        "source_target": row.get("source_target"),
-        "target_target": row.get("target_target"),
         "referenced_case_number": row.get("referenced_case_number"),
-        "target_title": row.get("target_title"),
-        "target_doc_number": row.get("target_doc_number"),
-        "target_doc_type_label": row.get("target_doc_type_label"),
-        "resolution_status": row.get("resolution_status"),
         "doc_kind": row.get("doc_kind"),
         "detail_link": row.get("detail_link"),
         "target": row.get("target"),
@@ -221,6 +283,13 @@ def _build_meta(collection_name: str, row: dict, point_id: str, text: str) -> di
         "source_file_path": row.get("source_file_path"),
         "chunk_index": row.get("chunk_index"),
         "text_len": len(text),
+        "search_text": row.get("search_text"),
+        "display_text": row.get("display_text"),
+        "updated_at": row.get("updated_at"),
+        "delta_batch_id": row.get("delta_batch_id"),
+        "default_score_multiplier": relation_profile.get("default_score_multiplier"),
+        "relation_model_priority": relation_profile.get("priority"),
+        "retrieval_role": relation_profile.get("retrieval_role"),
     }
 
     if collection_name == "law_article":
@@ -311,6 +380,39 @@ def _build_simple_import_rows(
         row["normalized"] = NORMALIZE_EMBEDDINGS
         rows.append(row)
     return rows
+
+
+def _build_retrieval_policy(
+    collection_manifests: Sequence[dict],
+) -> dict:
+    enabled_collections = {
+        str(item.get("collection_name") or "")
+        for item in collection_manifests
+        if not bool(item.get("skipped"))
+    }
+    query_profiles: dict[str, dict] = {}
+
+    for profile_name, profile in QUERY_RETRIEVAL_PROFILES.items():
+        configured_collections: list[dict] = []
+        for collection in profile["collections"]:
+            collection_entry = dict(collection)
+            collection_entry["available"] = collection_entry["name"] in enabled_collections
+            configured_collections.append(collection_entry)
+
+        query_profiles[profile_name] = {
+            "description": profile["description"],
+            "collections": configured_collections,
+        }
+
+    return {
+        "default_query_profile": "law_lookup",
+        "notes": [
+            "relation rows are supporting evidence and should not outrank primary corpus hits by default",
+            "case_to_case relations are intended for citation tracing and case-number-driven queries",
+        ],
+        "relation_model_profiles": RELATION_MODEL_SEARCH_PROFILES,
+        "query_profiles": query_profiles,
+    }
 
 
 def embed_law_article(
@@ -470,6 +572,9 @@ def embed_simple_collection(
         "source_jsonl_path": str(source_path),
         "import_jsonl_path": str(import_path),
     }
+    if collection_name == "legal_relation":
+        manifest["relation_model_counts"] = dict(stats["relation_model_counter"])
+        manifest["relation_model_profiles"] = RELATION_MODEL_SEARCH_PROFILES
     with manifest_path.open("w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
     return manifest
@@ -492,6 +597,7 @@ def write_embedding_manifest(
         "dataset_dir": str(dataset_dir),
         "emb_dir": str(emb_dir),
         "collections": list(collection_manifests),
+        "retrieval_policy": _build_retrieval_policy(collection_manifests),
     }
     with manifest_path.open("w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)

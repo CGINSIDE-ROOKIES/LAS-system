@@ -1,0 +1,3 @@
+ALTER TABLE qa_sources
+  ADD COLUMN IF NOT EXISTS snippet TEXT,
+  ADD COLUMN IF NOT EXISTS text    TEXT;

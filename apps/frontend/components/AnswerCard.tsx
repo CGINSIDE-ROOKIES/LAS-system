@@ -3,7 +3,6 @@ import { FileText, BookOpen, ExternalLink } from "lucide-react";
 interface AnswerCardProps {
   data: {
     summary: string;
-    detail?: string;
     citations: { article: string; content: string }[];
     references: string[];
   };
@@ -20,14 +19,6 @@ export function AnswerCard({ data }: AnswerCardProps) {
         </div>
         <p className="text-sm font-medium leading-relaxed text-foreground">{data.summary}</p>
       </div>
-
-      {/* 상세 설명 */}
-      {data.detail && (
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">상세 설명</div>
-          <p className="text-sm leading-relaxed text-foreground">{data.detail}</p>
-        </div>
-      )}
 
       {/* 근거 조문 */}
       <div className="rounded-lg border-2 border-legal-citation-border bg-legal-citation p-4">

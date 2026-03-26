@@ -34,6 +34,7 @@ def _normalize_bm25_results(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "source_id": src.get("id", ""),
                 "doc_type": src.get("doc_type", ""),
                 "law_name": src.get("law_name", ""),
+                "article_no": src.get("article_no_display", ""),
                 "text": text,
                 "snippet": text.replace("\n", " ")[:SNIPPET_MAX_LEN],
             }
