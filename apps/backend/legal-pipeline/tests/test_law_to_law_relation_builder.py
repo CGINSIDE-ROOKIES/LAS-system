@@ -66,3 +66,58 @@ def test_build_law_to_law_relation_records_extracts_explicit_law_and_article_ref
     assert decree_row["relation_model"] == "law_to_law"
     assert decree_row["article_keys"] == ["11"]
     assert decree_row["article_no_displays"] == ["제11조"]
+
+
+def test_build_law_to_law_relation_records_extracts_same_law_and_external_refs(tmp_path):
+    normalized_dir = tmp_path / "normalized" / "01_current_law" / "근로기준법"
+
+    _write_json(
+        normalized_dir / "근로기준법__parsed_law.json",
+        {
+            "law_name": "근로기준법",
+            "law_id": "001872",
+            "mst": "269390",
+            "ef_yd": "20250223",
+            "kind_name": "법률",
+            "classified_level": "법",
+            "articles": [
+                {
+                    "article_key": "3",
+                    "article_no": "제3조",
+                    "article_no_display": "제3조",
+                    "article_title": "정의",
+                    "article_title_raw": "정의",
+                    "article_text": "정의를 정한다.",
+                    "article_text_raw": "정의를 정한다.",
+                },
+                {
+                    "article_key": "4",
+                    "article_no": "제4조",
+                    "article_no_display": "제4조",
+                    "article_title": "근로조건",
+                    "article_title_raw": "근로조건",
+                    "article_text": "전조 및 민법 제750조를 따른다.",
+                    "article_text_raw": "전조 및 민법 제750조를 따른다.",
+                },
+            ],
+        },
+    )
+
+    rows = build_law_to_law_relation_records(tmp_path / "normalized" / "01_current_law")
+    rows_by_target = {row["law_name"]: row for row in rows}
+
+    same_law_row = rows_by_target["근로기준법"]
+    assert same_law_row["source_law_uid"] == same_law_row["law_uid"]
+    assert "same_law_reference" in same_law_row["relation_types"]
+    assert "relative_reference" in same_law_row["relation_types"]
+    assert same_law_row["article_keys"] == ["3"]
+    assert same_law_row["source_article_key"] == "4"
+    assert same_law_row["resolution_status"] == "resolved"
+    assert same_law_row["reference_texts"] == ["전조"]
+
+    external_row = rows_by_target["민법"]
+    assert external_row["law_uid"] is None
+    assert external_row["relation_type"] == "related_law"
+    assert "external_reference" in external_row["relation_types"]
+    assert external_row["article_keys"] == ["750"]
+    assert external_row["resolution_status"] == "unresolved_external"

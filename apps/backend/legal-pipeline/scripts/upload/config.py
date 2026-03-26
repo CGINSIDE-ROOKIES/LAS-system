@@ -184,6 +184,9 @@ COLLECTION_KEYWORD_INDEX_FIELDS = {
         "relation_types",
         "relation_model_priority",
         "retrieval_role",
+        "source_article_key",
+        "source_article_no_display",
+        "resolution_status",
         "source_canonical_case_id",
         "target_canonical_case_id",
         "referenced_case_number",
@@ -193,13 +196,13 @@ COLLECTION_KEYWORD_INDEX_FIELDS = {
 COLLECTION_INTEGER_INDEX_FIELDS = {
     "law_article": COMMON_INTEGER_INDEX_FIELDS + ["related_appendix_count"],
     "legal_case": COMMON_INTEGER_INDEX_FIELDS,
-    "legal_relation": COMMON_INTEGER_INDEX_FIELDS,
+    "legal_relation": COMMON_INTEGER_INDEX_FIELDS + ["target_article_resolution_count"],
 }
 
 COLLECTION_FLOAT_INDEX_FIELDS = {
     "law_article": [],
     "legal_case": [],
-    "legal_relation": COMMON_FLOAT_INDEX_FIELDS,
+    "legal_relation": COMMON_FLOAT_INDEX_FIELDS + ["resolution_confidence"],
 }
 
 DROP_FIELDS_ON_EXTRACT = {
