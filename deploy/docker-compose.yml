@@ -30,8 +30,8 @@ services:
 
   backend-doc-pipeline:
     build:
-      context: apps/backend
-      dockerfile: doc-processor/Dockerfile
+      context: apps/backend/doc-processor
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       - MIDM_LLM_URL=${MIDM_LLM_URL:-}
