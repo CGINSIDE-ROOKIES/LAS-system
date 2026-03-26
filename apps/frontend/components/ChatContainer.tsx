@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { QuestionInput } from "./QuestionInput";
 import { MessageBubble, ChatMessage } from "./MessageBubble";
+import { Button } from "@/components/ui/button";
 import { askStream } from "@/lib/api-client";
 import { ERROR_MESSAGES, sseErrorMessage } from "@/lib/errors";
+import { SquarePen } from "lucide-react";
 
 export type Citation = {
   article: string;  // e.g. "근로기준법 제17조"
@@ -12,6 +14,21 @@ export type Citation = {
 
 interface ChatContainerProps {
   onCitationsChange?: (citations: Citation[]) => void;
+}
+
+const STORAGE_KEY = "las_chat_messages";
+
+function loadMessages(): ChatMessage[] {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: ChatMessage[] = JSON.parse(raw);
+    return parsed.map((m) =>
+      m.isStreaming ? { ...m, isStreaming: false, content: m.content || "응답이 중단되었습니다." } : m
+    );
+  } catch {
+    return [];
+  }
 }
 
 export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
@@ -32,8 +49,22 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   }, [messages, scrollToBottom]);
 
   useEffect(() => {
+    const stored = loadMessages();
+    if (stored.length > 0) setMessages(stored);
+  }, []);
+
+  useEffect(() => {
     return () => { abortRef.current?.abort(); };
   }, []);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+    } catch {
+      // sessionStorage 용량 초과 등 무시
+    }
+  }, [messages]);
 
   const streamAnswer = useCallback(async (userQuestion: string) => {
     abortRef.current?.abort();
@@ -163,6 +194,13 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
     }
   }, [scrollToBottom]);
 
+  const handleNewChat = useCallback(() => {
+    abortRef.current?.abort();
+    setMessages([]);
+    sessionStorage.removeItem(STORAGE_KEY);
+    onCitationsChange?.([]);
+  }, [onCitationsChange]);
+
   const hasMessages = messages.length > 0;
 
   if (!hasMessages) {
@@ -214,6 +252,14 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
 
   return (
     <div className="flex h-full flex-col">
+      {/* Header */}
+      <div className="flex h-10 shrink-0 items-center justify-end border-b border-border px-4">
+        <Button variant="ghost" size="sm" onClick={handleNewChat} disabled={isStreaming}>
+          <SquarePen className="mr-1.5 h-3.5 w-3.5" />
+          새 대화
+        </Button>
+      </div>
+
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-6 py-4">
         <div className="space-y-4">
