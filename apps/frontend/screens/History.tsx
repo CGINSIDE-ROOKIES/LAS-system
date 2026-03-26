@@ -72,7 +72,8 @@ const History = () => {
       });
       setItems((prev) => (append ? [...prev, ...result.items] : result.items));
       setTotal(result.total);
-    } catch {
+    } catch (e) {
+      console.error("[LAS:HISTORY] 조회 실패:", e);
       setError("히스토리를 불러오는 데 실패했습니다.");
     } finally {
       setIsLoading(false);

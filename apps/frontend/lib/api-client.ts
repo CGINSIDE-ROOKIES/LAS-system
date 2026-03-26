@@ -102,6 +102,7 @@ export type SseEvent = SseChunkEvent | SseDoneEvent | SseErrorEvent;
 
 async function throwApiError(res: Response): Promise<never> {
   const body = await res.json().catch(() => ({ code: "INTERNAL_ERROR", error: res.statusText }));
+  console.error(`[LAS:API] ${res.status} ${res.url} — ${body.code}: ${body.error}`);
   throw new ApiError(body.code ?? "INTERNAL_ERROR", body.error ?? res.statusText, res.status);
 }
 

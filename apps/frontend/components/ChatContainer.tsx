@@ -40,6 +40,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
     const controller = new AbortController();
     abortRef.current = controller;
     const timeoutId = setTimeout(() => controller.abort("timeout"), 60_000);
+    const t0 = performance.now();
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -52,6 +53,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
     setMessages((prev) => [...prev, userMsg, aiMsg]);
     setIsStreaming(true);
 
+    console.log("[LAS:QA] 질문 전송:", userQuestion.slice(0, 80));
     try {
       for await (const event of askStream({ question: userQuestion }, controller.signal)) {
         if (event.type === "chunk") {
@@ -108,6 +110,9 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
             })
             .filter((c): c is Citation => c !== null);
 
+          console.log(
+            `[LAS:QA] 스트림 완료: ${((performance.now() - t0) / 1000).toFixed(2)}s | docs=${event.retrieved_docs.length} | law_context_status=${event.law_context_status}`
+          );
           onCitationsChange?.(parsedCitations);
 
           setMessages((prev) =>
@@ -127,6 +132,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
             )
           );
         } else if (event.type === "error") {
+          console.error("[LAS:QA] SSE 에러:", event.code, event.error);
           setMessages((prev) =>
             prev.map((m) =>
               m.id === aiId ? { ...m, isStreaming: false, content: sseErrorMessage(event.code) } : m
@@ -138,12 +144,13 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
       const error = err as Error;
       if (error.name === "AbortError" && error.message !== "timeout") return;
 
-      const errorContent =
-        error.message === "timeout"
-          ? ERROR_MESSAGES.TIMEOUT
-          : error.name === "TypeError"
-          ? ERROR_MESSAGES.NETWORK
-          : ERROR_MESSAGES.SERVER;
+      const isTimeout = error.message === "timeout";
+      console.error("[LAS:QA]", isTimeout ? "타임아웃" : "에러:", error.message);
+      const errorContent = isTimeout
+        ? ERROR_MESSAGES.TIMEOUT
+        : error.name === "TypeError"
+        ? ERROR_MESSAGES.NETWORK
+        : ERROR_MESSAGES.SERVER;
 
       setMessages((prev) =>
         prev.map((m) =>
