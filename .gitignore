@@ -226,6 +226,7 @@ apps/backend/doc-processor/tests/python-hwpx-docs/
 # legal-pipeline
 apps/backend/legal-pipeline/data/
 apps/backend/legal-pipeline/.local/
+apps/backend/legal-pipeline/CODEX.md
 
 # rag
 apps/backend/rag/docs/
