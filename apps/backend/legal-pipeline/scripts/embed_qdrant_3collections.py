@@ -26,7 +26,7 @@ MODEL_NAME = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 EMBEDDING_PASSAGE_PREFIX = ""
 NORMALIZE_EMBEDDINGS = True
 EMBEDDING_DTYPE = "float32"
-DEFAULT_BATCH_SIZE = 256
+DEFAULT_BATCH_SIZE = 128
 CASE_DOC_TYPES = {"prec", "detc", "decc", "expc"}
 COLLECTIONS = ("law_article", "legal_case", "legal_relation")
 APPENDIX_VECTOR_PLACEHOLDER = "[NO_APPENDIX_LINKED]"
@@ -358,11 +358,15 @@ def _encode(
 ) -> np.ndarray:
     """Encode texts using the appropriate backend (multi-process CPU or MPS)."""
     if pool is not None:
-        embeddings = SentenceTransformer.encode_multi_process(texts, pool, batch_size=batch_size)
-        if NORMALIZE_EMBEDDINGS:
-            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-            embeddings = embeddings / np.where(norms == 0, 1.0, norms)
-        return embeddings.astype(np.float32)
+        return model.encode(
+            texts,
+            batch_size=batch_size,
+            show_progress_bar=True,
+            convert_to_numpy=True,
+            normalize_embeddings=NORMALIZE_EMBEDDINGS,
+            precision=EMBEDDING_DTYPE,
+            pool=pool,
+        ).astype(np.float32)
     return model.encode(
         texts,
         batch_size=batch_size,
