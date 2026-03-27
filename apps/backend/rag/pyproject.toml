@@ -11,4 +11,4 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*"]
+include = ["rag_pipeline*"]
