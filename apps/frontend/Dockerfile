@@ -40,7 +40,9 @@ RUN pnpm install --frozen-lockfile
 FROM node:20-alpine AS builder
 
 ARG NEXT_PUBLIC_API_URL
+ARG BACKEND_INTERNAL_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV BACKEND_INTERNAL_URL=$BACKEND_INTERNAL_URL
 
 WORKDIR /app
 
@@ -58,6 +60,10 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 ENV NODE_ENV=production
+ARG NEXT_PUBLIC_API_URL
+ARG BACKEND_INTERNAL_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV BACKEND_INTERNAL_URL=$BACKEND_INTERNAL_URL
 
 # standalone mirrors /app/ — contains node_modules/, apps/frontend/server.js, etc.
 COPY --from=builder /app/apps/frontend/.next/standalone ./
