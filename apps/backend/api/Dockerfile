@@ -6,7 +6,7 @@ WORKDIR /app
 
 # Copy rag (local editable dependency) first
 COPY rag/pyproject.toml rag/pyproject.toml
-COPY rag/src/ rag/src/
+COPY rag/rag_pipeline/ rag/rag_pipeline/
 
 # Copy api project
 COPY api/pyproject.toml api/uv.lock api/
