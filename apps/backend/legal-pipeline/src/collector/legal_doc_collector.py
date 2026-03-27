@@ -9,7 +9,7 @@ from src.common.io_utils import (
     _write_json,
     _write_jsonl,
 )
-from src.common.law_meta import build_law_uid, normalize_identifier_token
+from src.common.law_meta import build_law_uid, build_strict_law_uid, normalize_identifier_token
 from src.common.url_utils import sanitize_detail_link
 from src.common.payload_utils import (
     _ensure_success_payload,
@@ -437,7 +437,7 @@ def build_candidate_hit(
     doc_number = ref.get("doc_number")
     canonical_case_id = build_canonical_case_id(target, doc_id, doc_number, title)
     source_law_uid = build_law_uid(law_entry.get("law_id"), law_entry.get("mst"), source_law_name)
-    root_law_uid = build_law_uid(None, None, root_law_name)
+    root_law_uid = source_law_uid if source_law_name == root_law_name else build_strict_law_uid(None, None)
 
     return {
         "id": _build_candidate_hit_id(root_law_name, source_law_name, target, ref, hit_rank),

@@ -550,6 +550,22 @@ def parse_article_unit(article_unit: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _is_effective_article_entry(article: dict[str, Any]) -> bool:
+    article_key = str(article.get("article_key") or "").strip()
+    if not article_key:
+        return False
+
+    title = str(article.get("article_title_raw") or article.get("article_title") or "").strip()
+    if title:
+        return True
+
+    article_text = str(article.get("article_text_raw") or article.get("article_text") or "").strip()
+    if not article_text:
+        return False
+
+    return bool(re.match(r"^제\s*\d+\s*조(?:\s*의\s*\d+)?", article_text))
+
+
 def _extract_supplementary_units(law_root: dict[str, Any]) -> list[dict[str, Any]]:
     container = law_root.get("부칙")
     units = _extract_container_units(
@@ -730,7 +746,7 @@ def parse_law_body(
     law_root = get_law_root(payload)
     article_units = get_article_units(law_root)
 
-    articles = [parse_article_unit(unit) for unit in article_units]
+    articles = [article for article in (parse_article_unit(unit) for unit in article_units) if _is_effective_article_entry(article)]
     supplementary = parse_supplementary(law_root)
     appendices, excluded_appendices = parse_appendices(
         law_root,
