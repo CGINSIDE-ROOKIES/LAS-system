@@ -62,7 +62,7 @@ def _normalize_existing_relation_row(row: dict[str, Any]) -> dict[str, Any]:
     normalized["law_uid"] = normalized.get("law_uid") or build_law_uid(None, None, law_name)
     normalized["source_law_uid"] = normalized.get("source_law_uid") or build_law_uid(None, None, source_law_name)
     normalized["root_law_name"] = root_law_name
-    normalized["root_law_uid"] = normalized.get("root_law_uid") or build_law_uid(None, None, root_law_name)
+    normalized["root_law_uid"] = normalized.get("root_law_uid") or None
     normalized["detail_link"] = sanitize_detail_link(normalized.get("detail_link"))
     normalized["evidence_preview"] = sanitize_inline_urls(normalized.get("evidence_preview"))
     normalized["display_text"] = sanitize_inline_urls(normalized.get("display_text"))
@@ -183,6 +183,16 @@ def build_root_relation_payloads(
         if str(row.get("canonical_case_id") or row.get("canonical_id") or row.get("id") or "").strip()
     }
 
+    root_law_uid = next(
+        (
+            str(row.get("source_law_uid") or "").strip()
+            for row in candidate_hits
+            if str(row.get("source_law_name") or "").strip() == root_law_name
+            and str(row.get("source_law_uid") or "").strip()
+        ),
+        None,
+    ) or None
+
     relation_rows: list[dict[str, Any]] = []
     hits_by_case_and_law: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
 
@@ -227,7 +237,6 @@ def build_root_relation_payloads(
 
         relation_types = list(dict.fromkeys(relation_types))
         source_law_uid = str(hits[0].get("source_law_uid") or build_law_uid(None, None, law_name))
-        root_law_uid = str(hits[0].get("root_law_uid") or build_law_uid(None, None, root_law_name))
         preview_anchor = law_name if law_name in matched_law_names else (referenced_case_numbers[0] if referenced_case_numbers else None)
         evidence_preview = build_evidence_preview(body_text, law_name=law_name, anchor=preview_anchor)
         article_keys = [item["article_key"] for item in article_refs]
