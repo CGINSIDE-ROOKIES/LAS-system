@@ -1,20 +1,33 @@
+# syntax=docker/dockerfile:1.7
+#
 # Build context: apps/backend/ (one level up, needs both api/ and rag/)
 # ── Stage 1: build ───────────────────────────────────
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
 WORKDIR /app
 
-# Copy rag (local editable dependency) first
+# Copy dependency metadata first so app source changes do not invalidate the
+# heavy external dependency install layer.
 COPY rag/pyproject.toml rag/pyproject.toml
-COPY rag/rag_pipeline/ rag/rag_pipeline/
-
-# Copy api project
 COPY api/pyproject.toml api/uv.lock api/
-COPY api/main.py api/main.py
-COPY api/src/ api/src/
 
 WORKDIR /app/api
-RUN uv sync --frozen --no-dev
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-local
+
+# Install the local editable dependency after the shared third-party packages
+# have already been cached.
+WORKDIR /app
+COPY rag/rag_pipeline/ rag/rag_pipeline/
+
+WORKDIR /app/api
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
+
+# Copy the API source last so plain code changes reuse both dependency layers.
+WORKDIR /app
+COPY api/main.py api/main.py
+COPY api/src/ api/src/
 
 # ── Stage 2: runtime ────────────────────────────────
 FROM python:3.12-slim-bookworm
