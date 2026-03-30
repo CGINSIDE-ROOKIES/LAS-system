@@ -62,6 +62,7 @@ def search_qdrant(
     embedding_provider: str = "sentence_transformers",
     embedding_api_key: str | None = None,
     embedding_api_base_url: str = DEFAULT_OPENAI_API_BASE_URL,
+    embedding_dimensions: int | None = None,
     api_key: str | None = None,
     doc_types: list[str] | None = None,
     law_names: list[str] | None = None,
@@ -80,6 +81,7 @@ def search_qdrant(
         provider=embedding_provider,
         api_key=embedding_api_key,
         api_base_url=embedding_api_base_url,
+        dimensions=embedding_dimensions,
     )
 
     headers = {"Content-Type": "application/json"}

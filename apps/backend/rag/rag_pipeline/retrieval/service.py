@@ -25,6 +25,7 @@ class RetrievalConfig:
     embedding_provider: str = "sentence_transformers"
     embedding_api_key: str | None = None
     embedding_api_base_url: str = DEFAULT_OPENAI_API_BASE_URL
+    embedding_dimensions: int | None = None
 
     # 파이프라인 파라미터
     top_k: int = 5

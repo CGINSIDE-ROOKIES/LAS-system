@@ -84,9 +84,12 @@ def _embed_query_openai(
     model_name: str,
     api_key: str,
     api_base_url: str,
+    dimensions: int | None = None,
 ) -> list[float]:
     """OpenAI Embeddings API를 호출해 벡터를 반환한다."""
-    payload = {"model": model_name, "input": query_text}
+    payload: dict[str, Any] = {"model": model_name, "input": query_text}
+    if dimensions:
+        payload["dimensions"] = dimensions
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
@@ -104,6 +107,7 @@ def embed_query(
     provider: str = "sentence_transformers",
     api_key: str | None = None,
     api_base_url: str = DEFAULT_OPENAI_API_BASE_URL,
+    dimensions: int | None = None,
 ) -> list[float]:
     """텍스트를 임베딩 벡터로 변환한다.
 
@@ -127,7 +131,7 @@ def embed_query(
     if provider == "openai":
         if not api_key:
             raise RetrievalError("OpenAI 임베딩 사용 시 api_key가 필요합니다.")
-        return _embed_query_openai(query_text, model_name, api_key, api_base_url)
+        return _embed_query_openai(query_text, model_name, api_key, api_base_url, dimensions)
 
     # sentence_transformers
     try:

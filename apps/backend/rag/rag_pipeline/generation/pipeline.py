@@ -135,6 +135,7 @@ class RagPipeline:
                     embedding_provider=os.getenv("EMBEDDING_PROVIDER", "sentence_transformers"),
                     embedding_api_key=os.getenv("OPENAI_API_KEY") or None,
                     embedding_api_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+                    embedding_dimensions=int(d) if (d := os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "").strip()) else None,
                 ),
                 generation=GenerationConfig.from_env(),
             )
@@ -166,6 +167,7 @@ class RagPipeline:
                 embedding_provider=rcfg.embedding_provider,
                 embedding_api_key=rcfg.embedding_api_key,
                 embedding_api_base_url=rcfg.embedding_api_base_url,
+                embedding_dimensions=rcfg.embedding_dimensions,
                 api_key=rcfg.qdrant_api_key,
                 doc_types=doc_types,
                 law_names=law_names,
