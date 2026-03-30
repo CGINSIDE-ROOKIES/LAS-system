@@ -53,6 +53,29 @@ def _looks_like_law_name(text: str) -> bool:
     return candidate.endswith(("법", "법률", "시행령", "대통령령", "령", "시행규칙", "규칙", "부령", "조례", "규정", "훈령", "예규", "고시"))
 
 
+def _is_noisy_explicit_law_name(text: str) -> bool:
+    candidate = _normalize_space(text)
+    if not candidate:
+        return True
+
+    if candidate in {"법", "법 시행령", "법 시행규칙", "같은 법 시행령", "같은 법 시행규칙"}:
+        return True
+
+    tokens = candidate.split()
+    if len(tokens) >= 2 and tokens[0] == "법":
+        return True
+
+    topic_particles = ("은", "는", "이", "가")
+    object_particles = ("을", "를")
+    conjunctive_particles = ("과", "와")
+
+    for token in tokens[:-1]:
+        if token.endswith(topic_particles + object_particles + conjunctive_particles):
+            return True
+
+    return False
+
+
 def _article_ref(main_no: str, branch_no: str | None) -> dict[str, str]:
     article_key = str(int(main_no)) if not branch_no else f"{int(main_no)}-{int(branch_no)}"
     article_no_display = f"제{int(main_no)}조" if not branch_no else f"제{int(main_no)}조의{int(branch_no)}"
@@ -319,7 +342,12 @@ def parse_law_article_references(
     for match in EXPLICIT_LAW_WITH_ARTICLE_PATTERN.finditer(raw_text):
         candidate_law_name = _normalize_space(match.group("law_name"))
         article_refs = extract_article_refs(match.group("article_block"))
-        if not candidate_law_name or not article_refs or not _looks_like_law_name(candidate_law_name):
+        if (
+            not candidate_law_name
+            or not article_refs
+            or not _looks_like_law_name(candidate_law_name)
+            or _is_noisy_explicit_law_name(candidate_law_name)
+        ):
             continue
         candidates, resolution_status = _resolve_law_name_candidates(
             candidate_law_name,
