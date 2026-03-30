@@ -7,6 +7,7 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const allowedFrameOrigins = process.env.ALLOWED_FRAME_ORIGINS
   ? process.env.ALLOWED_FRAME_ORIGINS.split(",").map((o) => o.trim())
   : [];
+const backendInternalUrl = process.env.BACKEND_INTERNAL_URL?.replace(/\/$/, "");
 
 const frameAncestors =
   allowedFrameOrigins.length > 0
@@ -32,6 +33,18 @@ const nextConfig = {
             value: "nosniff",
           },
         ],
+      },
+    ];
+  },
+  async rewrites() {
+    if (!backendInternalUrl) {
+      return [];
+    }
+
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${backendInternalUrl}/api/:path*`,
       },
     ];
   },

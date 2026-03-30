@@ -4,6 +4,18 @@ services:
       context: apps/backend
       dockerfile: api/Dockerfile
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     environment:
       - MIDM_LLM_URL=${MIDM_LLM_URL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -28,33 +40,50 @@ services:
       - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-4096}
       - DATABASE_URL=${DATABASE_URL:-postgresql://user:password@postgres:5432/las}
 
-  backend-doc-pipeline:
-    build:
-      context: apps/backend/doc-processor
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    environment:
-      - MIDM_LLM_URL=${MIDM_LLM_URL:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-flash-latest}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-mpnet-base-v2}
-      - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-cpu}
-      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-CPU}
-      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
-      - QDRANT_COLLECTION=${QDRANT_COLLECTION:-law_article}
-      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
-      - QDRANT_VECTOR_NAME_MAP=${QDRANT_VECTOR_NAME_MAP:-}
-      - OPENSEARCH_URL=${OPENSEARCH_URL:-http://opensearch:9200}
-      - OPENSEARCH_INDEX=${OPENSEARCH_INDEX:-las_legal_docs}
-      - OPENSEARCH_USERNAME=${OPENSEARCH_USERNAME:-}
-      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
+  # backend-doc-pipeline:
+  #   build:
+  #     context: apps/backend/doc-processor
+  #     dockerfile: Dockerfile
+  #   restart: unless-stopped
+  #   environment:
+  #     - MIDM_LLM_URL=${MIDM_LLM_URL:-}
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+  #     - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+  #     - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+  #     - GEMINI_MODEL=${GEMINI_MODEL:-gemini-flash-latest}
+  #     - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-mpnet-base-v2}
+  #     - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-cpu}
+  #     - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-CPU}
+  #     - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+  #     - QDRANT_COLLECTION=${QDRANT_COLLECTION:-law_article}
+  #     - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+  #     - QDRANT_VECTOR_NAME_MAP=${QDRANT_VECTOR_NAME_MAP:-}
+  #     - OPENSEARCH_URL=${OPENSEARCH_URL:-http://opensearch:9200}
+  #     - OPENSEARCH_INDEX=${OPENSEARCH_INDEX:-las_legal_docs}
+  #     - OPENSEARCH_USERNAME=${OPENSEARCH_USERNAME:-}
+  #     - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
 
   frontend:
     build:
       context: apps/frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+        BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend-api:8000}
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     environment:
       - ALLOWED_FRAME_ORIGINS=${ALLOWED_FRAME_ORIGINS:-}
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
+      - BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL:-http://backend-api:8000}
