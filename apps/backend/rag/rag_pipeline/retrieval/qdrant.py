@@ -7,6 +7,7 @@ from typing import Any
 
 from .common import (
     DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_OPENAI_API_BASE_URL,
     SNIPPET_MAX_LEN,
     dedup_normalized_rows,
     embed_query,
@@ -58,6 +59,9 @@ def search_qdrant(
     collection: str,
     timeout: int,
     embedding_model: str = DEFAULT_EMBEDDING_MODEL,
+    embedding_provider: str = "sentence_transformers",
+    embedding_api_key: str | None = None,
+    embedding_api_base_url: str = DEFAULT_OPENAI_API_BASE_URL,
     api_key: str | None = None,
     doc_types: list[str] | None = None,
     law_names: list[str] | None = None,
@@ -70,7 +74,13 @@ def search_qdrant(
     dedup=True일 경우 top_k * fetch_multiplier 만큼 먼저 가져온 뒤
     중복 제거 후 top_k개로 잘라낸다.
     """
-    vector = embed_query(query, embedding_model)
+    vector = embed_query(
+        query,
+        embedding_model,
+        provider=embedding_provider,
+        api_key=embedding_api_key,
+        api_base_url=embedding_api_base_url,
+    )
 
     headers = {"Content-Type": "application/json"}
     if api_key:
