@@ -116,9 +116,29 @@ eval_set.csv
   - 해당 쿼리 모두 "컨텍스트에 정보가 부족합니다" 형태의 답변 → retrieval 자체 실패
   - 예: 연장근로 허용 한도, 근로계약서 미작성, 하도급 대금 지급 기한
 
-### 4-4. 종합 해석
+### 4-4. 3차 측정 (2026-03-30, GCP OpenSearch 연동 후)
 
-- **normative `context_precision`이 일관되게 최저** (0.41~0.43) — 사용자 표현과 법령 원문 간 어휘 불일치가 핵심 원인으로 추정
+> GCP OpenSearch 인덱스 구조 정비 후 측정 (`search_text` 필드 전환, 인덱스 3개 분리)
+
+| 메트릭 | 전체 평균 |
+|---|---|
+| answer_relevancy | **0.703** |
+| context_precision | **0.526** |
+
+| intent | n | answer_relevancy | context_precision |
+|---|---|---|---|
+| normative | 10 | 0.668 | 0.445 |
+| case_law | 12 | 0.747 | 0.634 |
+| mixed | 6 | 0.674 | 0.447 |
+
+- `law_context_status`: 28건 모두 `ok`
+- `answer_relevancy` 0.0 저점수 5건 (이전 6건 → 1건 감소)
+  - 예: 연장근로 허용 한도, 근로계약서 미작성, 도급계약 근로자 인정, 연장근로 수당 산정, 도산 사실 인정 거부
+- **context_precision 0.483 → 0.526** — `search_text` 필드 전환 및 인덱스 구조 정비 효과. 특히 `case_law` prec 0.541 → 0.634 큰 폭 개선
+
+### 4-5. 종합 해석
+
+- **normative `context_precision`이 일관되게 최저** (0.41~0.45) — 사용자 표현과 법령 원문 간 어휘 불일치가 핵심 원인으로 추정
 - LLM 판단 기반 메트릭 특성상 실행마다 노이즈 존재. 단일 수치보다 추세로 판단 필요
 - **다음 개선 타겟: normative 유형의 retrieval 품질** (동의어 사전, query 확장)
 
@@ -130,7 +150,7 @@ eval_set.csv
 
 - **intent별 점수 비교** → normative의 context_precision이 일관되게 최저임을 확인
 - **law_context_status 분포** → 현재 전 건 `ok` (missing 문제는 retrieval 순위 문제로 나타남)
-- **저점수 쿼리 목록** → 0점 6건 확인 및 원인 파악
+- **저점수 쿼리 목록** → 0점 5건 확인 및 원인 파악 (어휘 불일치)
 
 ### 중기 (개선 적용 후 비교)
 
