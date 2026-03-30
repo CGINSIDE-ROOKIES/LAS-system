@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +19,7 @@ from src.collector.law_delta_collector import collect_daily_law_delta
 from src.collector.legal_case_hydrator import hydrate_canonical_cases_for_family_result
 from src.collector.legal_doc_collector import collect_related_doc_candidates_for_family_result
 from src.collector.related_doc_expander import collect_expanded_related_docs_for_family_result
-from src.common.io_utils import _write_json
+from src.common.io_utils import _write_json, _write_jsonl
 from src.export.dataset_builder import (
     build_and_write_datasets,
     build_incremental_dataset_patch,
@@ -39,6 +40,11 @@ def _raise_if_invalid(name: str, result) -> None:
         raise RuntimeError(f"{name} validation failed")
 
 
+def _log(message: str) -> None:
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[incremental][{timestamp}] {message}", flush=True)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Collect daily law delta and rebuild dataset patches")
     parser.add_argument("--scope", default="config/collection_scope.json")
@@ -57,9 +63,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def _run_subprocess(cmd: list[str]) -> None:
+    _log(f"subprocess start: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=REPO_ROOT, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"command failed: {' '.join(cmd)}")
+    _log(f"subprocess done: {' '.join(cmd)}")
 
 
 def _build_qdrant_incremental_commands(
@@ -149,9 +157,43 @@ def _build_filtered_appendix_asset_base_dir(
     return temp_base_dir, temp_dir
 
 
+def _build_empty_patch_manifest(*, patch_dir: Path, delta_batch_id: str) -> dict:
+    patch_dir.mkdir(parents=True, exist_ok=True)
+    _write_jsonl(patch_dir / "legal_corpus.upsert.jsonl", [])
+    _write_jsonl(patch_dir / "legal_corpus.delete.jsonl", [])
+    _write_jsonl(patch_dir / "legal_relations.upsert.jsonl", [])
+    _write_jsonl(patch_dir / "legal_relations.delete.jsonl", [])
+
+    delta_manifest = {
+        "delta_batch_id": delta_batch_id,
+        "legal_corpus_upsert_count": 0,
+        "legal_corpus_delete_count": 0,
+        "legal_relations_upsert_count": 0,
+        "legal_relations_delete_count": 0,
+    }
+    _write_json(patch_dir / "delta_manifest.json", delta_manifest)
+
+    return {
+        "patch_dir": str(patch_dir),
+        "delta_batch_id": delta_batch_id,
+        "legal_corpus_upsert_count": 0,
+        "legal_corpus_delete_count": 0,
+        "legal_relations_upsert_count": 0,
+        "legal_relations_delete_count": 0,
+    }
+
+
 def main() -> None:
     load_dotenv()
     args = parse_args()
+    _log(
+        "workflow start"
+        f" reg_dt={args.reg_dt}"
+        f" skip_related_refresh={args.skip_related_refresh}"
+        f" skip_embed={args.skip_embed}"
+        f" skip_opensearch_upload={args.skip_opensearch_upload}"
+        f" opensearch_dry_run={args.opensearch_dry_run}"
+    )
 
     scope = load_collection_scope(args.scope)
     law_registry = load_endpoint_registry(args.law_registry)
@@ -169,23 +211,70 @@ def main() -> None:
     dataset_dir = base_dir / "dataset"
     patch_dir = dataset_dir / "patches" / args.reg_dt
 
+    _log(f"loading previous dataset rows from {dataset_dir}")
     previous_corpus_rows, previous_relation_rows = load_dataset_rows(dataset_dir)
+    _log(
+        "loaded previous dataset rows"
+        f" corpus={len(previous_corpus_rows)}"
+        f" relations={len(previous_relation_rows)}"
+    )
 
+    _log(f"collecting daily law delta for reg_dt={args.reg_dt}")
     delta_summary = collect_daily_law_delta(
         registry=law_registry,
         oc=oc,
         reg_dt=args.reg_dt,
         base_dir=base_dir,
     )
+    _log(
+        "daily law delta collected"
+        f" event_count={delta_summary.get('event_count')}"
+        f" changed_law_count={delta_summary.get('changed_law_count')}"
+    )
     delta_events_path = base_dir / "delta" / args.reg_dt / "delta_events.jsonl"
+    _log(f"resolving incremental scope from {delta_events_path}")
     incremental_scope = resolve_incremental_scope(
         scope=scope,
         delta_events_path=delta_events_path,
         normalized_base_dir=base_dir / "normalized" / "01_current_law",
     )
+    changed_root_law_names = incremental_scope["changed_root_law_names"]
+    _log(
+        "incremental scope resolved"
+        f" changed_root_law_count={len(changed_root_law_names)}"
+        f" changed_root_laws={changed_root_law_names}"
+    )
+
+    if not changed_root_law_names:
+        _log("no changed root laws matched current scope; skipping dataset rebuild and uploads")
+        patch_manifest = _build_empty_patch_manifest(
+            patch_dir=patch_dir,
+            delta_batch_id=args.reg_dt,
+        )
+        summary = {
+            "reg_dt": args.reg_dt,
+            "delta_summary": delta_summary,
+            "incremental_scope": incremental_scope,
+            "family_results": [],
+            "dataset_manifest": None,
+            "patch_manifest": patch_manifest,
+            "skip_embed": args.skip_embed,
+            "upload_dry_run": args.upload_dry_run,
+            "skip_opensearch_upload": args.skip_opensearch_upload,
+            "opensearch_dry_run": args.opensearch_dry_run,
+            "opensearch_output_dir": str(base_dir / "handoff" / "opensearch_incremental" / args.reg_dt),
+            "skipped": True,
+            "skip_reason": "no_changed_root_laws_in_scope",
+        }
+        _write_json(base_dir / "manifest" / f"incremental_update_{args.reg_dt}.json", summary)
+        _log(f"workflow summary written to {base_dir / 'manifest' / f'incremental_update_{args.reg_dt}.json'}")
+        _log("incremental update workflow finished")
+        print(summary)
+        return
 
     family_results: list[dict] = []
-    for root_law_name in incremental_scope["changed_root_law_names"]:
+    for idx, root_law_name in enumerate(changed_root_law_names, start=1):
+        _log(f"[{idx}/{len(changed_root_law_names)}] collecting root law family: {root_law_name}")
         family_result = collect_root_law_family(
             scope=scope,
             registry=law_registry,
@@ -196,10 +285,13 @@ def main() -> None:
             clean_existing=True,
         )
         family_results.append(family_result)
+        _log(f"[{idx}/{len(changed_root_law_names)}] root law family collected: {root_law_name}")
 
         if args.skip_related_refresh:
+            _log(f"[{idx}/{len(changed_root_law_names)}] related refresh skipped: {root_law_name}")
             continue
 
+        _log(f"[{idx}/{len(changed_root_law_names)}] collecting related doc candidates: {root_law_name}")
         candidate_result = collect_related_doc_candidates_for_family_result(
             registry=related_registry,
             oc=oc,
@@ -208,6 +300,12 @@ def main() -> None:
             base_dir=base_dir / "raw" / "02_related_legal_docs",
         )
         effective_targets = list(candidate_result.get("targets", {}).keys())
+        _log(
+            f"[{idx}/{len(changed_root_law_names)}] related doc candidates collected:"
+            f" root_law={root_law_name}"
+            f" targets={effective_targets}"
+        )
+        _log(f"[{idx}/{len(changed_root_law_names)}] hydrating canonical cases: {root_law_name}")
         hydrate_canonical_cases_for_family_result(
             registry=related_registry,
             oc=oc,
@@ -215,6 +313,8 @@ def main() -> None:
             raw_related_base_dir=base_dir / "raw" / "02_related_legal_docs",
             targets=effective_targets,
         )
+        _log(f"[{idx}/{len(changed_root_law_names)}] canonical cases hydrated: {root_law_name}")
+        _log(f"[{idx}/{len(changed_root_law_names)}] collecting expanded related docs: {root_law_name}")
         collect_expanded_related_docs_for_family_result(
             scope=scope,
             family_result=family_result,
@@ -222,6 +322,7 @@ def main() -> None:
             save_dir=base_dir / "expanded" / "03_expanded_related_docs",
             targets=effective_targets,
         )
+        _log(f"[{idx}/{len(changed_root_law_names)}] expanded related docs collected: {root_law_name}")
 
     appendix_asset_base_dir = (
         base_dir / "normalized" / "01_current_law_appendix_assets"
@@ -234,6 +335,7 @@ def main() -> None:
     )
 
     try:
+        _log("building dataset outputs")
         dataset_manifest = build_and_write_datasets(
             normalized_base_dir=base_dir / "normalized" / "01_current_law",
             raw_related_base_dir=base_dir / "raw" / "02_related_legal_docs",
@@ -246,11 +348,24 @@ def main() -> None:
             write_legacy_appendix_datasets=False,
             include_law_to_law_relations=not args.skip_law_to_law_relations,
         )
+        _log(
+            "dataset outputs built"
+            f" legal_corpus_count={dataset_manifest.get('legal_corpus_count')}"
+            f" legal_relations_count={dataset_manifest.get('legal_relations_count')}"
+        )
     finally:
         if temp_appendix_asset_dir is not None:
             temp_appendix_asset_dir.cleanup()
+            _log("temporary appendix asset directory cleaned up")
+    _log(f"reloading current dataset rows from {dataset_dir}")
     current_corpus_rows, current_relation_rows = load_dataset_rows(dataset_dir)
+    _log(
+        "loaded current dataset rows"
+        f" corpus={len(current_corpus_rows)}"
+        f" relations={len(current_relation_rows)}"
+    )
 
+    _log(f"building dataset patch into {patch_dir}")
     patch_manifest = build_incremental_dataset_patch(
         previous_corpus_rows=previous_corpus_rows,
         current_corpus_rows=current_corpus_rows,
@@ -258,6 +373,13 @@ def main() -> None:
         current_relation_rows=current_relation_rows,
         patch_dir=patch_dir,
         delta_batch_id=args.reg_dt,
+    )
+    _log(
+        "dataset patch built"
+        f" corpus_upserts={patch_manifest.get('legal_corpus_upsert_count')}"
+        f" corpus_deletes={patch_manifest.get('legal_corpus_delete_count')}"
+        f" relation_upserts={patch_manifest.get('legal_relations_upsert_count')}"
+        f" relation_deletes={patch_manifest.get('legal_relations_delete_count')}"
     )
 
     for command in _build_qdrant_incremental_commands(
@@ -294,7 +416,8 @@ def main() -> None:
     }
     _write_json(base_dir / "manifest" / f"incremental_update_{args.reg_dt}.json", summary)
 
-    print("Incremental update workflow finished")
+    _log(f"workflow summary written to {base_dir / 'manifest' / f'incremental_update_{args.reg_dt}.json'}")
+    _log("incremental update workflow finished")
     print(summary)
 
 

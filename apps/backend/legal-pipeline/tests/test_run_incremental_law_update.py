@@ -2,6 +2,7 @@ import json
 
 from scripts.run_incremental_law_update import (
     _build_filtered_appendix_asset_base_dir,
+    _build_empty_patch_manifest,
     _build_opensearch_incremental_command,
     _build_qdrant_incremental_commands,
 )
@@ -73,3 +74,19 @@ def test_build_opensearch_incremental_command_respects_skip_and_dry_run(tmp_path
     assert command is not None
     assert command[1] == "scripts/upload/load_opensearch_incremental.py"
     assert command[-1] == "--dry-run"
+
+
+def test_build_empty_patch_manifest_writes_zero_count_artifacts(tmp_path):
+    patch_dir = tmp_path / "dataset" / "patches" / "20260330"
+
+    manifest = _build_empty_patch_manifest(
+        patch_dir=patch_dir,
+        delta_batch_id="20260330",
+    )
+
+    assert manifest["delta_batch_id"] == "20260330"
+    assert manifest["legal_corpus_upsert_count"] == 0
+    assert manifest["legal_relations_delete_count"] == 0
+    assert json.loads((patch_dir / "delta_manifest.json").read_text(encoding="utf-8"))["delta_batch_id"] == "20260330"
+    assert (patch_dir / "legal_corpus.upsert.jsonl").read_text(encoding="utf-8") == ""
+    assert (patch_dir / "legal_relations.delete.jsonl").read_text(encoding="utf-8") == ""

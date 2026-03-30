@@ -9,42 +9,30 @@ from pathlib import Path
 from typing import Iterable, Iterator, Sequence
 
 import numpy as np
-import torch
-from sentence_transformers import SentenceTransformer
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.common.embedding_backend import create_embedding_backend, load_embedding_settings
 from src.export.qdrant_point_id import (
     build_qdrant_point_id,
     canonical_id_from_row,
 )
 
 
-MODEL_NAME = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+EMBEDDING_SETTINGS = load_embedding_settings()
+MODEL_NAME = EMBEDDING_SETTINGS.model_name
+EMBEDDING_PROVIDER = EMBEDDING_SETTINGS.provider
 EMBEDDING_PASSAGE_PREFIX = ""
-NORMALIZE_EMBEDDINGS = True
-EMBEDDING_DTYPE = "float32"
+NORMALIZE_EMBEDDINGS = EMBEDDING_SETTINGS.normalize_embeddings
+EMBEDDING_DTYPE = EMBEDDING_SETTINGS.dtype
 DEFAULT_BATCH_SIZE = 128
 CASE_DOC_TYPES = {"prec", "detc", "decc", "expc"}
 COLLECTIONS = ("law_article", "legal_case", "legal_relation")
 APPENDIX_VECTOR_PLACEHOLDER = "[NO_APPENDIX_LINKED]"
 LAW_ARTICLE_VECTOR_NAMES = ("body", "appendix")
-
-# EMBED_DEVICE=cpu_mp|mps|auto  (auto: detect MPS, fall back to cpu_mp)
-_DEVICE_ENV = os.getenv("EMBED_DEVICE", "auto").lower()
-
-
-def _resolve_device() -> str:
-    if _DEVICE_ENV == "auto":
-        if torch.backends.mps.is_available():
-            return "mps"
-        return "cpu_mp"
-    return _DEVICE_ENV
-
-
-DEVICE_MODE = _resolve_device()
+DEVICE_MODE = EMBEDDING_SETTINGS.device_mode
 
 RELATION_MODEL_SEARCH_PROFILES = {
     "law_to_case": {
@@ -350,31 +338,8 @@ def _iter_simple_rows(dataset_dir: Path, collection_name: str) -> list[dict]:
     return list(_iter_collection_rows(dataset_dir, collection_name))
 
 
-def _encode(
-    model: SentenceTransformer,
-    pool: dict | None,
-    texts: list[str],
-    batch_size: int,
-) -> np.ndarray:
-    """Encode texts using the appropriate backend (multi-process CPU or MPS)."""
-    if pool is not None:
-        return model.encode(
-            texts,
-            batch_size=batch_size,
-            show_progress_bar=True,
-            convert_to_numpy=True,
-            normalize_embeddings=NORMALIZE_EMBEDDINGS,
-            precision=EMBEDDING_DTYPE,
-            pool=pool,
-        ).astype(np.float32)
-    return model.encode(
-        texts,
-        batch_size=batch_size,
-        show_progress_bar=True,
-        convert_to_numpy=True,
-        normalize_embeddings=NORMALIZE_EMBEDDINGS,
-        precision=EMBEDDING_DTYPE,
-    )
+def _encode(model, texts: list[str], batch_size: int) -> np.ndarray:
+    return model.encode(texts, batch_size=batch_size)
 
 
 def _build_law_article_import_rows(
@@ -383,6 +348,9 @@ def _build_law_article_import_rows(
     appendix_texts: Sequence[str],
     body_embeddings: np.ndarray,
     appendix_embeddings: np.ndarray,
+    *,
+    embedding_model: str,
+    embedding_provider: str,
 ) -> list[dict]:
     rows: list[dict] = []
     for meta, body_text, appendix_text, body_vector, appendix_vector in zip(
@@ -401,7 +369,8 @@ def _build_law_article_import_rows(
             "appendix": appendix_vector.astype(np.float32).tolist(),
         }
         row["_score"] = None
-        row["embedding_model"] = MODEL_NAME
+        row["embedding_model"] = embedding_model
+        row["embedding_provider"] = embedding_provider
         row["embedding_passage_prefix"] = EMBEDDING_PASSAGE_PREFIX
         row["normalized"] = NORMALIZE_EMBEDDINGS
         rows.append(row)
@@ -412,6 +381,9 @@ def _build_simple_import_rows(
     metas: Sequence[dict],
     texts: Sequence[str],
     embeddings: np.ndarray,
+    *,
+    embedding_model: str,
+    embedding_provider: str,
 ) -> list[dict]:
     rows: list[dict] = []
     for meta, text, vector in zip(metas, texts, embeddings, strict=True):
@@ -419,7 +391,8 @@ def _build_simple_import_rows(
         row["text"] = text
         row["_vector"] = vector.astype(np.float32).tolist()
         row["_score"] = None
-        row["embedding_model"] = MODEL_NAME
+        row["embedding_model"] = embedding_model
+        row["embedding_provider"] = embedding_provider
         row["embedding_passage_prefix"] = EMBEDDING_PASSAGE_PREFIX
         row["normalized"] = NORMALIZE_EMBEDDINGS
         rows.append(row)
@@ -460,11 +433,10 @@ def _build_retrieval_policy(
 
 
 def embed_law_article(
-    model: SentenceTransformer,
+    model,
     dataset_dir: Path,
     emb_dir: Path,
     handoff_dir: Path,
-    pool: dict | None,
     *,
     batch_size: int,
 ) -> dict:
@@ -493,8 +465,8 @@ def embed_law_article(
     if not body_texts:
         raise ValueError("[law_article] no texts found to embed")
 
-    body_embeddings = _encode(model, pool, body_texts, batch_size)
-    appendix_embeddings = _encode(model, pool, appendix_texts, batch_size)
+    body_embeddings = _encode(model, body_texts, batch_size)
+    appendix_embeddings = _encode(model, appendix_texts, batch_size)
 
     emb_dir.mkdir(parents=True, exist_ok=True)
     body_npy_path = emb_dir / f"{collection_name}.body.npy"
@@ -506,13 +478,22 @@ def embed_law_article(
     np.save(appendix_npy_path, appendix_embeddings)
     write_jsonl(meta_path, metas)
 
-    import_rows = _build_law_article_import_rows(metas, body_texts, appendix_texts, body_embeddings, appendix_embeddings)
+    import_rows = _build_law_article_import_rows(
+        metas,
+        body_texts,
+        appendix_texts,
+        body_embeddings,
+        appendix_embeddings,
+        embedding_model=model.model_name,
+        embedding_provider=model.provider,
+    )
     source_path = _write_variant_source(handoff_dir, collection_name, source_rows)
     import_path = _write_variant_import(handoff_dir, collection_name, import_rows)
 
     manifest = {
         "collection_name": collection_name,
-        "model_name": MODEL_NAME,
+        "model_name": model.model_name,
+        "embedding_provider": model.provider,
         "count": len(metas),
         "embedding_dim": int(body_embeddings.shape[1]) if len(body_embeddings) else 0,
         "normalized": NORMALIZE_EMBEDDINGS,
@@ -532,12 +513,11 @@ def embed_law_article(
 
 
 def embed_simple_collection(
-    model: SentenceTransformer,
+    model,
     dataset_dir: Path,
     emb_dir: Path,
     handoff_dir: Path,
     collection_name: str,
-    pool: dict | None,
     *,
     batch_size: int,
 ) -> dict:
@@ -573,7 +553,7 @@ def embed_simple_collection(
             "reason": "no texts found to embed",
         }
 
-    embeddings = _encode(model, pool, texts, batch_size)
+    embeddings = _encode(model, texts, batch_size)
 
     emb_dir.mkdir(parents=True, exist_ok=True)
     npy_path = emb_dir / f"{collection_name}.npy"
@@ -583,13 +563,20 @@ def embed_simple_collection(
     np.save(npy_path, embeddings)
     write_jsonl(meta_path, metas)
 
-    import_rows = _build_simple_import_rows(metas, texts, embeddings)
+    import_rows = _build_simple_import_rows(
+        metas,
+        texts,
+        embeddings,
+        embedding_model=model.model_name,
+        embedding_provider=model.provider,
+    )
     source_path = _write_variant_source(handoff_dir, collection_name, source_rows)
     import_path = _write_variant_import(handoff_dir, collection_name, import_rows)
 
     manifest = {
         "collection_name": collection_name,
-        "model_name": MODEL_NAME,
+        "model_name": model.model_name,
+        "embedding_provider": model.provider,
         "count": len(metas),
         "embedding_dim": int(embeddings.shape[1]) if len(embeddings) else 0,
         "normalized": NORMALIZE_EMBEDDINGS,
@@ -617,9 +604,17 @@ def write_embedding_manifest(
     collection_manifests: Sequence[dict],
 ) -> Path:
     manifest_path = handoff_dir / "qdrant_embedding_manifest.json"
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+    embedding_dim = max((int(item.get("embedding_dim") or 0) for item in collection_manifests), default=0)
+    model_name = next((str(item.get("model_name") or "") for item in collection_manifests if item.get("model_name")), MODEL_NAME)
+    embedding_provider = next(
+        (str(item.get("embedding_provider") or "") for item in collection_manifests if item.get("embedding_provider")),
+        EMBEDDING_PROVIDER,
+    )
     payload = {
-        "model_name": MODEL_NAME,
-        "embedding_dim": 768,
+        "model_name": model_name,
+        "embedding_provider": embedding_provider,
+        "embedding_dim": embedding_dim,
         "normalized": NORMALIZE_EMBEDDINGS,
         "dtype": "float32",
         "metric": "cosine",
@@ -658,7 +653,7 @@ def parse_args() -> argparse.Namespace:
         "--batch-size",
         type=int,
         default=DEFAULT_BATCH_SIZE,
-        help="SentenceTransformer encode batch size.",
+        help="Embedding encode batch size.",
     )
     return parser.parse_args()
 
@@ -674,14 +669,9 @@ def main() -> None:
     if not dataset_dir.exists():
         raise FileNotFoundError(f"dataset_dir not found: {dataset_dir}")
 
-    print(f"[embed] device_mode={DEVICE_MODE}")
+    print(f"[embed] provider={EMBEDDING_PROVIDER} model={MODEL_NAME} device_mode={DEVICE_MODE}")
 
-    if DEVICE_MODE == "mps":
-        model = SentenceTransformer(MODEL_NAME, device="mps")
-        pool = None
-    else:  # cpu_mp
-        model = SentenceTransformer(MODEL_NAME)
-        pool = model.start_multi_process_pool(target_devices=["cpu"] * 4)
+    model = create_embedding_backend(EMBEDDING_SETTINGS)
 
     try:
         collection_manifests: list[dict] = []
@@ -691,7 +681,6 @@ def main() -> None:
                 dataset_dir=dataset_dir,
                 emb_dir=emb_dir,
                 handoff_dir=handoff_dir,
-                pool=pool,
                 batch_size=batch_size,
             )
         )
@@ -703,7 +692,6 @@ def main() -> None:
                     emb_dir=emb_dir,
                     handoff_dir=handoff_dir,
                     collection_name=collection_name,
-                    pool=pool,
                     batch_size=batch_size,
                 )
             )
@@ -715,8 +703,7 @@ def main() -> None:
             collection_manifests=collection_manifests,
         )
     finally:
-        if pool is not None:
-            model.stop_multi_process_pool(pool)
+        model.close()
 
 
 if __name__ == "__main__":

@@ -11,12 +11,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from sentence_transformers import SentenceTransformer
-
+from src.common.embedding_backend import create_embedding_backend, load_embedding_settings
 from src.common.io_utils import _iter_jsonl, _write_json, _write_jsonl
 from scripts.embed_qdrant_3collections import (
     DEFAULT_BATCH_SIZE,
-    MODEL_NAME,
     embed_law_article,
     embed_simple_collection,
     write_embedding_manifest,
@@ -100,39 +98,44 @@ def build_incremental_embeddings(
         _write_jsonl(tmp_dataset_dir / "legal_corpus.jsonl", corpus_upserts)
         _write_jsonl(tmp_dataset_dir / "legal_relations.jsonl", relation_upserts)
 
-        model = SentenceTransformer(MODEL_NAME)
+        model = create_embedding_backend(load_embedding_settings())
         collection_manifests: list[dict] = []
 
-        if any(str(row.get("doc_type") or "").strip() == "law" for row in corpus_upserts):
-            collection_manifests.append(
-                embed_law_article(
-                    model=model,
-                    dataset_dir=tmp_dataset_dir,
-                    emb_dir=emb_dir,
-                    handoff_dir=handoff_dir,
-                    batch_size=batch_size,
+        try:
+            if any(str(row.get("doc_type") or "").strip() == "law" for row in corpus_upserts):
+                collection_manifests.append(
+                    embed_law_article(
+                        model=model,
+                        dataset_dir=tmp_dataset_dir,
+                        emb_dir=emb_dir,
+                        handoff_dir=handoff_dir,
+                        batch_size=batch_size,
+                    )
                 )
-            )
-        else:
-            collection_manifests.append({"collection_name": "law_article", "count": 0, "skipped": True, "reason": "no patch rows"})
-        for collection_name in ("legal_case", "legal_relation"):
-            collection_manifests.append(
-                embed_simple_collection(
-                    model=model,
-                    dataset_dir=tmp_dataset_dir,
-                    emb_dir=emb_dir,
-                    handoff_dir=handoff_dir,
-                    collection_name=collection_name,
-                    batch_size=batch_size,
+            else:
+                collection_manifests.append(
+                    {"collection_name": "law_article", "count": 0, "skipped": True, "reason": "no patch rows"}
                 )
-            )
+            for collection_name in ("legal_case", "legal_relation"):
+                collection_manifests.append(
+                    embed_simple_collection(
+                        model=model,
+                        dataset_dir=tmp_dataset_dir,
+                        emb_dir=emb_dir,
+                        handoff_dir=handoff_dir,
+                        collection_name=collection_name,
+                        batch_size=batch_size,
+                    )
+                )
 
-        write_embedding_manifest(
-            handoff_dir=handoff_dir,
-            dataset_dir=tmp_dataset_dir,
-            emb_dir=emb_dir,
-            collection_manifests=collection_manifests,
-        )
+            write_embedding_manifest(
+                handoff_dir=handoff_dir,
+                dataset_dir=tmp_dataset_dir,
+                emb_dir=emb_dir,
+                collection_manifests=collection_manifests,
+            )
+        finally:
+            model.close()
 
     delete_manifest = {
         "delta_batch_id": delta_batch_id,
