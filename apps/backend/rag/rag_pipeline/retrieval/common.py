@@ -23,6 +23,11 @@ SNIPPET_MAX_LEN = 180
 _MODEL_CACHE: dict[str, Any] = {}
 
 
+def is_embedding_model_cached(model_name: str) -> bool:
+    """현재 프로세스에 임베딩 모델이 메모리 캐시되어 있으면 True."""
+    return model_name in _MODEL_CACHE
+
+
 class RetrievalError(Exception):
     """네트워크·임베딩 등 검색 과정에서 발생하는 오류.
 

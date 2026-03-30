@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { askStream, RetrievedDoc as ApiDoc } from "@/lib/api-client";
-import { ERROR_MESSAGES } from "@/lib/errors";
+import { QA_STREAM_TIMEOUT_MS, streamTransportErrorMessage } from "@/lib/errors";
 import Link from "next/link";
 
 // Types
@@ -54,6 +54,7 @@ interface ChatMessage {
   sources?: Source[];
   followUps?: string[];
   isStreaming?: boolean;
+  statusMessage?: string;
 }
 
 // Source badge config
@@ -123,7 +124,7 @@ const ContractQA = () => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    const timeoutId = setTimeout(() => controller.abort("timeout"), 60_000);
+    const timeoutId = setTimeout(() => controller.abort("timeout"), QA_STREAM_TIMEOUT_MS);
 
     const assistantId = `m${Date.now()}`;
     setMessages((prev) => [
@@ -136,15 +137,28 @@ const ContractQA = () => {
         if (event.type === "chunk") {
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantId ? { ...m, content: m.content + event.content } : m
+              m.id === assistantId
+                ? { ...m, statusMessage: undefined, content: m.content + event.content }
+                : m
             )
           );
           scrollToBottom();
+        } else if (event.type === "status") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, statusMessage: event.message } : m
+            )
+          );
         } else if (event.type === "done") {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId
-                ? { ...m, isStreaming: false, sources: event.retrieved_docs.map(mapDocToSource) }
+                ? {
+                    ...m,
+                    isStreaming: false,
+                    statusMessage: undefined,
+                    sources: event.retrieved_docs.map(mapDocToSource),
+                  }
                 : m
             )
           );
@@ -153,7 +167,12 @@ const ContractQA = () => {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId
-                ? { ...m, isStreaming: false, content: m.content || `오류가 발생했습니다: ${event.error}` }
+                ? {
+                    ...m,
+                    isStreaming: false,
+                    statusMessage: undefined,
+                    content: m.content || `오류가 발생했습니다: ${event.error}`,
+                  }
                 : m
             )
           );
@@ -161,20 +180,13 @@ const ContractQA = () => {
         }
       }
     } catch (err) {
-      const error = err as Error;
-      if (error.name === "AbortError" && error.message !== "timeout") return;
-
-      const errorContent =
-        error.message === "timeout"
-          ? ERROR_MESSAGES.TIMEOUT
-          : error.name === "TypeError"
-          ? ERROR_MESSAGES.NETWORK
-          : ERROR_MESSAGES.SERVER;
+      const errorContent = streamTransportErrorMessage(err);
+      if (errorContent === null) return;
 
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
-            ? { ...m, isStreaming: false, content: m.content || errorContent }
+            ? { ...m, isStreaming: false, statusMessage: undefined, content: m.content || errorContent }
             : m
         )
       );
@@ -297,6 +309,9 @@ const ContractQA = () => {
                               "whitespace-pre-wrap text-sm leading-relaxed",
                               msg.role === "assistant" && "prose-sm"
                             )}>
+                              {msg.isStreaming && msg.statusMessage && (
+                                <p className="mb-2 text-sm text-muted-foreground">{msg.statusMessage}</p>
+                              )}
                               {msg.content.split(/(\*\*.*?\*\*|### .*?\n)/g).map((part, idx) => {
                                 if (part.startsWith("**") && part.endsWith("**")) {
                                   return <strong key={idx}>{part.slice(2, -2)}</strong>;
