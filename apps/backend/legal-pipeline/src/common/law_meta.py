@@ -97,6 +97,17 @@ def build_law_uid(
     return "unknown-law"
 
 
+def build_strict_law_uid(
+    law_id: Any,
+    mst: Any,
+) -> str | None:
+    for candidate in (law_id, mst):
+        text = _clean_text(candidate)
+        if text:
+            return normalize_identifier_token(text)
+    return None
+
+
 def build_record_id(
     *,
     prefix: str,

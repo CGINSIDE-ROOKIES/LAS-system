@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from src.common.io_utils import _read_json
-from src.common.law_meta import build_law_uid
+from src.common.law_meta import build_law_uid, build_strict_law_uid
 from src.parser.legal_case_parser import (
     extract_explicit_article_refs,
     find_related_law_names,
@@ -139,7 +139,7 @@ def build_law_to_law_relation_records(
             {
                 "path": path,
                 "root_law_name": root_law_name,
-                "root_law_uid": build_law_uid(None, None, root_law_name),
+                "root_law_uid": build_strict_law_uid(payload.get("law_id"), payload.get("mst")),
                 "law_name": law_name,
                 "law_id": payload.get("law_id"),
                 "mst": payload.get("mst"),
@@ -154,6 +154,10 @@ def build_law_to_law_relation_records(
         family_law_names = [row["law_name"] for row in laws]
         uid_by_name = {row["law_name"]: row["law_uid"] for row in laws}
         law_meta_by_name = {row["law_name"]: row for row in laws}
+        root_law_uid = uid_by_name.get(root_law_name) or build_strict_law_uid(
+            law_meta_by_name.get(root_law_name, {}).get("law_id"),
+            law_meta_by_name.get(root_law_name, {}).get("mst"),
+        )
         family_alias_map = _family_laws_by_alias(root_law_name, laws)
 
         for source in laws:
@@ -287,7 +291,7 @@ def build_law_to_law_relation_records(
                             "source_law_name": source["law_name"],
                             "source_law_uid": source["law_uid"],
                             "root_law_name": root_law_name,
-                            "root_law_uid": source["root_law_uid"],
+                            "root_law_uid": root_law_uid,
                             "related_law_names": list(
                                 dict.fromkeys(
                                     [target_law_name]
