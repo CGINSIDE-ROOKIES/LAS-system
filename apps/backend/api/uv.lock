@@ -439,9 +439,14 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "datasets", marker = "extra == 'eval'", specifier = ">=2.19" },
+    { name = "langchain-google-genai", marker = "extra == 'eval'", specifier = ">=2.0" },
+    { name = "litellm", marker = "extra == 'eval'", specifier = ">=1.82.6" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "ragas", marker = "extra == 'eval'", specifier = ">=0.2" },
     { name = "sentence-transformers", specifier = ">=5.2.3" },
 ]
+provides-extras = ["eval"]
 
 [[package]]
 name = "regex"

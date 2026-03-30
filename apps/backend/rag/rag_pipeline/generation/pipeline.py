@@ -14,7 +14,7 @@ from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
-from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError
+from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, is_embedding_model_cached
 from ..retrieval.context import build_llm_context_rows, build_llm_context_text
 from ..retrieval.fusion import fuse_rrf, fuse_rrf_multi
 from ..retrieval.opensearch import search_bm25
@@ -246,6 +246,10 @@ class RagPipeline:
             retrieved_docs=retrieved_docs,
             law_context_status=law_context_status,
         )
+
+    def is_embedding_cold_start(self) -> bool:
+        """현재 프로세스에서 임베딩 모델 첫 로드가 필요한 상태인지 반환한다."""
+        return not is_embedding_model_cached(self._cfg.retrieval.embedding_model)
 
     def run(
         self,

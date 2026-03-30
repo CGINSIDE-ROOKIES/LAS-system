@@ -3,7 +3,7 @@ import { QuestionInput } from "./QuestionInput";
 import { MessageBubble, ChatMessage } from "./MessageBubble";
 import { Button } from "@/components/ui/button";
 import { askStream } from "@/lib/api-client";
-import { ERROR_MESSAGES, sseErrorMessage } from "@/lib/errors";
+import { QA_STREAM_TIMEOUT_MS, sseErrorMessage, streamTransportErrorMessage } from "@/lib/errors";
 import { SquarePen } from "lucide-react";
 
 export type Citation = {
@@ -24,7 +24,14 @@ function loadMessages(): ChatMessage[] {
     if (!raw) return [];
     const parsed: ChatMessage[] = JSON.parse(raw);
     return parsed.map((m) =>
-      m.isStreaming ? { ...m, isStreaming: false, content: m.content || "응답이 중단되었습니다." } : m
+      m.isStreaming
+        ? {
+            ...m,
+            isStreaming: false,
+            statusMessage: undefined,
+            content: m.content || "응답이 중단되었습니다.",
+          }
+        : m
     );
   } catch {
     return [];
@@ -70,7 +77,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    const timeoutId = setTimeout(() => controller.abort("timeout"), 60_000);
+    const timeoutId = setTimeout(() => controller.abort("timeout"), QA_STREAM_TIMEOUT_MS);
     const t0 = performance.now();
 
     const userMsg: ChatMessage = {
@@ -89,9 +96,20 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
       for await (const event of askStream({ question: userQuestion }, controller.signal)) {
         if (event.type === "chunk") {
           setMessages((prev) =>
-            prev.map((m) => m.id === aiId ? { ...m, content: m.content + event.content } : m)
+            prev.map((m) =>
+              m.id === aiId
+                ? { ...m, statusMessage: undefined, content: m.content + event.content }
+                : m
+            )
           );
           scrollToBottom();
+        } else if (event.type === "status") {
+          console.info("[LAS:QA] 상태:", event.code, event.message);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === aiId ? { ...m, statusMessage: event.message } : m
+            )
+          );
         } else if (event.type === "done") {
           const parsedCitations: Citation[] = event.retrieved_docs
             .filter((doc) => doc.doc_type === "law")
@@ -153,6 +171,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
                     ...m,
                     content: "",
                     isStreaming: false,
+                    statusMessage: undefined,
                     answerData: {
                       summary: m.content,
                       citations: parsedCitations,
@@ -166,26 +185,29 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
           console.error("[LAS:QA] SSE 에러:", event.code, event.error);
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === aiId ? { ...m, isStreaming: false, content: sseErrorMessage(event.code) } : m
+              m.id === aiId
+                ? {
+                    ...m,
+                    isStreaming: false,
+                    statusMessage: undefined,
+                    content: sseErrorMessage(event.code),
+                  }
+                : m
             )
           );
         }
       }
     } catch (err) {
-      const error = err as Error;
-      if (error.name === "AbortError" && error.message !== "timeout") return;
+      const errorContent = streamTransportErrorMessage(err);
+      if (errorContent === null) return;
 
-      const isTimeout = error.message === "timeout";
-      console.error("[LAS:QA]", isTimeout ? "타임아웃" : "에러:", error.message);
-      const errorContent = isTimeout
-        ? ERROR_MESSAGES.TIMEOUT
-        : error.name === "TypeError"
-        ? ERROR_MESSAGES.NETWORK
-        : ERROR_MESSAGES.SERVER;
+      console.error("[LAS:QA] 스트림 예외:", err);
 
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === aiId ? { ...m, isStreaming: false, content: errorContent } : m
+          m.id === aiId
+            ? { ...m, isStreaming: false, statusMessage: undefined, content: errorContent }
+            : m
         )
       );
     } finally {

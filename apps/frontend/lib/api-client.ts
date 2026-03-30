@@ -116,8 +116,9 @@ export type SseDoneEvent = {
   retrieved_docs: RetrievedDoc[];
   law_context_status: string;
 };
+export type SseStatusEvent = { type: "status"; code: string; message: string };
 export type SseErrorEvent = { type: "error"; code: string; error: string };
-export type SseEvent = SseChunkEvent | SseDoneEvent | SseErrorEvent;
+export type SseEvent = SseChunkEvent | SseDoneEvent | SseStatusEvent | SseErrorEvent;
 
 async function throwApiError(res: Response): Promise<never> {
   const body = await res.json().catch(() => ({ code: "INTERNAL_ERROR", error: res.statusText }));
