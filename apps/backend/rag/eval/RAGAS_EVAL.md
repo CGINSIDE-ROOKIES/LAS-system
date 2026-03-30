@@ -70,27 +70,67 @@ eval_set.csv
 
 ---
 
-## 4. 현재 측정 결과 (normative 5개, 2026-03-26)
+## 4. 측정 결과
+
+> `faithfulness`는 비용/시간 문제로 현재 측정에서 제외. 추후 `ragas.metrics.collections.Faithfulness`로 추가 가능.
+
+### 4-1. 초기 측정 (normative 5개, 2026-03-26)
 
 | 메트릭 | 점수 |
 |---|---|
-| faithfulness | **1.000** |
 | answer_relevancy | **0.693** |
 | context_precision | **0.612** |
 
-- `law_context_status`: 5건 모두 `ok`
-- 해석: 생성 품질(faithfulness)은 양호. retrieval 순위(context_precision)와 답변 적절성(answer_relevancy)에 개선 여지 있음.
-- ⚠️ 이는 상대적으로 쉬운 normative 유형만의 결과. case_law·decc·expc 유형 포함 시 수치 하락 예상.
+- 상대적으로 쉬운 normative 유형만의 결과. 전체 포함 시 수치 하락 예상.
+
+### 4-2. 전체 28개 baseline (2026-03-27)
+
+| 메트릭 | 전체 평균 |
+|---|---|
+| answer_relevancy | **0.662** |
+| context_precision | **0.492** |
+
+| intent | n | answer_relevancy | context_precision |
+|---|---|---|---|
+| normative | 10 | 0.716 | 0.410 |
+| case_law | 12 | 0.677 | 0.567 |
+| mixed | 6 | 0.542 | 0.476 |
+
+- `law_context_status`: 28건 모두 `ok`
+
+### 4-3. 2차 측정 (2026-03-30)
+
+| 메트릭 | 전체 평균 |
+|---|---|
+| answer_relevancy | **0.686** |
+| context_precision | **0.483** |
+
+| intent | n | answer_relevancy | context_precision |
+|---|---|---|---|
+| normative | 10 | 0.613 | 0.432 |
+| case_law | 12 | 0.735 | 0.541 |
+| mixed | 6 | 0.711 | 0.454 |
+
+- `law_context_status`: 28건 모두 `ok`
+- `answer_relevancy` 0.0 저점수 6건: normative 3건, case_law 2건, mixed 1건
+  - 해당 쿼리 모두 "컨텍스트에 정보가 부족합니다" 형태의 답변 → retrieval 자체 실패
+  - 예: 연장근로 허용 한도, 근로계약서 미작성, 하도급 대금 지급 기한
+
+### 4-4. 종합 해석
+
+- **normative `context_precision`이 일관되게 최저** (0.41~0.43) — 사용자 표현과 법령 원문 간 어휘 불일치가 핵심 원인으로 추정
+- LLM 판단 기반 메트릭 특성상 실행마다 노이즈 존재. 단일 수치보다 추세로 판단 필요
+- **다음 개선 타겟: normative 유형의 retrieval 품질** (동의어 사전, query 확장)
 
 ---
 
 ## 5. 앞으로 기대되는 도출
 
-### 단기 (전체 28개 측정 후)
+### 단기 ✅ 완료
 
-- **intent별 점수 비교** → normative vs case_law vs mixed 중 어느 유형이 취약한지 정량 확인
-- **law_context_status 분포** → missing/supplemented 비율로 retrieval 실패 패턴 파악
-- **저점수 쿼리 목록** → 어떤 질문이 왜 실패하는지 직접 확인
+- **intent별 점수 비교** → normative의 context_precision이 일관되게 최저임을 확인
+- **law_context_status 분포** → 현재 전 건 `ok` (missing 문제는 retrieval 순위 문제로 나타남)
+- **저점수 쿼리 목록** → 0점 6건 확인 및 원인 파악
 
 ### 중기 (개선 적용 후 비교)
 

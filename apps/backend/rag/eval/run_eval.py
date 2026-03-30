@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """RAGAS 기반 RAG 파이프라인 평가 스크립트.
 
-ground_truth 없이 측정 가능한 메트릭:
-  - faithfulness           : 답변이 컨텍스트에 근거하는지
+현재 측정 메트릭 (ground_truth 불필요):
   - answer_relevancy       : 답변이 질문에 관련 있는지
   - context_precision      : 검색 컨텍스트 순위가 적절한지 (LLM 판단, reference 불필요)
+
+  # faithfulness (답변이 컨텍스트에 근거하는지)는 비용/시간 문제로 제외.
+  # 필요 시 ragas.metrics.collections.Faithfulness 로 추가 가능.
 
 사용법:
   cd apps/backend/rag
@@ -26,7 +28,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent.parent))
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from src.generation.pipeline import RagPipeline  # noqa: E402
+from rag_pipeline.generation.pipeline import RagPipeline  # noqa: E402
 
 
 # ── 파이프라인 실행 ────────────────────────────────────────────────────────────
@@ -216,11 +218,11 @@ def print_summary(results: list[dict]) -> None:
         print("-" * 50)
         for intent in intents:
             group = [r for r in scored if r["intent"] == intent]
-            faith = _avg(group, "faithfulness")
-            rel   = _avg(group, "answer_relevancy")
-            prec  = _avg(group, "context_precision")
+            rel  = _avg(group, "answer_relevancy")
+            prec = _avg(group, "context_precision")
             print(f"  [{intent:<12}] n={len(group):2}  "
-                  f"faith={faith:.3f}  rel={rel:.3f}  prec={prec:.3f}")
+                  f"rel={rel:.3f}  prec={prec:.3f}")
+            # faithfulness 메트릭은 비용/시간 문제로 제외. 추후 추가 가능.
 
     # law_context_status 분포
     print("\nlaw_context_status")
