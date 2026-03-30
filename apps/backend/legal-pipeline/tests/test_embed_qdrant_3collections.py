@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from src.common.io_utils import _write_jsonl
@@ -5,6 +6,7 @@ from scripts.embed_qdrant_3collections import (
     _build_meta,
     _build_retrieval_policy,
     _scan_collection,
+    write_embedding_manifest,
 )
 
 
@@ -98,3 +100,25 @@ def test_build_retrieval_policy_marks_collection_availability_and_weights():
     assert citation_profile["collections"][0]["relation_model_weights"]["case_to_case"] == 1.0
     assert policy["query_profiles"]["law_lookup"]["collections"][2]["relation_model_weights"]["law_to_law"] == 0.95
     assert all(item["available"] is True for item in citation_profile["collections"][:2])
+
+
+def test_write_embedding_manifest_uses_collection_dim_and_provider(tmp_path):
+    manifest_path = write_embedding_manifest(
+        handoff_dir=tmp_path / "handoff",
+        dataset_dir=tmp_path / "dataset",
+        emb_dir=tmp_path / "emb",
+        collection_manifests=[
+            {
+                "collection_name": "law_article",
+                "model_name": "text-embedding-3-large",
+                "embedding_provider": "openai",
+                "embedding_dim": 1024,
+            }
+        ],
+    )
+
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert payload["model_name"] == "text-embedding-3-large"
+    assert payload["embedding_provider"] == "openai"
+    assert payload["embedding_dim"] == 1024
