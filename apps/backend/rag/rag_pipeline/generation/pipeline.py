@@ -132,6 +132,9 @@ class RagPipeline:
                     opensearch_username=os.getenv("OPENSEARCH_USERNAME") or None,
                     opensearch_password=os.getenv("OPENSEARCH_PASSWORD") or None,
                     embedding_model=os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
+                    embedding_provider=os.getenv("EMBEDDING_PROVIDER", "sentence_transformers"),
+                    embedding_api_key=os.getenv("OPENAI_API_KEY") or None,
+                    embedding_api_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
                 ),
                 generation=GenerationConfig.from_env(),
             )
@@ -160,6 +163,9 @@ class RagPipeline:
                 collection=collection,
                 timeout=rcfg.timeout,
                 embedding_model=rcfg.embedding_model,
+                embedding_provider=rcfg.embedding_provider,
+                embedding_api_key=rcfg.embedding_api_key,
+                embedding_api_base_url=rcfg.embedding_api_base_url,
                 api_key=rcfg.qdrant_api_key,
                 doc_types=doc_types,
                 law_names=law_names,
@@ -249,7 +255,10 @@ class RagPipeline:
 
     def is_embedding_cold_start(self) -> bool:
         """현재 프로세스에서 임베딩 모델 첫 로드가 필요한 상태인지 반환한다."""
-        return not is_embedding_model_cached(self._cfg.retrieval.embedding_model)
+        return not is_embedding_model_cached(
+            self._cfg.retrieval.embedding_model,
+            provider=self._cfg.retrieval.embedding_provider,
+        )
 
     def run(
         self,
