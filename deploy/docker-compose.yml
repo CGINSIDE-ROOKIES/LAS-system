@@ -40,29 +40,6 @@ services:
       - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-4096}
       - DATABASE_URL=${DATABASE_URL:-postgresql://user:password@postgres:5432/las}
 
-  # backend-doc-pipeline:
-  #   build:
-  #     context: apps/backend/doc-processor
-  #     dockerfile: Dockerfile
-  #   restart: unless-stopped
-  #   environment:
-  #     - MIDM_LLM_URL=${MIDM_LLM_URL:-}
-  #     - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-  #     - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-  #     - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-  #     - GEMINI_MODEL=${GEMINI_MODEL:-gemini-flash-latest}
-  #     - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-mpnet-base-v2}
-  #     - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-cpu}
-  #     - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-CPU}
-  #     - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
-  #     - QDRANT_COLLECTION=${QDRANT_COLLECTION:-law_article}
-  #     - QDRANT_API_KEY=${QDRANT_API_KEY:-}
-  #     - QDRANT_VECTOR_NAME_MAP=${QDRANT_VECTOR_NAME_MAP:-}
-  #     - OPENSEARCH_URL=${OPENSEARCH_URL:-http://opensearch:9200}
-  #     - OPENSEARCH_INDEX=${OPENSEARCH_INDEX:-las_legal_docs}
-  #     - OPENSEARCH_USERNAME=${OPENSEARCH_USERNAME:-}
-  #     - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
-
   frontend:
     build:
       context: apps/frontend
