@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 import httpx
 import numpy as np
 import torch
+from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env")
 
 DEFAULT_SENTENCE_TRANSFORMER_MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-large"
@@ -72,7 +77,8 @@ def load_embedding_settings() -> EmbeddingSettings:
     model_name = os.getenv("EMBEDDING_MODEL", default_model).strip() or default_model
     openai_dimensions_raw = os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "").strip()
     openai_dimensions = int(openai_dimensions_raw) if openai_dimensions_raw else None
-    cpu_workers = int(os.getenv("EMBED_CPU_WORKERS", str(DEFAULT_CPU_WORKERS)))
+    cpu_workers_raw = os.getenv("EMBED_CPU_WORKERS", "").strip()
+    cpu_workers = int(cpu_workers_raw) if cpu_workers_raw else DEFAULT_CPU_WORKERS
 
     return EmbeddingSettings(
         provider=provider,
