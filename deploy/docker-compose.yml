@@ -77,13 +77,14 @@ services:
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:3000/').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+          "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
         ]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
     environment:
+      - HOSTNAME=0.0.0.0
       - ALLOWED_FRAME_ORIGINS=${ALLOWED_FRAME_ORIGINS:-}
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
       - BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL:-http://backend-api:8000}

@@ -24,7 +24,7 @@ def test_build_incremental_embeddings_skips_model_load_when_no_upserts(tmp_path,
     def fail_model_load(*args, **kwargs):
         raise AssertionError("embedding model should not be loaded for delete-only patches")
 
-    monkeypatch.setattr("scripts.embed_qdrant_incremental.SentenceTransformer", fail_model_load)
+    monkeypatch.setattr("scripts.embed_qdrant_incremental.create_embedding_backend", fail_model_load)
 
     manifest = build_incremental_embeddings(
         dataset_patch_dir=patch_dir,
