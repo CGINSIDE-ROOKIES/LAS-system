@@ -47,9 +47,9 @@ ground_truth 없이 측정 가능한 3개 메트릭 사용:
 
 | 메트릭 | 의미 | 낮으면 의심되는 원인 |
 |---|---|---|
-| `faithfulness` | 답변이 컨텍스트에 근거하는가 | 생성 단계 hallucination |
 | `answer_relevancy` | 답변이 질문에 관련 있는가 | 프롬프트·생성 품질 문제 |
 | `context_precision` | 관련 문서가 상위에 랭크되는가 | retrieval 순위 문제 |
+| ~~`faithfulness`~~ | ~~답변이 컨텍스트에 근거하는가~~ | 비용/시간 문제로 현재 미측정 |
 
 ### 3-3. 실행 구조 (`eval/run_eval.py`)
 
