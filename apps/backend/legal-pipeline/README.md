@@ -33,6 +33,7 @@
 - Python `>= 3.12`
 - `uv` 사용 권장
 - `.env` 파일에 `LAW_OC=<국가법령정보 API 키>` 필요
+- OpenAI 임베딩 사용 시 `OPENAI_API_KEY`, `EMBEDDING_PROVIDER=openai` 필요
 
 ### 2-2. 설치(프로젝트 루트 기준)
 
@@ -81,6 +82,16 @@ uv run apps/backend/legal-pipeline/scripts/run_current_law_collection.py --max-r
 
 - `apps/backend/legal-pipeline/data/dataset/legal_corpus.jsonl`
 - `apps/backend/legal-pipeline/data/dataset/legal_relations.jsonl`
+
+기본 임베딩 backend는 `sentence-transformers`다. OpenAI로 전환하려면 예시처럼 설정한다.
+
+```bash
+export EMBEDDING_PROVIDER="openai"
+export EMBEDDING_MODEL="text-embedding-3-large"
+export OPENAI_API_KEY="<YOUR_OPENAI_API_KEY>"
+# 선택 사항: 차원 축소가 필요할 때만 지정
+export OPENAI_EMBEDDING_DIMENSIONS="1024"
+```
 
 ### 3-2. 3-collection 임베딩 실행
 

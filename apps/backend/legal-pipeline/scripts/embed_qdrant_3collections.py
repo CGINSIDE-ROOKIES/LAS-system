@@ -2,33 +2,38 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import Counter
 from pathlib import Path
 from typing import Iterable, Iterator, Sequence
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.common.embedding_backend import create_embedding_backend, load_embedding_settings
 from src.export.qdrant_point_id import (
     build_qdrant_point_id,
     canonical_id_from_row,
 )
 
 
-MODEL_NAME = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+EMBEDDING_SETTINGS = load_embedding_settings()
+MODEL_NAME = EMBEDDING_SETTINGS.model_name
+EMBEDDING_PROVIDER = EMBEDDING_SETTINGS.provider
 EMBEDDING_PASSAGE_PREFIX = ""
-NORMALIZE_EMBEDDINGS = True
-EMBEDDING_DTYPE = "float32"
-DEFAULT_BATCH_SIZE = 32
+NORMALIZE_EMBEDDINGS = EMBEDDING_SETTINGS.normalize_embeddings
+EMBEDDING_DTYPE = EMBEDDING_SETTINGS.dtype
+DEFAULT_BATCH_SIZE = 128
 CASE_DOC_TYPES = {"prec", "detc", "decc", "expc"}
 COLLECTIONS = ("law_article", "legal_case", "legal_relation")
 APPENDIX_VECTOR_PLACEHOLDER = "[NO_APPENDIX_LINKED]"
 LAW_ARTICLE_VECTOR_NAMES = ("body", "appendix")
+DEVICE_MODE = EMBEDDING_SETTINGS.device_mode
+
 RELATION_MODEL_SEARCH_PROFILES = {
     "law_to_case": {
         "default_score_multiplier": 1.0,
@@ -333,12 +338,19 @@ def _iter_simple_rows(dataset_dir: Path, collection_name: str) -> list[dict]:
     return list(_iter_collection_rows(dataset_dir, collection_name))
 
 
+def _encode(model, texts: list[str], batch_size: int) -> np.ndarray:
+    return model.encode(texts, batch_size=batch_size)
+
+
 def _build_law_article_import_rows(
     metas: Sequence[dict],
     body_texts: Sequence[str],
     appendix_texts: Sequence[str],
     body_embeddings: np.ndarray,
     appendix_embeddings: np.ndarray,
+    *,
+    embedding_model: str,
+    embedding_provider: str,
 ) -> list[dict]:
     rows: list[dict] = []
     for meta, body_text, appendix_text, body_vector, appendix_vector in zip(
@@ -357,7 +369,8 @@ def _build_law_article_import_rows(
             "appendix": appendix_vector.astype(np.float32).tolist(),
         }
         row["_score"] = None
-        row["embedding_model"] = MODEL_NAME
+        row["embedding_model"] = embedding_model
+        row["embedding_provider"] = embedding_provider
         row["embedding_passage_prefix"] = EMBEDDING_PASSAGE_PREFIX
         row["normalized"] = NORMALIZE_EMBEDDINGS
         rows.append(row)
@@ -368,6 +381,9 @@ def _build_simple_import_rows(
     metas: Sequence[dict],
     texts: Sequence[str],
     embeddings: np.ndarray,
+    *,
+    embedding_model: str,
+    embedding_provider: str,
 ) -> list[dict]:
     rows: list[dict] = []
     for meta, text, vector in zip(metas, texts, embeddings, strict=True):
@@ -375,7 +391,8 @@ def _build_simple_import_rows(
         row["text"] = text
         row["_vector"] = vector.astype(np.float32).tolist()
         row["_score"] = None
-        row["embedding_model"] = MODEL_NAME
+        row["embedding_model"] = embedding_model
+        row["embedding_provider"] = embedding_provider
         row["embedding_passage_prefix"] = EMBEDDING_PASSAGE_PREFIX
         row["normalized"] = NORMALIZE_EMBEDDINGS
         rows.append(row)
@@ -416,7 +433,7 @@ def _build_retrieval_policy(
 
 
 def embed_law_article(
-    model: SentenceTransformer,
+    model,
     dataset_dir: Path,
     emb_dir: Path,
     handoff_dir: Path,
@@ -425,8 +442,8 @@ def embed_law_article(
 ) -> dict:
     collection_name = "law_article"
     rows = _iter_law_article_rows(dataset_dir)
-    stats = _scan_collection(dataset_dir, collection_name)
-    duplicate_canonical_ids: set[str] = stats["duplicate_canonical_ids"]
+    canonical_id_counter: Counter[str] = Counter(_canonical_id_from_row(r) for r in rows)
+    duplicate_canonical_ids: set[str] = {cid for cid, n in canonical_id_counter.items() if n > 1}
 
     metas: list[dict] = []
     body_texts: list[str] = []
@@ -448,22 +465,8 @@ def embed_law_article(
     if not body_texts:
         raise ValueError("[law_article] no texts found to embed")
 
-    body_embeddings = model.encode(
-        body_texts,
-        batch_size=batch_size,
-        show_progress_bar=True,
-        convert_to_numpy=True,
-        normalize_embeddings=NORMALIZE_EMBEDDINGS,
-        precision=EMBEDDING_DTYPE,
-    ).astype(np.float32)
-    appendix_embeddings = model.encode(
-        appendix_texts,
-        batch_size=batch_size,
-        show_progress_bar=True,
-        convert_to_numpy=True,
-        normalize_embeddings=NORMALIZE_EMBEDDINGS,
-        precision=EMBEDDING_DTYPE,
-    ).astype(np.float32)
+    body_embeddings = _encode(model, body_texts, batch_size)
+    appendix_embeddings = _encode(model, appendix_texts, batch_size)
 
     emb_dir.mkdir(parents=True, exist_ok=True)
     body_npy_path = emb_dir / f"{collection_name}.body.npy"
@@ -475,13 +478,22 @@ def embed_law_article(
     np.save(appendix_npy_path, appendix_embeddings)
     write_jsonl(meta_path, metas)
 
-    import_rows = _build_law_article_import_rows(metas, body_texts, appendix_texts, body_embeddings, appendix_embeddings)
+    import_rows = _build_law_article_import_rows(
+        metas,
+        body_texts,
+        appendix_texts,
+        body_embeddings,
+        appendix_embeddings,
+        embedding_model=model.model_name,
+        embedding_provider=model.provider,
+    )
     source_path = _write_variant_source(handoff_dir, collection_name, source_rows)
     import_path = _write_variant_import(handoff_dir, collection_name, import_rows)
 
     manifest = {
         "collection_name": collection_name,
-        "model_name": MODEL_NAME,
+        "model_name": model.model_name,
+        "embedding_provider": model.provider,
         "count": len(metas),
         "embedding_dim": int(body_embeddings.shape[1]) if len(body_embeddings) else 0,
         "normalized": NORMALIZE_EMBEDDINGS,
@@ -501,7 +513,7 @@ def embed_law_article(
 
 
 def embed_simple_collection(
-    model: SentenceTransformer,
+    model,
     dataset_dir: Path,
     emb_dir: Path,
     handoff_dir: Path,
@@ -510,8 +522,13 @@ def embed_simple_collection(
     batch_size: int,
 ) -> dict:
     rows = _iter_simple_rows(dataset_dir, collection_name)
-    stats = _scan_collection(dataset_dir, collection_name)
-    duplicate_canonical_ids: set[str] = stats["duplicate_canonical_ids"]
+    canonical_id_counter: Counter[str] = Counter(_canonical_id_from_row(r) for r in rows)
+    duplicate_canonical_ids: set[str] = {cid for cid, n in canonical_id_counter.items() if n > 1}
+    relation_model_counter: Counter[str] = (
+        Counter(str(r.get("relation_model") or "unknown") for r in rows)
+        if collection_name == "legal_relation"
+        else Counter()
+    )
 
     metas: list[dict] = []
     texts: list[str] = []
@@ -536,14 +553,7 @@ def embed_simple_collection(
             "reason": "no texts found to embed",
         }
 
-    embeddings = model.encode(
-        texts,
-        batch_size=batch_size,
-        show_progress_bar=True,
-        convert_to_numpy=True,
-        normalize_embeddings=NORMALIZE_EMBEDDINGS,
-        precision=EMBEDDING_DTYPE,
-    ).astype(np.float32)
+    embeddings = _encode(model, texts, batch_size)
 
     emb_dir.mkdir(parents=True, exist_ok=True)
     npy_path = emb_dir / f"{collection_name}.npy"
@@ -553,13 +563,20 @@ def embed_simple_collection(
     np.save(npy_path, embeddings)
     write_jsonl(meta_path, metas)
 
-    import_rows = _build_simple_import_rows(metas, texts, embeddings)
+    import_rows = _build_simple_import_rows(
+        metas,
+        texts,
+        embeddings,
+        embedding_model=model.model_name,
+        embedding_provider=model.provider,
+    )
     source_path = _write_variant_source(handoff_dir, collection_name, source_rows)
     import_path = _write_variant_import(handoff_dir, collection_name, import_rows)
 
     manifest = {
         "collection_name": collection_name,
-        "model_name": MODEL_NAME,
+        "model_name": model.model_name,
+        "embedding_provider": model.provider,
         "count": len(metas),
         "embedding_dim": int(embeddings.shape[1]) if len(embeddings) else 0,
         "normalized": NORMALIZE_EMBEDDINGS,
@@ -573,7 +590,7 @@ def embed_simple_collection(
         "import_jsonl_path": str(import_path),
     }
     if collection_name == "legal_relation":
-        manifest["relation_model_counts"] = dict(stats["relation_model_counter"])
+        manifest["relation_model_counts"] = dict(relation_model_counter)
         manifest["relation_model_profiles"] = RELATION_MODEL_SEARCH_PROFILES
     with manifest_path.open("w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
@@ -587,9 +604,17 @@ def write_embedding_manifest(
     collection_manifests: Sequence[dict],
 ) -> Path:
     manifest_path = handoff_dir / "qdrant_embedding_manifest.json"
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+    embedding_dim = max((int(item.get("embedding_dim") or 0) for item in collection_manifests), default=0)
+    model_name = next((str(item.get("model_name") or "") for item in collection_manifests if item.get("model_name")), MODEL_NAME)
+    embedding_provider = next(
+        (str(item.get("embedding_provider") or "") for item in collection_manifests if item.get("embedding_provider")),
+        EMBEDDING_PROVIDER,
+    )
     payload = {
-        "model_name": MODEL_NAME,
-        "embedding_dim": 768,
+        "model_name": model_name,
+        "embedding_provider": embedding_provider,
+        "embedding_dim": embedding_dim,
         "normalized": NORMALIZE_EMBEDDINGS,
         "dtype": "float32",
         "metric": "cosine",
@@ -628,7 +653,7 @@ def parse_args() -> argparse.Namespace:
         "--batch-size",
         type=int,
         default=DEFAULT_BATCH_SIZE,
-        help="SentenceTransformer encode batch size.",
+        help="Embedding encode batch size.",
     )
     return parser.parse_args()
 
@@ -644,36 +669,41 @@ def main() -> None:
     if not dataset_dir.exists():
         raise FileNotFoundError(f"dataset_dir not found: {dataset_dir}")
 
-    model = SentenceTransformer(MODEL_NAME)
+    print(f"[embed] provider={EMBEDDING_PROVIDER} model={MODEL_NAME} device_mode={DEVICE_MODE}")
 
-    collection_manifests: list[dict] = []
-    collection_manifests.append(
-        embed_law_article(
-            model=model,
-            dataset_dir=dataset_dir,
-            emb_dir=emb_dir,
-            handoff_dir=handoff_dir,
-            batch_size=batch_size,
-        )
-    )
-    for collection_name in ("legal_case", "legal_relation"):
+    model = create_embedding_backend(EMBEDDING_SETTINGS)
+
+    try:
+        collection_manifests: list[dict] = []
         collection_manifests.append(
-            embed_simple_collection(
+            embed_law_article(
                 model=model,
                 dataset_dir=dataset_dir,
                 emb_dir=emb_dir,
                 handoff_dir=handoff_dir,
-                collection_name=collection_name,
                 batch_size=batch_size,
             )
         )
+        for collection_name in ("legal_case", "legal_relation"):
+            collection_manifests.append(
+                embed_simple_collection(
+                    model=model,
+                    dataset_dir=dataset_dir,
+                    emb_dir=emb_dir,
+                    handoff_dir=handoff_dir,
+                    collection_name=collection_name,
+                    batch_size=batch_size,
+                )
+            )
 
-    write_embedding_manifest(
-        handoff_dir=handoff_dir,
-        dataset_dir=dataset_dir,
-        emb_dir=emb_dir,
-        collection_manifests=collection_manifests,
-    )
+        write_embedding_manifest(
+            handoff_dir=handoff_dir,
+            dataset_dir=dataset_dir,
+            emb_dir=emb_dir,
+            collection_manifests=collection_manifests,
+        )
+    finally:
+        model.close()
 
 
 if __name__ == "__main__":

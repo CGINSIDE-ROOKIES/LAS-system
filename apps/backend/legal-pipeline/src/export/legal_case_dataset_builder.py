@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from src.collector.legal_doc_collector import DOC_TYPE_LABELS
-from src.common.law_meta import build_law_uid
+from src.common.law_meta import build_law_uid, build_strict_law_uid
 from src.common.io_utils import _iter_jsonl, _read_json
 from src.parser.legal_case_parser import parse_case_payload
 
@@ -233,7 +233,7 @@ def build_legal_case_records(
         first_related_law_name = related_law_names[0] if related_law_names else None
         first_root_law_name = root_law_names[0] if root_law_names else row.get("root_law_name")
         first_source_law_uid = source_law_uids[0] if source_law_uids else None
-        root_law_uid = build_law_uid(None, None, first_root_law_name)
+        root_law_uid = first_source_law_uid if first_root_law_name == first_related_law_name else build_strict_law_uid(None, None)
 
         for chunk_index, chunk in enumerate(chunks):
             search_parts = [

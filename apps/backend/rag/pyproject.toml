@@ -9,6 +9,14 @@ dependencies = [
     "sentence-transformers>=5.2.3",
 ]
 
+[project.optional-dependencies]
+eval = [
+    "ragas>=0.2",
+    "langchain-google-genai>=2.0",
+    "datasets>=2.19",
+    "litellm>=1.82.6",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["rag_pipeline*"]

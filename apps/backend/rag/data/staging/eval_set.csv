@@ -1,29 +1,29 @@
 query,intent,gold_law,gold_article,expected_doc_type,notes
-연장근로는 최대 몇 시간까지 가능한가요,normative,근로기준법,제53조,law,
-근로계약서는 반드시 서면으로 작성해야 하나요,normative,근로기준법,제17조,law,
-회사가 근로자를 해고하려면 미리 통보해야 하나요,normative,근로기준법,제26조,law,
-최저임금은 어떤 기준으로 정해지나요,normative,최저임금법,제4조,law,
-사용자가 임금을 지급하지 않으면 어떻게 되나요,normative,근로기준법,제36조,law,
-하도급 대금은 언제까지 지급해야 하나요,normative,하도급거래 공정화에 관한 법률,제13조,law,
-사업장에서 발생한 산업재해의 보상 기준은 무엇인가요,normative,산업재해보상보험법,제37조,law,
-판례상 근로자성 판단 기준은 무엇인가요,case_law,,,prec,
-유족보상일시금 지급 관련 판례 기준은 무엇인가요,case_law,,,prec,
-근로계약이 형식상 도급계약이면 근로자가 아닌가요,case_law,,,prec,
-근로시간 판단 기준에 대한 판례는 어떤 것이 있나요,case_law,,,prec,
-연장근로 관련 판례에서는 어떤 기준을 적용하나요,mixed,근로기준법,제53조,mixed,allowed_doc_types=law|prec|decc
-근로자 해고 관련 판례와 법 규정은 무엇인가요,mixed,근로기준법,제26조,mixed,allowed_doc_types=law|prec|decc
-하도급 대금 미지급 관련 판례는 어떤 것이 있나요,mixed,하도급거래 공정화에 관한 법률,제13조,mixed,allowed_doc_types=law|prec|decc
-근로기준법에서 정한 휴게시간 규정은 무엇인가요,normative,근로기준법,제54조,law,
-휴일 근로를 하면 추가 수당을 받아야 하나요,normative,근로기준법,제56조,law,
-사용자가 근로자에게 임금을 언제까지 지급해야 하나요,normative,근로기준법,제36조,law,
-판례에서 근로자와 도급계약의 구분 기준은 무엇인가요,case_law,,,prec,
-근로시간 산정과 관련된 법 규정과 판례 기준은 무엇인가요,mixed,근로기준법,제50조,mixed,allowed_doc_types=law|prec|decc
-부당해고 판단 기준은 법 규정과 판례에서 어떻게 설명되나요,mixed,근로기준법,제23조,mixed,allowed_doc_types=law|prec|decc
-고용보험료 부과처분 관련 행정심판례의 판단 기준은 무엇인가요,case_law,,,decc,
-도산등사실인정 거부처분 관련 행정심판례 기준은 무엇인가요,case_law,,,decc,
-근로시간 휴게 관련 법령해석례의 판단 기준은 무엇인가요,case_law,,,expc,
-근로기준법 관련 연관 판례는 어떤 것이 있나요,case_law,근로기준법,,relation,
-하도급거래법 위반 사건에서 법원이 적용한 판례 근거는 무엇인가요,case_law,하도급거래 공정화에 관한 법률,,relation,
-최저임금법과 관련된 법원 판단 연관 사례가 있나요,case_law,최저임금법,,relation,
-산업재해보상보험법 관련 법원 판단 사례는 무엇인가요,case_law,산업재해보상보험법,,relation,
-연장근로 관련 판례와 법령해석례는 어떤 것이 있나요,mixed,근로기준법,제53조,mixed,allowed_doc_types=law|prec|decc|relation
+연장근로 허용 한도가 어떻게 되나요,normative,근로기준법,제53조,law,
+근로계약서 미작성 시 법적 문제가 있나요,normative,근로기준법,제17조,law,
+직원 해고 시 사전 통보 기간은 어떻게 되나요,normative,근로기준법,제26조,law,
+내년도 최저임금 기준은 어떻게 결정되나요,normative,최저임금법,제4조,law,
+임금 체불 시 회사가 부담하는 법적 책임은 무엇인가요,normative,근로기준법,제36조,law,
+하도급 대금 지급 기한을 어기면 어떤 불이익이 있나요,normative,하도급거래 공정화에 관한 법률,제13조,law,
+직원이 업무 중 부상을 입은 경우 회사의 보상 의무는 어떻게 되나요,normative,산업재해보상보험법,제37조,law,
+프리랜서로 계약한 인력이 근로자로 인정될 수 있나요,case_law,,,prec,
+업무상 사망 사고 발생 시 유족에게 어떤 보상을 해줘야 하나요,case_law,,,prec,
+도급계약으로 체결한 외주 인력이 근로자로 인정될 가능성이 있나요,case_law,,,prec,
+직원의 대기시간을 근로시간으로 인정해야 하는 경우가 있나요,case_law,,,prec,
+연장근로 수당 산정 방식은 어떻게 되나요,mixed,근로기준법,제53조,mixed,allowed_doc_types=law|prec|decc
+직원이 부당해고를 주장할 경우 회사가 어떻게 대응해야 하나요,mixed,근로기준법,제26조,mixed,allowed_doc_types=law|prec|decc
+하도급 대금 지급 지연 시 법적 제재는 무엇인가요,mixed,하도급거래 공정화에 관한 법률,제13조,mixed,allowed_doc_types=law|prec|decc
+근무시간에 따른 휴게시간 부여 기준이 어떻게 되나요,normative,근로기준법,제54조,law,
+주말 근무 시 추가 수당 지급 의무가 있나요,normative,근로기준법,제56조,law,
+급여 지급일을 정할 때 법적 기준이 있나요,normative,근로기준법,제36조,law,
+도급 계약 인력에게 업무 지시를 하면 근로자로 볼 수 있나요,case_law,,,prec,
+사업장 밖 근무 시 근로시간 산정은 어떻게 하나요,mixed,근로기준법,제50조,mixed,allowed_doc_types=law|prec|decc
+직원 해고가 정당한지 어떤 기준으로 판단하나요,mixed,근로기준법,제23조,mixed,allowed_doc_types=law|prec|decc
+고용보험료 추가 부과 처분을 받았을 때 이의를 제기할 수 있나요,case_law,,,decc,
+폐업 후 도산 사실 인정이 거부된 경우 어떻게 대응해야 하나요,case_law,,,decc,
+직원 점심시간 중 업무 대기를 시키면 휴게시간으로 인정되지 않나요,case_law,,,expc,
+근로기준법 위반으로 제재받은 사례가 있나요,case_law,근로기준법,,relation,
+하도급법 위반으로 시정명령을 받은 경우 법원 판단은 어떤가요,case_law,하도급거래 공정화에 관한 법률,,relation,
+최저임금 미준수로 소송이 제기된 경우 법원 판단 기준은 무엇인가요,case_law,최저임금법,,relation,
+산재보험 관련 분쟁에서 회사가 불리하게 판결난 사례가 있나요,case_law,산업재해보상보험법,,relation,
+연장근로 수당 관련 분쟁 판례나 해석 사례가 있나요,mixed,근로기준법,제53조,mixed,allowed_doc_types=law|prec|decc|relation

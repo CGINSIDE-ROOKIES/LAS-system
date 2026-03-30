@@ -47,17 +47,17 @@ def _build_bm25_query(
 ) -> dict[str, Any]:
     """OpenSearch BM25 검색용 쿼리 DSL을 생성한다.
 
-    `text` 필드에 OR 매칭을 적용하고, doc_type / law_name 조건은 filter로 추가한다.
+    `search_text` 필드(법령명+조문번호+본문 통합)에 OR 매칭을 적용하고, doc_type / law_name 조건은 filter로 추가한다.
     """
     must: list[dict[str, Any]] = [
-        {"match": {"text": {"query": query, "operator": "or"}}}
+        {"match": {"search_text": {"query": query, "operator": "or"}}}
     ]
     filters: list[dict[str, Any]] = []
 
     if doc_types:
-        filters.append({"terms": {"doc_type.keyword": doc_types}})
+        filters.append({"terms": {"doc_type": doc_types}})
     if law_names:
-        filters.append({"terms": {"law_name.keyword": law_names}})
+        filters.append({"terms": {"law_name": law_names}})
 
     query_obj: dict[str, Any] = {"bool": {"must": must}}
     if filters:
