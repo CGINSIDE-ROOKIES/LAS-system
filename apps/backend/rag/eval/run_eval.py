@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 from rag_pipeline.generation.pipeline import RagPipeline  # noqa: E402
+from rag_pipeline.query_parser import QueryParser  # noqa: E402
 
 
 # ── 파이프라인 실행 ────────────────────────────────────────────────────────────
@@ -36,13 +37,46 @@ from rag_pipeline.generation.pipeline import RagPipeline  # noqa: E402
 def collect_pipeline_results(
     pipeline: RagPipeline,
     queries: list[dict],
+    *,
+    query_parser: QueryParser | None = None,
 ) -> list[dict]:
     results = []
     for i, row in enumerate(queries, 1):
         query = row["query"]
         print(f"[{i:2}/{len(queries)}] {query[:60]}", flush=True)
+
+        # Query Parser 적용
+        law_names: list[str] | None = None
+        pipeline_intent: str | None = None
+        parser_law_names = ""
+        parser_intent = ""
+        if query_parser is not None:
+            parsed = query_parser.parse(query)
+            parser_law_names = "|".join(parsed.law_names)
+            parser_intent = parsed.intent or ""
+            pipeline_intent = parsed.intent
+            if not parsed.is_legal:
+                print(f"  → parser: is_legal=false, 스킵")
+                results.append({
+                    "query": query,
+                    "intent": row.get("intent", ""),
+                    "expected_doc_type": row.get("expected_doc_type", ""),
+                    "gold_law": row.get("gold_law", ""),
+                    "gold_article": row.get("gold_article", ""),
+                    "answer": "법률 무관 질문으로 스킵",
+                    "contexts": [],
+                    "retrieved_doc_types": [],
+                    "law_context_status": "irrelevant",
+                    "parser_law_names": parser_law_names,
+                    "parser_intent": parser_intent,
+                })
+                continue
+            law_names = parsed.law_names or None
+            if law_names:
+                print(f"  → parser: law_names={law_names}")
+
         try:
-            result = pipeline.run(query)
+            result = pipeline.run(query, law_names=law_names, intent=pipeline_intent)
             results.append({
                 "query": query,
                 "intent": row.get("intent", ""),
@@ -59,6 +93,8 @@ def collect_pipeline_results(
                     doc["doc_type"] for doc in result.retrieved_docs
                 ],
                 "law_context_status": result.law_context_status,
+                "parser_law_names": parser_law_names,
+                "parser_intent": parser_intent,
             })
         except Exception as exc:
             print(f"  ERROR: {exc}")
@@ -72,6 +108,8 @@ def collect_pipeline_results(
                 "contexts": [],
                 "retrieved_doc_types": [],
                 "law_context_status": "error",
+                "parser_law_names": parser_law_names,
+                "parser_intent": parser_intent,
             })
     return results
 
@@ -171,7 +209,7 @@ FIELDNAMES = [
     "query", "intent", "expected_doc_type", "gold_law", "gold_article",
     "law_context_status",
     "answer_relevancy", "context_precision",
-    "retrieved_doc_types", "answer",
+    "retrieved_doc_types", "parser_law_names", "parser_intent", "answer",
 ]
 
 
@@ -245,9 +283,10 @@ def print_summary(results: list[dict]) -> None:
 # ── 진입점 ────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--limit", type=int, default=0, help="평가할 쿼리 수 제한 (0=전체)")
-    args = parser.parse_args()
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument("--limit", type=int, default=0, help="평가할 쿼리 수 제한 (0=전체)")
+    arg_parser.add_argument("--use-parser", action="store_true", help="Query Parser 적용 후 평가")
+    args = arg_parser.parse_args()
 
     eval_csv = Path(__file__).parent.parent / "data/staging/eval_set.csv"
     out_dir  = Path(__file__).parent.parent / "data/staging/eval_results"
@@ -258,13 +297,15 @@ def main() -> None:
     if args.limit:
         queries = queries[: args.limit]
 
-    print(f"평가 쿼리: {len(queries)}개")
+    mode = "parser 적용" if args.use_parser else "baseline"
+    print(f"평가 쿼리: {len(queries)}개  [{mode}]")
 
     pipeline = RagPipeline.from_env()
+    query_parser = QueryParser.from_env() if args.use_parser else None
     print("파이프라인 초기화 완료\n")
 
     print("=== Step 1. 파이프라인 실행 ===")
-    results = collect_pipeline_results(pipeline, queries)
+    results = collect_pipeline_results(pipeline, queries, query_parser=query_parser)
 
     print("\n=== Step 2. RAGAS 평가 ===")
     results = run_ragas(results)
