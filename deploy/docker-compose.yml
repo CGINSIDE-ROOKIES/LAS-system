@@ -53,6 +53,18 @@ services:
       context: apps/backend/law-updater
       dockerfile: Dockerfile
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     environment:
       - LAW_OC=${LAW_OC:-}
       - LAW_API_BASE_URL=${LAW_API_BASE_URL:-}
@@ -73,7 +85,7 @@ services:
       - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
     volumes:
       - law-updater-data:/app/data
-    command: ["python", "-c", "import time; time.sleep(10**9)"]
+    command: ["python", "-m", "http.server", "8080", "--bind", "0.0.0.0", "--directory", "/tmp"]
 
   frontend:
     build:
