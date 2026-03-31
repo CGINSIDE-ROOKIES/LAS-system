@@ -22,9 +22,8 @@ _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 _SYSTEM_PROMPT = """\
 당신은 법률 질문 분석기입니다.
-사용자 질문에서 아래 정보를 추출해 JSON으로만 응답하세요. 설명은 절대 추가하지 마세요.
+반드시 아래 형식의 JSON만 출력하세요. 설명, 코드 블록(```), 마크다운 없이 {{ 로 시작하는 순수 JSON만 출력하세요.
 
-출력 형식:
 {{"law_names": [...], "article_no": "...", "intent": "...", "is_legal": true/false}}
 
 - law_names: 아래 목록 중 질문에 해당하는 법령 정식명칭 (없으면 [])
@@ -182,7 +181,7 @@ class QueryParser:
                 model=cfg.model,
                 api_key=cfg.api_key,
                 timeout=cfg.timeout,
-                max_tokens=256,
+                max_tokens=1024,
                 temperature=0.0,
                 system_prompt=self._system_prompt,
             )
