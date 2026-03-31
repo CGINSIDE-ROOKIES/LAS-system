@@ -22,7 +22,6 @@ services:
     environment:
       - MIDM_LLM_URL=${MIDM_LLM_URL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-flash-latest}
       - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-sentence_transformers}
