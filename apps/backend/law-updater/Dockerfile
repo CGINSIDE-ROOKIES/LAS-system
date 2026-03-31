@@ -3,24 +3,25 @@
 # ── Stage 1: build ───────────────────────────────────
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
-WORKDIR /app
+WORKDIR /app/law-updater
 
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-COPY config/ /app/config/
-COPY scripts/ /app/scripts/
-COPY src/ /app/src/
+COPY config/ /app/law-updater/config/
+COPY scripts/ /app/law-updater/scripts/
+COPY src/ /app/law-updater/src/
 
 # ── Stage 2: runtime ────────────────────────────────
 FROM python:3.12-slim-bookworm
 
-WORKDIR /app
+WORKDIR /app/law-updater
 
-COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app/config/ /app/config/
-COPY --from=builder /app/scripts/ /app/scripts/
-COPY --from=builder /app/src/ /app/src/
+COPY --from=builder /app/law-updater/.venv /app/law-updater/.venv
+COPY --from=builder /app/law-updater/config/ /app/law-updater/config/
+COPY --from=builder /app/law-updater/scripts/ /app/law-updater/scripts/
+COPY --from=builder /app/law-updater/src/ /app/law-updater/src/
 
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/app/law-updater/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
+
