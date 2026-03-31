@@ -171,6 +171,7 @@ def ask(
             request.question,
             doc_types=request.doc_types,
             law_names=effective_law_names,
+            intent=parsed.intent,
         )
     except RetrievalError as exc:
         logger.error("ask RetrievalError: %s", exc)
@@ -243,6 +244,7 @@ def ask_stream(
                 request.question,
                 doc_types=request.doc_types,
                 law_names=effective_law_names,
+                intent=parsed.intent,
             )
             for chunk in chunks:
                 answer_parts.append(chunk)
