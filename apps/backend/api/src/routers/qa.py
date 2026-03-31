@@ -27,7 +27,10 @@ from rag_pipeline.retrieval.common import RetrievalError
 
 router = APIRouter(tags=["qa"])
 
-
+_IRRELEVANT_ANSWER = (
+    "저는 노동법·하도급법 전문 법률 Q&A 어시스턴트입니다. "
+    "법률 관련 질문을 해주시면 도움을 드릴 수 있습니다."
+)
 _VALID_DOC_TYPES = {"law", "prec", "detc", "decc", "expc"}
 
 
@@ -147,6 +150,15 @@ def ask(
         "query_parser: law_names=%r article_no=%r intent=%r is_legal=%r parser_fallback=%r",
         parsed.law_names, parsed.article_no, parsed.intent, parsed.is_legal, parsed.parser_fallback,
     )
+
+    if not parsed.is_legal:
+        logger.info("ask 조기 반환: 법률 무관 질문")
+        return AskResponse(
+            answer=_IRRELEVANT_ANSWER,
+            retrieved_docs=[],
+            law_context_status="irrelevant",
+        )
+
     # 사용자가 명시한 law_names 우선, 없으면 파서 결과 사용
     effective_law_names = (
         request.law_names
@@ -199,6 +211,14 @@ def ask_stream(
         "query_parser: law_names=%r article_no=%r intent=%r is_legal=%r parser_fallback=%r",
         parsed.law_names, parsed.article_no, parsed.intent, parsed.is_legal, parsed.parser_fallback,
     )
+
+    if not parsed.is_legal:
+        logger.info("ask_stream 조기 반환: 법률 무관 질문")
+        def _irrelevant():
+            yield f"data: {json.dumps({'type': 'chunk', 'content': _IRRELEVANT_ANSWER}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'retrieved_docs': [], 'law_context_status': 'irrelevant'}, ensure_ascii=False)}\n\n"
+        return StreamingResponse(_irrelevant(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
+
     effective_law_names = (
         request.law_names
         if request.law_names is not None
