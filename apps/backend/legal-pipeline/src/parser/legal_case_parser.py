@@ -19,7 +19,7 @@ from src.common.payload_utils import _first_non_empty, _walk_objects
 DECISION_DATE_KEYS_BY_TARGET = {
     "prec": ("선고일자", "판결일자", "선고일"),
     "detc": ("선고일자", "결정일자", "선고일"),
-    "expc": ("회신일자", "등록일자", "생산일자", "작성일자"),
+    "expc": ("회신일자", "해석일자", "등록일자", "생산일자", "작성일자"),
     "decc": ("재결일자", "의결일자", "결정일자"),
 }
 

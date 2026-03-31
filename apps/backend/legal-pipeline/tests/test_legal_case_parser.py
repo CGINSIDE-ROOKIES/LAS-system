@@ -35,6 +35,7 @@ def test_parse_case_payload_from_expc_json_fixture():
     assert parsed["doc_number"] == "16-0305"
     assert parsed["decision_date"] == "2016.09.01"
     assert "근로기준법 제43조의2" in parsed["body_text"]
+    assert "사업주의 의무를 해석한다." in parsed["body_text"]
 
 
 def test_parse_case_payload_from_expc_html_fixture_uses_fallback_meta():
