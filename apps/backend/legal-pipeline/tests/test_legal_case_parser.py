@@ -38,6 +38,19 @@ def test_parse_case_payload_from_expc_json_fixture():
     assert "사업주의 의무를 해석한다." in parsed["body_text"]
 
 
+def test_parse_case_payload_from_detc_json_fixture_uses_jongguk_date():
+    payload = json.loads((FIXTURE_DIR / "detc_detail.json").read_text(encoding="utf-8"))
+
+    parsed = parse_case_payload("detc", payload)
+
+    assert parsed["canonical_case_id"] == "case::detc::58400"
+    assert parsed["title"] == "참전유공자예우에관한법률 제6조 제1항 위헌확인"
+    assert parsed["doc_number"] == "2002헌마522"
+    assert parsed["decision_date"] == "2003.07.24"
+    assert parsed["body_sections"][0]["label"] == "판시사항"
+    assert parsed["body_sections"][-1]["label"] == "전문"
+
+
 def test_parse_case_payload_from_expc_html_fixture_uses_fallback_meta():
     payload = json.loads((FIXTURE_DIR / "expc_detail_html.json").read_text(encoding="utf-8"))
 

@@ -18,9 +18,38 @@ from src.common.payload_utils import _first_non_empty, _walk_objects
 
 DECISION_DATE_KEYS_BY_TARGET = {
     "prec": ("선고일자", "판결일자", "선고일"),
-    "detc": ("선고일자", "결정일자", "선고일"),
+    "detc": ("종국일자", "선고일자", "결정일자", "선고일"),
     "expc": ("회신일자", "해석일자", "등록일자", "생산일자", "작성일자"),
     "decc": ("재결일자", "의결일자", "결정일자"),
+}
+
+BODY_SECTION_KEYS_BY_TARGET = {
+    "prec": (
+        ("판시사항", ("판시사항",)),
+        ("판결요지", ("판결요지",)),
+        ("참조조문", ("참조조문",)),
+        ("참조판례", ("참조판례",)),
+        ("판례내용", ("판례내용",)),
+    ),
+    "detc": (
+        ("판시사항", ("판시사항",)),
+        ("결정요지", ("결정요지",)),
+        ("심판대상조문", ("심판대상조문",)),
+        ("참조조문", ("참조조문",)),
+        ("참조판례", ("참조판례",)),
+        ("전문", ("전문",)),
+    ),
+    "expc": (
+        ("질의요지", ("질의요지",)),
+        ("회답", ("회답",)),
+        ("이유", ("이유",)),
+    ),
+    "decc": (
+        ("청구취지", ("청구취지",)),
+        ("주문", ("주문",)),
+        ("재결요지", ("재결요지",)),
+        ("이유", ("이유",)),
+    ),
 }
 
 GENERIC_TEXT_KEYS = (
@@ -192,6 +221,34 @@ def extract_case_body_text(
     return sanitize_inline_urls("\n\n".join(deduped).strip())
 
 
+def extract_case_body_sections(
+    target: str,
+    payload: dict[str, Any],
+    fallback_text: str | None = None,
+) -> list[dict[str, str]]:
+    sections: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    for label, keys in BODY_SECTION_KEYS_BY_TARGET.get(target, ()):
+        texts = _find_all_recursive(payload, keys)
+        deduped = _dedup_texts(texts)
+        if not deduped:
+            continue
+        section_text = sanitize_inline_urls("\n\n".join(deduped).strip())
+        normalized = _normalize_space(section_text)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        sections.append({"label": label, "text": section_text})
+
+    if not sections and fallback_text not in (None, ""):
+        fallback_body = _normalize_structure(str(fallback_text))
+        if fallback_body:
+            sections.append({"label": "본문", "text": sanitize_inline_urls(fallback_body)})
+
+    return sections
+
+
 
 def parse_case_payload(
     target: str,
@@ -201,10 +258,12 @@ def parse_case_payload(
     fallback = fallback or {}
     meta = extract_case_meta(target, payload, fallback=fallback)
     body_text = extract_case_body_text(target, payload, fallback_text=str(fallback.get("text") or ""))
+    body_sections = extract_case_body_sections(target, payload, fallback_text=str(fallback.get("text") or ""))
 
     return {
         **meta,
         "body_text": body_text,
+        "body_sections": body_sections,
         "source_format": payload.get("_response_format"),
         "source_content_type": payload.get("_response_content_type"),
         "source_url": payload.get("_response_url"),
