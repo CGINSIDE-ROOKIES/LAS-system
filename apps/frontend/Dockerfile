@@ -39,11 +39,6 @@ RUN pnpm install --frozen-lockfile
 # ── Stage 2: build ───────────────────────────────────
 FROM node:20-alpine AS builder
 
-ARG NEXT_PUBLIC_API_URL
-ARG BACKEND_INTERNAL_URL
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-ENV BACKEND_INTERNAL_URL=$BACKEND_INTERNAL_URL
-
 WORKDIR /app
 
 # Restore workspace packages (symlinks in node_modules point to /app/packages/*)
@@ -60,10 +55,6 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 ENV NODE_ENV=production
-ARG NEXT_PUBLIC_API_URL
-ARG BACKEND_INTERNAL_URL
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-ENV BACKEND_INTERNAL_URL=$BACKEND_INTERNAL_URL
 
 # standalone mirrors /app/ — contains node_modules/, apps/frontend/server.js, etc.
 COPY --from=builder /app/apps/frontend/.next/standalone ./

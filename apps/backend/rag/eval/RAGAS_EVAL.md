@@ -136,11 +136,84 @@ eval_set.csv
   - 예: 연장근로 허용 한도, 근로계약서 미작성, 도급계약 근로자 인정, 연장근로 수당 산정, 도산 사실 인정 거부
 - **context_precision 0.483 → 0.526** — `search_text` 필드 전환 및 인덱스 구조 정비 효과. 특히 `case_law` prec 0.541 → 0.634 큰 폭 개선
 
-### 4-5. 종합 해석
+### 4-5. 4차 측정 (2026-03-31, OpenAI 임베딩 적용 후 baseline)
 
-- **normative `context_precision`이 일관되게 최저** (0.41~0.45) — 사용자 표현과 법령 원문 간 어휘 불일치가 핵심 원인으로 추정
+> OpenAI `text-embedding-3-large` (1024 dim) 전환 후 측정. Query Parser 미적용 baseline.
+
+| 메트릭 | 전체 평균 |
+|---|---|
+| answer_relevancy | **0.756** |
+| context_precision | **0.692** |
+
+| intent | n | answer_relevancy | context_precision |
+|---|---|---|---|
+| normative | 10 | 0.866 | 0.637 |
+| case_law | 12 | 0.684 | 0.731 |
+| mixed | 6 | 0.717 | 0.705 |
+
+- `law_context_status`: ok 26건, supplemented 2건
+- `answer_relevancy` 0.0 저점수 4건 (이전 5건 → 1건 감소)
+  - mixed: 직원이 부당해고를 주장할 경우 회사가 어떻게 대응해야 하나요
+  - case_law: 도급 계약 인력에게 업무 지시를 하면 근로자로 볼 수 있나요
+  - case_law: 폐업 후 도산 사실 인정이 거부된 경우 어떻게 대응해야 하나요
+  - case_law: 근로기준법 위반으로 제재받은 사례가 있나요
+- **전 구간에서 큰 폭 개선** — answer_relevancy 0.703 → 0.756, context_precision 0.526 → 0.692
+- 특히 normative context_precision이 0.445 → 0.637로 가장 크게 향상 (어휘 불일치 문제 완화 효과)
+
+### 4-6. 5차 측정 (2026-03-31, eval_set v2 기준 새 baseline)
+
+> **eval_set 전면 개편** (28 → 43건): gold_article 오류 수정, 법령별 커버리지 보강(기간제·파견·퇴직급여·남녀고용평등·건설산업기본법·산재보험법), case_law에 gold_issue_keyword 추가, Query Parser 미적용 baseline.
+> 이전 측정(4-1~4-5)과 eval_set이 달라 수치 직접 비교는 불가. 이 결과를 v2 eval_set의 기준값으로 삼는다.
+
+| 메트릭 | 전체 평균 |
+|---|---|
+| answer_relevancy | **0.836** |
+| context_precision | **0.740** |
+
+| intent | n | answer_relevancy | context_precision |
+|---|---|---|---|
+| normative | 22 | 0.902 | 0.755 |
+| case_law | 13 | 0.699 | 0.703 |
+| mixed | 8 | 0.877 | 0.758 |
+
+- `law_context_status`: ok 41건, supplemented 2건
+- `answer_relevancy` 0.0 저점수 3건
+  - case_law: 도급계약으로 체결한 외주 인력이 근로자로 인정될 가능성이 있나요
+  - case_law: 폐업 후 도산 사실 인정이 거부된 경우 어떻게 대응해야 하나요
+  - case_law: 근로기준법 위반으로 제재받은 사례가 있나요
+- normative가 이전 대비 높은 수치 — gold_article 오류 수정 및 평가 대상 확대 효과로 보임
+- 저점수 3건 모두 case_law 중 `prec` / `relation` 타입 → corpus에 판례 문서 자체가 부족하거나 retrieval이 법령 문서로 치우치는 현상 의심
+
+### 4-7. 6차 측정 (2026-03-31, Query Parser 적용, intent별 필터 최적화 전)
+
+> Query Parser 적용 (`--use-parser`). intent별 필터 전략 미적용 상태 — `case_law` 질의에도 law_names hard filter + `min_law_contexts` 강제 보강이 동작하는 버전.
+> **v2 eval_set 기준 (4-6 baseline 비교 가능).**
+
+| 메트릭 | 전체 평균 |
+|---|---|
+| answer_relevancy | **0.846** (n=39) |
+| context_precision | **0.718** (n=39) |
+
+| intent | n | answer_relevancy | context_precision |
+|---|---|---|---|
+| normative | 19 | 0.898 | 0.698 |
+| case_law | 12 | 0.755 | 0.715 |
+| mixed | 8 | 0.860 | 0.767 |
+
+- `law_context_status`: ok 37건, missing 4건, supplemented 2건
+- `answer_relevancy` 0.0 저점수 2건
+  - case_law: 폐업 후 도산 사실 인정이 거부된 경우 어떻게 대응해야 하나요
+  - case_law: 기간제 근로자 계약 만료 후 묵시적 갱신이 인정될 수 있나요
+- **case_law rel 0.699 → 0.755** (+0.056) — 파서가 법령 컨텍스트 힌트 제공 효과
+- **normative prec 0.755 → 0.698** (-0.057), **missing 4건 발생** — law_names hard filter 과적용으로 인한 retrieval 실패
+- n이 43→39로 감소 (missing 4건 = RAGAS 평가 제외)
+
+### 4-8. 종합 해석
+
+- **normative · mixed는 안정적** — OpenAI 임베딩 전환 이후 어휘 불일치 문제 크게 완화
+- **파서 적용 시 case_law 개선 / normative 하락** — law_names hard filter가 case_law 판례 retrieval을 방해하는 구조적 문제 확인
+- **다음 개선 타겟: intent 기반 필터 전략** — case_law는 law_names 필터 미적용, mixed는 enforce 해제. 이후 재측정으로 효과 확인
 - LLM 판단 기반 메트릭 특성상 실행마다 노이즈 존재. 단일 수치보다 추세로 판단 필요
-- **다음 개선 타겟: normative 유형의 retrieval 품질** (동의어 사전, query 확장)
 
 ---
 

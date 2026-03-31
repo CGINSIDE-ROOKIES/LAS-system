@@ -147,14 +147,29 @@ class RagPipeline:
         *,
         doc_types: list[str] | None,
         law_names: list[str] | None,
+        intent: str | None = None,
     ) -> tuple[list[dict[str, Any]], str, str, bool]:
         """검색 → 융합 → 순위 조정 → 컨텍스트 빌드.
+
+        intent에 따라 law_names 필터 전략과 law 문서 보강 강제 여부를 조정한다.
+          - case_law : 판례 중심 질의. law_names 필터 미적용, law 문서 강제 보강 해제.
+          - mixed    : 법령+판례 혼합. law_names 유지하되 강제 보강 해제.
+          - normative: 조문 중심 질의. 현재 동작 유지 (law_names 필터 + 강제 보강).
+          - None     : 파서 미적용. 현재 동작 유지.
 
         Returns:
             (llm_rows, context_text, law_context_status, law_context_added)
         """
         rcfg = self._cfg.retrieval
         candidate_k = max(rcfg.top_k, rcfg.candidate_k)
+
+        if intent == "case_law":
+            law_names = None
+            enforce = False
+        elif intent == "mixed":
+            enforce = False
+        else:
+            enforce = self._cfg.enforce_min_law_contexts
 
         t0 = time.perf_counter()
         collection_rows = [
@@ -212,7 +227,7 @@ class RagPipeline:
             rrf_rows,
             top_k=rcfg.top_k,
             min_law_contexts=rcfg.min_law_contexts,
-            enforce_min_law_contexts=self._cfg.enforce_min_law_contexts,
+            enforce_min_law_contexts=enforce,
         )
 
         contexts = build_llm_context_rows(
@@ -269,10 +284,11 @@ class RagPipeline:
         system_prompt: str | None = DEFAULT_SYSTEM_PROMPT,
         doc_types: list[str] | None = None,
         law_names: list[str] | None = None,
+        intent: str | None = None,
     ) -> RagResult:
         """검색 + 생성 파이프라인을 실행하고 최종 결과를 반환한다."""
         llm_rows, context_text, law_context_status, law_context_added = self._retrieve(
-            question, doc_types=doc_types, law_names=law_names
+            question, doc_types=doc_types, law_names=law_names, intent=intent
         )
         prompt = build_user_prompt_with_limit(
             retrieved_context_text=context_text,
@@ -292,6 +308,7 @@ class RagPipeline:
         system_prompt: str | None = DEFAULT_SYSTEM_PROMPT,
         doc_types: list[str] | None = None,
         law_names: list[str] | None = None,
+        intent: str | None = None,
     ) -> tuple[RagResult, Iterator[str]]:
         """검색 후 생성을 스트리밍으로 반환한다.
 
@@ -299,7 +316,7 @@ class RagPipeline:
             (meta, chunks): meta는 sources 등 메타데이터, chunks는 토큰 조각 이터레이터.
         """
         llm_rows, context_text, law_context_status, law_context_added = self._retrieve(
-            question, doc_types=doc_types, law_names=law_names
+            question, doc_types=doc_types, law_names=law_names, intent=intent
         )
         prompt = build_user_prompt_with_limit(
             retrieved_context_text=context_text,
