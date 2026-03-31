@@ -107,6 +107,24 @@ uv run python cli/generate_answer.py --question "연장근로 최대 시간은?"
 - `source_id_normalized`: 중복 제거/병합 기준으로 사용한 정규화 source id
 - 운영/표시 권장: `source_id`(= normalized 우선), 디버깅 시 raw 함께 확인
 
+## 임베딩 환경변수
+
+`EMBEDDING_PROVIDER`로 임베딩 backend를 전환할 수 있다.
+
+```env
+# sentence-transformers 사용 (기본값, 로컬 모델)
+EMBEDDING_PROVIDER=sentence_transformers
+EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-mpnet-base-v2
+
+# OpenAI 사용 시
+# EMBEDDING_PROVIDER=openai
+# EMBEDDING_MODEL=text-embedding-3-large
+# OPENAI_API_KEY=...
+# OPENAI_BASE_URL=https://api.openai.com/v1  # 기본값, 생략 가능
+```
+
+> OpenAI로 전환 시 Qdrant에 저장된 벡터와 차원이 맞아야 한다 (1024 dim).
+
 ## LLM 환경변수 (generation CLI 사용 시)
 
 `generator.py` / `generate_answer.py` 실행 시 `.env`에 추가로 필요하다.
