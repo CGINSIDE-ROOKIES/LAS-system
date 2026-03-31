@@ -80,6 +80,7 @@ def test_build_case_to_case_relation_records_resolves_referenced_doc_number(tmp_
     assert record["source_canonical_case_id"] == "case::prec::123456"
     assert record["target_canonical_case_id"] == "case::prec::777777"
     assert record["referenced_case_number"] == "2018다12345"
+    assert record["reference_sources"] == ["body_regex"]
     assert record["resolution_status"] == "resolved"
 
 
@@ -234,6 +235,7 @@ def test_build_case_reference_audit_records_tracks_ambiguous_and_unresolved(tmp_
     by_ref = {record["referenced_case_number"]: record for record in records}
     assert by_ref["2018다12345"]["resolution_status"] == "ambiguous"
     assert by_ref["2018다12345"]["candidate_count"] == 2
+    assert by_ref["2018다12345"]["reference_sources"] == ["body_regex"]
     assert by_ref["2027다99999"]["resolution_status"] == "unresolved_external"
     assert by_ref["2027다99999"]["candidate_count"] == 0
 
@@ -313,3 +315,4 @@ def test_build_case_to_case_relation_records_uses_structured_reference_field(tmp
 
     assert len(records) == 1
     assert records[0]["referenced_case_number"] == "2018다12345"
+    assert records[0]["reference_sources"] == ["structured_field"]

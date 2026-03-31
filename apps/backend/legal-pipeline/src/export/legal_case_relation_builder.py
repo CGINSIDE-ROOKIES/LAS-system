@@ -54,28 +54,41 @@ def _merge_referenced_case_numbers(
     parsed: dict[str, Any],
     body_text: str,
     source_doc_number: Any,
-) -> list[str]:
-    merged: list[str] = []
-    seen: set[str] = set()
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
 
     for item in parsed.get("structured_case_refs") or []:
         if not isinstance(item, dict):
             continue
         case_number = str(item.get("case_number") or "").strip()
         normalized = _normalize_case_number(case_number)
-        if not normalized or normalized in seen:
+        if not normalized:
             continue
-        seen.add(normalized)
-        merged.append(case_number)
+        entry = merged.setdefault(
+            normalized,
+            {
+                "case_number": case_number,
+                "reference_sources": [],
+            },
+        )
+        if "structured_field" not in entry["reference_sources"]:
+            entry["reference_sources"].append("structured_field")
 
     for case_number in extract_case_number_refs(body_text, exclude_numbers=[source_doc_number]):
         normalized = _normalize_case_number(case_number)
-        if not normalized or normalized in seen:
+        if not normalized:
             continue
-        seen.add(normalized)
-        merged.append(case_number)
+        entry = merged.setdefault(
+            normalized,
+            {
+                "case_number": case_number,
+                "reference_sources": [],
+            },
+        )
+        if "body_regex" not in entry["reference_sources"]:
+            entry["reference_sources"].append("body_regex")
 
-    return merged
+    return [merged[key] for key in sorted(merged)]
 
 
 def _iter_case_reference_candidates(
@@ -111,11 +124,12 @@ def build_case_to_case_relation_records(
         if not body_text:
             continue
 
-        referenced_case_numbers = _merge_referenced_case_numbers(parsed, body_text, source_doc_number)
-        if not referenced_case_numbers:
+        referenced_case_rows = _merge_referenced_case_numbers(parsed, body_text, source_doc_number)
+        if not referenced_case_rows:
             continue
 
-        for referenced_case_number in referenced_case_numbers:
+        for ref_row in referenced_case_rows:
+            referenced_case_number = str(ref_row.get("case_number") or "").strip()
             normalized_ref = _normalize_case_number(referenced_case_number)
             if not normalized_ref:
                 continue
@@ -168,6 +182,7 @@ def build_case_to_case_relation_records(
                 "target_doc_number": target_row.get("doc_number"),
                 "target_doc_type_label": target_row.get("doc_type_label"),
                 "referenced_case_number": referenced_case_number,
+                "reference_sources": list(ref_row.get("reference_sources") or []),
                 "root_law_name": row.get("root_law_name"),
                 "root_law_names": row.get("root_law_names") or [],
                 "related_law_names": row.get("source_law_names") or [],
@@ -214,8 +229,9 @@ def build_case_reference_audit_records(
         if not body_text:
             continue
 
-        referenced_case_numbers = _merge_referenced_case_numbers(parsed, body_text, source_doc_number)
-        for referenced_case_number in referenced_case_numbers:
+        referenced_case_rows = _merge_referenced_case_numbers(parsed, body_text, source_doc_number)
+        for ref_row in referenced_case_rows:
+            referenced_case_number = str(ref_row.get("case_number") or "").strip()
             normalized_ref = _normalize_case_number(referenced_case_number)
             if not normalized_ref:
                 continue
@@ -253,6 +269,7 @@ def build_case_reference_audit_records(
                     "source_title": parsed.get("title"),
                     "source_doc_number": source_doc_number,
                     "referenced_case_number": referenced_case_number,
+                    "reference_sources": list(ref_row.get("reference_sources") or []),
                     "normalized_referenced_case_number": normalized_ref,
                     "resolution_status": resolution_status,
                     "candidate_count": len(candidate_rows),

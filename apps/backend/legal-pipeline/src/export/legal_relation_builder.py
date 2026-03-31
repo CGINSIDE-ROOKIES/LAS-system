@@ -161,8 +161,8 @@ def _merge_article_refs(
     parsed: dict[str, Any],
     body_text: str,
     family_law_names: list[str],
-) -> dict[str, list[dict[str, str]]]:
-    merged: dict[str, list[dict[str, str]]] = {}
+) -> dict[str, list[dict[str, Any]]]:
+    merged: dict[str, list[dict[str, Any]]] = {}
 
     for item in parsed.get("structured_article_refs") or []:
         if not isinstance(item, dict):
@@ -176,16 +176,38 @@ def _merge_article_refs(
         article = {
             "article_key": article_key,
             "article_no_display": article_no_display,
+            "reference_sources": ["structured_field"],
         }
-        if article not in merged[law_name]:
+        if not any(
+            existing["article_key"] == article["article_key"]
+            and existing["article_no_display"] == article["article_no_display"]
+            for existing in merged[law_name]
+        ):
             merged[law_name].append(article)
 
     body_refs_map = extract_explicit_article_refs(body_text, family_law_names) if body_text else {}
     for law_name, refs in body_refs_map.items():
         merged.setdefault(law_name, [])
         for article in refs:
-            if article not in merged[law_name]:
-                merged[law_name].append(article)
+            existing = next(
+                (
+                    item
+                    for item in merged[law_name]
+                    if item["article_key"] == article["article_key"]
+                    and item["article_no_display"] == article["article_no_display"]
+                ),
+                None,
+            )
+            if existing is None:
+                merged[law_name].append(
+                    {
+                        **article,
+                        "reference_sources": ["body_regex"],
+                    }
+                )
+                continue
+            if "body_regex" not in existing["reference_sources"]:
+                existing["reference_sources"].append("body_regex")
 
     return merged
 
@@ -282,6 +304,14 @@ def build_root_relation_payloads(
         evidence_preview = build_evidence_preview(body_text, law_name=law_name, anchor=preview_anchor)
         article_keys = [item["article_key"] for item in article_refs]
         article_no_displays = [item["article_no_display"] for item in article_refs]
+        article_reference_sources = sorted(
+            {
+                source
+                for item in article_refs
+                for source in (item.get("reference_sources") or [])
+                if str(source).strip()
+            }
+        )
         source_file_paths = sorted(
             {
                 str(hit.get("source_file_path") or "").strip()
@@ -317,6 +347,7 @@ def build_root_relation_payloads(
             "relation_types": relation_types,
             "article_keys": article_keys,
             "article_no_displays": article_no_displays,
+            "article_reference_sources": article_reference_sources,
             "relation_confidence": _confidence(article_refs, matched_law_names, law_name, has_structured_article_ref),
             "evidence_preview": evidence_preview,
             "display_text": _display_text(evidence_preview or body_text),

@@ -121,6 +121,7 @@ def test_build_legal_relation_records_dedupes_by_case_and_law(tmp_path):
     assert labor_relation["id"] == "relation::case::prec::123456::law-001"
     assert labor_relation["source_hit_count"] == 2
     assert labor_relation["article_keys"] == ["43-2"]
+    assert labor_relation["article_reference_sources"] == ["body_regex", "structured_field"]
     assert "cited_law" in labor_relation["relation_types"]
     assert labor_relation["relation_confidence"] == 0.98
 
@@ -292,4 +293,5 @@ def test_build_legal_relation_records_uses_structured_article_reference_field(tm
     assert record["law_name"] == "근로기준법"
     assert record["article_keys"] == ["43-2"]
     assert record["article_no_displays"] == ["제43조의2"]
+    assert record["article_reference_sources"] == ["structured_field"]
     assert record["relation_confidence"] == 0.98
