@@ -24,7 +24,7 @@ TPM: 250k
 RPD: 500
 """
 gemini_flash_lite = ChatGoogleGenerativeAI(
-    api_key=load_env_SecretStr("GOOGLE_API_KEY"),
+    api_key=load_env_SecretStr("GEMINI_API_KEY"),
     model="gemini-3.1-flash-lite-preview",
     temperature=0.7,
     max_retries=2
