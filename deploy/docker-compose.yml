@@ -74,9 +74,6 @@ services:
     build:
       context: apps/frontend
       dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
-        BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend-api:8000}
     restart: unless-stopped
     healthcheck:
       test:
