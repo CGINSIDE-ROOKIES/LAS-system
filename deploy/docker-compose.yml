@@ -53,7 +53,7 @@ services:
     build:
       context: apps/backend/law-updater
       dockerfile: Dockerfile
-    restart: "no"
+    restart: unless-stopped
     environment:
       - LAW_OC=${LAW_OC:-}
       - LAW_API_BASE_URL=${LAW_API_BASE_URL:-}
@@ -74,6 +74,7 @@ services:
       - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
     volumes:
       - law-updater-data:/app/data
+    command: ["sleep", "infinity"]
 
   frontend:
     build:
