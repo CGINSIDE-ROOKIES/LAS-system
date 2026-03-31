@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .common import DEFAULT_EMBEDDING_MODEL
+from .common import DEFAULT_EMBEDDING_MODEL, DEFAULT_OPENAI_API_BASE_URL
 
 
 @dataclass
@@ -22,6 +22,10 @@ class RetrievalConfig:
     opensearch_username: str | None = None
     opensearch_password: str | None = None
     embedding_model: str = DEFAULT_EMBEDDING_MODEL
+    embedding_provider: str = "sentence_transformers"
+    embedding_api_key: str | None = None
+    embedding_api_base_url: str = DEFAULT_OPENAI_API_BASE_URL
+    embedding_dimensions: int | None = None
 
     # 파이프라인 파라미터
     top_k: int = 5
