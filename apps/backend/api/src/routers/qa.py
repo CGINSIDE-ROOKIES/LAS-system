@@ -19,8 +19,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from src.db import get_db
-from src.dependencies import get_rag_pipeline
+from src.dependencies import get_query_parser, get_rag_pipeline
 from rag_pipeline.generation.pipeline import RagPipeline
+from rag_pipeline.query_parser import QueryParser
 from src.history import delete_history_item, delete_history_items, get_history, get_history_item, save_qa
 from rag_pipeline.retrieval.common import RetrievalError
 
@@ -134,16 +135,30 @@ def history_item(
 def ask(
     request: AskRequest,
     pipeline: RagPipeline = Depends(get_rag_pipeline),
+    parser: QueryParser = Depends(get_query_parser),
     conn: psycopg2.extensions.connection = Depends(get_db),
 ) -> AskResponse:
     """질문을 받아 RAG 파이프라인을 실행하고 답변을 반환합니다."""
     t0 = time.perf_counter()
     logger.info("ask 요청: %s", request.question[:80])
+
+    parsed = parser.parse(request.question)
+    logger.info(
+        "query_parser: law_names=%r article_no=%r intent=%r is_legal=%r parser_fallback=%r",
+        parsed.law_names, parsed.article_no, parsed.intent, parsed.is_legal, parsed.parser_fallback,
+    )
+    # 사용자가 명시한 law_names 우선, 없으면 파서 결과 사용
+    effective_law_names = (
+        request.law_names
+        if request.law_names is not None
+        else (parsed.law_names or None)
+    )
+
     try:
         result = pipeline.run(
             request.question,
             doc_types=request.doc_types,
-            law_names=request.law_names,
+            law_names=effective_law_names,
         )
     except RetrievalError as exc:
         logger.error("ask RetrievalError: %s", exc)
@@ -175,9 +190,21 @@ def ask(
 def ask_stream(
     request: AskRequest,
     pipeline: RagPipeline = Depends(get_rag_pipeline),
+    parser: QueryParser = Depends(get_query_parser),
     conn: psycopg2.extensions.connection = Depends(get_db),
 ) -> StreamingResponse:
     """질문을 받아 RAG 파이프라인을 실행하고 답변을 SSE로 스트리밍합니다."""
+    parsed = parser.parse(request.question)
+    logger.info(
+        "query_parser: law_names=%r article_no=%r intent=%r is_legal=%r parser_fallback=%r",
+        parsed.law_names, parsed.article_no, parsed.intent, parsed.is_legal, parsed.parser_fallback,
+    )
+    effective_law_names = (
+        request.law_names
+        if request.law_names is not None
+        else (parsed.law_names or None)
+    )
+
     def generate():
         t0 = time.perf_counter()
         logger.info("ask_stream 요청: %s", request.question[:80])
@@ -195,7 +222,7 @@ def ask_stream(
             meta, chunks = pipeline.stream(
                 request.question,
                 doc_types=request.doc_types,
-                law_names=request.law_names,
+                law_names=effective_law_names,
             )
             for chunk in chunks:
                 answer_parts.append(chunk)
