@@ -52,6 +52,13 @@ BODY_SECTION_KEYS_BY_TARGET = {
     ),
 }
 
+CASE_REFERENCE_KEYS_BY_TARGET = {
+    "prec": ("참조판례",),
+    "detc": ("참조판례",),
+    "expc": (),
+    "decc": (),
+}
+
 GENERIC_TEXT_KEYS = (
     "전문",
     "본문",
@@ -259,11 +266,17 @@ def parse_case_payload(
     meta = extract_case_meta(target, payload, fallback=fallback)
     body_text = extract_case_body_text(target, payload, fallback_text=str(fallback.get("text") or ""))
     body_sections = extract_case_body_sections(target, payload, fallback_text=str(fallback.get("text") or ""))
+    structured_case_refs = extract_structured_case_number_refs(
+        target,
+        payload,
+        exclude_numbers=[meta.get("doc_number")],
+    )
 
     return {
         **meta,
         "body_text": body_text,
         "body_sections": body_sections,
+        "structured_case_refs": structured_case_refs,
         "source_format": payload.get("_response_format"),
         "source_content_type": payload.get("_response_content_type"),
         "source_url": payload.get("_response_url"),
@@ -531,6 +544,35 @@ def extract_case_number_refs(text: str, exclude_numbers: Iterable[str] | None = 
             continue
         seen.add(normalized_candidate)
         results.append(candidate)
+
+    return results
+
+
+def extract_structured_case_number_refs(
+    target: str,
+    payload: dict[str, Any],
+    exclude_numbers: Iterable[str] | None = None,
+) -> list[dict[str, str]]:
+    keys = CASE_REFERENCE_KEYS_BY_TARGET.get(target, ())
+    if not keys:
+        return []
+
+    results: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    for text in _find_all_recursive(payload, keys):
+        for case_number in extract_case_number_refs(text, exclude_numbers=exclude_numbers):
+            normalized_case_number = _normalize_name(case_number)
+            if not normalized_case_number or normalized_case_number in seen:
+                continue
+            seen.add(normalized_case_number)
+            results.append(
+                {
+                    "case_number": case_number,
+                    "source": "structured_field",
+                    "field_name": keys[0],
+                }
+            )
 
     return results
 

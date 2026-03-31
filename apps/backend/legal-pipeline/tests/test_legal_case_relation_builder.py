@@ -236,3 +236,80 @@ def test_build_case_reference_audit_records_tracks_ambiguous_and_unresolved(tmp_
     assert by_ref["2018다12345"]["candidate_count"] == 2
     assert by_ref["2027다99999"]["resolution_status"] == "unresolved_external"
     assert by_ref["2027다99999"]["candidate_count"] == 0
+
+
+def test_build_case_to_case_relation_records_uses_structured_reference_field(tmp_path):
+    raw_dir = tmp_path / "raw" / "02_related_legal_docs"
+    root = raw_dir / "근로기준법"
+
+    source_detail_path = root / "canonical" / "prec" / "case_prec_123456__detail.json"
+    _write_json(
+        source_detail_path,
+        {
+            "PrecService": {
+                "판례정보일련번호": "123456",
+                "사건명": "임금",
+                "사건번호": "2019다12345",
+                "선고일자": "2019.05.30",
+                "참조판례": "2018다12345",
+                "판례내용": "본문에는 사건번호가 직접 나오지 않는다.",
+            }
+        },
+    )
+
+    target_detail_path = root / "canonical" / "prec" / "case_prec_777777__detail.json"
+    _write_json(
+        target_detail_path,
+        {
+            "PrecService": {
+                "판례정보일련번호": "777777",
+                "사건명": "선행판결",
+                "사건번호": "2018다12345",
+                "선고일자": "2018.04.20",
+                "판례내용": "선행 판결 본문",
+            }
+        },
+    )
+
+    _write_jsonl(
+        root / "canonical_cases.jsonl",
+        [
+            {
+                "id": "case::prec::123456",
+                "canonical_case_id": "case::prec::123456",
+                "canonical_id": "case::prec::123456",
+                "target": "prec",
+                "doc_type_label": "판례",
+                "doc_id": "123456",
+                "title": "임금",
+                "doc_number": "2019다12345",
+                "root_law_name": "근로기준법",
+                "source_law_names": ["근로기준법"],
+                "source_law_uids": ["law-001"],
+                "source_hit_count": 1,
+                "detail_available": True,
+                "detail_payload_path": str(source_detail_path),
+            },
+            {
+                "id": "case::prec::777777",
+                "canonical_case_id": "case::prec::777777",
+                "canonical_id": "case::prec::777777",
+                "target": "prec",
+                "doc_type_label": "판례",
+                "doc_id": "777777",
+                "title": "선행판결",
+                "doc_number": "2018다12345",
+                "root_law_name": "근로기준법",
+                "source_law_names": ["근로기준법"],
+                "source_law_uids": ["law-001"],
+                "source_hit_count": 1,
+                "detail_available": True,
+                "detail_payload_path": str(target_detail_path),
+            },
+        ],
+    )
+
+    records = build_case_to_case_relation_records(raw_related_base_dir=raw_dir)
+
+    assert len(records) == 1
+    assert records[0]["referenced_case_number"] == "2018다12345"

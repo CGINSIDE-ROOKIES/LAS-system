@@ -50,6 +50,34 @@ def _build_doc_number_index(canonical_rows: list[dict[str, Any]]) -> dict[str, l
     return index
 
 
+def _merge_referenced_case_numbers(
+    parsed: dict[str, Any],
+    body_text: str,
+    source_doc_number: Any,
+) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+
+    for item in parsed.get("structured_case_refs") or []:
+        if not isinstance(item, dict):
+            continue
+        case_number = str(item.get("case_number") or "").strip()
+        normalized = _normalize_case_number(case_number)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        merged.append(case_number)
+
+    for case_number in extract_case_number_refs(body_text, exclude_numbers=[source_doc_number]):
+        normalized = _normalize_case_number(case_number)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        merged.append(case_number)
+
+    return merged
+
+
 def _iter_case_reference_candidates(
     raw_related_base_dir: str | Path,
 ) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
@@ -83,10 +111,7 @@ def build_case_to_case_relation_records(
         if not body_text:
             continue
 
-        referenced_case_numbers = extract_case_number_refs(
-            body_text,
-            exclude_numbers=[source_doc_number],
-        )
+        referenced_case_numbers = _merge_referenced_case_numbers(parsed, body_text, source_doc_number)
         if not referenced_case_numbers:
             continue
 
@@ -189,10 +214,7 @@ def build_case_reference_audit_records(
         if not body_text:
             continue
 
-        referenced_case_numbers = extract_case_number_refs(
-            body_text,
-            exclude_numbers=[source_doc_number],
-        )
+        referenced_case_numbers = _merge_referenced_case_numbers(parsed, body_text, source_doc_number)
         for referenced_case_number in referenced_case_numbers:
             normalized_ref = _normalize_case_number(referenced_case_number)
             if not normalized_ref:

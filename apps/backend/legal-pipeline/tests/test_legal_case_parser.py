@@ -23,6 +23,13 @@ def test_parse_case_payload_from_prec_json_fixture():
     assert parsed["doc_number"] == "2019다12345"
     assert parsed["decision_date"] == "2019.05.30"
     assert "근로기준법 제43조의2" in parsed["body_text"]
+    assert parsed["structured_case_refs"] == [
+        {
+            "case_number": "2018다12345",
+            "source": "structured_field",
+            "field_name": "참조판례",
+        }
+    ]
 
 
 def test_parse_case_payload_from_expc_json_fixture():
