@@ -30,6 +30,15 @@ def test_parse_case_payload_from_prec_json_fixture():
             "field_name": "참조판례",
         }
     ]
+    assert parsed["structured_article_refs"] == [
+        {
+            "law_name": "근로기준법",
+            "article_key": "43-2",
+            "article_no_display": "제43조의2",
+            "source": "structured_field",
+            "field_name": "참조조문",
+        }
+    ]
 
 
 def test_parse_case_payload_from_expc_json_fixture():

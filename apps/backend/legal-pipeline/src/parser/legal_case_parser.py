@@ -59,6 +59,13 @@ CASE_REFERENCE_KEYS_BY_TARGET = {
     "decc": (),
 }
 
+ARTICLE_REFERENCE_KEYS_BY_TARGET = {
+    "prec": ("참조조문",),
+    "detc": ("참조조문",),
+    "expc": (),
+    "decc": (),
+}
+
 GENERIC_TEXT_KEYS = (
     "전문",
     "본문",
@@ -271,12 +278,14 @@ def parse_case_payload(
         payload,
         exclude_numbers=[meta.get("doc_number")],
     )
+    structured_article_refs = extract_structured_article_refs(target, payload)
 
     return {
         **meta,
         "body_text": body_text,
         "body_sections": body_sections,
         "structured_case_refs": structured_case_refs,
+        "structured_article_refs": structured_article_refs,
         "source_format": payload.get("_response_format"),
         "source_content_type": payload.get("_response_content_type"),
         "source_url": payload.get("_response_url"),
@@ -573,6 +582,39 @@ def extract_structured_case_number_refs(
                     "field_name": keys[0],
                 }
             )
+
+    return results
+
+
+def extract_structured_article_refs(target: str, payload: dict[str, Any]) -> list[dict[str, str]]:
+    keys = ARTICLE_REFERENCE_KEYS_BY_TARGET.get(target, ())
+    if not keys:
+        return []
+
+    results: list[dict[str, str]] = []
+
+    for text in _find_all_recursive(payload, keys):
+        normalized_text = _normalize_structure(text)
+        if not normalized_text:
+            continue
+        family_law_names = []
+        for law_match in re.finditer(r"([가-힣0-9ㆍ·()\-\s]+?)\s*제\d+조(?:의\d+)?", normalized_text):
+            law_name = re.sub(r"\s+", " ", str(law_match.group(1) or "")).strip(" ,./")
+            if law_name and law_name not in family_law_names:
+                family_law_names.append(law_name)
+
+        refs_map = extract_explicit_article_refs(normalized_text, family_law_names)
+        for law_name, refs in refs_map.items():
+            for article in refs:
+                row = {
+                    "law_name": law_name,
+                    "article_key": article["article_key"],
+                    "article_no_display": article["article_no_display"],
+                    "source": "structured_field",
+                    "field_name": keys[0],
+                }
+                if row not in results:
+                    results.append(row)
 
     return results
 
