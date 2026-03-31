@@ -25,9 +25,15 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-flash-latest}
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-sentence_transformers}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-mpnet-base-v2}
       - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-cpu}
       - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-CPU}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENAI_EMBEDDING_DIMENSIONS=${OPENAI_EMBEDDING_DIMENSIONS:-}
+      - QUERY_PARSER_MODEL=${QUERY_PARSER_MODEL:-}
+      - QUERY_PARSER_TIMEOUT=${QUERY_PARSER_TIMEOUT:-10}
+      - QUERY_PARSER_STRICT=${QUERY_PARSER_STRICT:-false}
       - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
       - QDRANT_COLLECTIONS=${QDRANT_COLLECTIONS:-law_article,legal_case,legal_relation}
       - QDRANT_API_KEY=${QDRANT_API_KEY:-}

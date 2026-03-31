@@ -14,7 +14,7 @@ Legal AI Assistant FastAPI 백엔드 서버.
 
 ```bash
 cd apps/backend/api
-cp ../rag/.env.example .env   # 최초 1회 — QDRANT_URL, GEMINI_API_KEY 등 채워야 함
+ln -sf ../rag/.env .env   # rag/.env를 공유 (최초 1회, rag/.env가 먼저 설정되어 있어야 함)
 
 uv run uvicorn main:app --reload                    # 개발 서버
 uv run uvicorn main:app --host 0.0.0.0 --port 8000  # 운영 서버
@@ -34,8 +34,10 @@ QDRANT_COLLECTIONS=law_article,legal_case,legal_relation
 OPENSEARCH_URL=http://localhost:9200
 OPENSEARCH_INDEX=las_legal_docs
 
-# 임베딩 모델 (768차원)
+# 임베딩 provider (sentence_transformers | openai)
+EMBEDDING_PROVIDER=sentence_transformers
 EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-mpnet-base-v2
+# OpenAI 사용 시: EMBEDDING_PROVIDER=openai, EMBEDDING_MODEL=text-embedding-3-large, OPENAI_API_KEY=...
 
 # LLM — Gemini
 LLM_PROVIDER=gemini
