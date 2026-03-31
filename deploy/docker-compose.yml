@@ -74,7 +74,7 @@ services:
       - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
     volumes:
       - law-updater-data:/app/data
-    command: ["sleep", "infinity"]
+    command: ["tail", "-f", "/dev/null"]
 
   frontend:
     build:

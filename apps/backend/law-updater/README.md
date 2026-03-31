@@ -6,7 +6,7 @@ Minimal runtime packaging for `apps/backend/legal-pipeline/scripts/run_increment
 - Embeddings are external-API only. Local sentence-transformer execution is intentionally removed.
 - Base install is intended for `--skip-embed` or API-backed embeddings.
 - Docker build context should be `apps/backend/law-updater/`.
-- The image does not define a default command. Pass the full job command from Coolify.
+- The image does not define a default command. In `deploy/docker-compose.yml`, the service is kept alive with `tail -f /dev/null` so Coolify can exec scheduled commands into the running container.
 
 Examples:
 
