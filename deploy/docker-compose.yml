@@ -1,3 +1,6 @@
+# Coolify runs this file with `--project-directory` set to the repo root,
+# so build contexts here must stay repo-root-relative.
+
 services:
   backend-api:
     build:
@@ -19,7 +22,6 @@ services:
     environment:
       - MIDM_LLM_URL=${MIDM_LLM_URL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash-lite}
       - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-sentence_transformers}
@@ -46,36 +48,49 @@ services:
       - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-2048}
       - DATABASE_URL=${DATABASE_URL:-postgresql://user:password@postgres:5432/las}
 
-  # backend-doc-pipeline:
-  #   build:
-  #     context: apps/backend/doc-processor
-  #     dockerfile: Dockerfile
-  #   restart: unless-stopped
-  #   environment:
-  #     - MIDM_LLM_URL=${MIDM_LLM_URL:-}
-  #     - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-  #     - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-  #     - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-  #     - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash-lite}
-  #     - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-mpnet-base-v2}
-  #     - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-cpu}
-  #     - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-CPU}
-  #     - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
-  #     - QDRANT_COLLECTION=${QDRANT_COLLECTION:-law_article}
-  #     - QDRANT_API_KEY=${QDRANT_API_KEY:-}
-  #     - QDRANT_VECTOR_NAME_MAP=${QDRANT_VECTOR_NAME_MAP:-}
-  #     - OPENSEARCH_URL=${OPENSEARCH_URL:-http://opensearch:9200}
-  #     - OPENSEARCH_INDEX=${OPENSEARCH_INDEX:-las_legal_docs}
-  #     - OPENSEARCH_USERNAME=${OPENSEARCH_USERNAME:-}
-  #     - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
+  law-updater:
+    build:
+      context: apps/backend/law-updater
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    environment:
+      - LAW_OC=${LAW_OC:-}
+      - LAW_API_BASE_URL=${LAW_API_BASE_URL:-}
+      - EMBEDDING_PROVIDER=${LAW_UPDATER_EMBEDDING_PROVIDER:-openai}
+      - EMBEDDING_MODEL=${LAW_UPDATER_EMBEDDING_MODEL:-text-embedding-3-large}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${LAW_UPDATER_OPENAI_BASE_URL:-}
+      - OPENAI_EMBEDDING_DIMENSIONS=${LAW_UPDATER_OPENAI_EMBEDDING_DIMENSIONS:-}
+      - OPENAI_MAX_INPUT_TOKENS=${LAW_UPDATER_OPENAI_MAX_INPUT_TOKENS:-8192}
+      - OPENAI_MAX_BATCH_TOKENS=${LAW_UPDATER_OPENAI_MAX_BATCH_TOKENS:-300000}
+      - OPENAI_MAX_RETRIES=${LAW_UPDATER_OPENAI_MAX_RETRIES:-5}
+      - OPENAI_RETRY_BASE_DELAY_SEC=${LAW_UPDATER_OPENAI_RETRY_BASE_DELAY_SEC:-1.0}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+      - OPENSEARCH_URL=${OPENSEARCH_URL:-http://opensearch:9200}
+      - OPENSEARCH_API_KEY=${OPENSEARCH_API_KEY:-}
+      - OPENSEARCH_USERNAME=${OPENSEARCH_USERNAME:-}
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
+    volumes:
+      - law-updater-data:/app/data
+    command: ["python", "-m", "http.server", "8080", "--bind", "0.0.0.0", "--directory", "/tmp"]
 
   frontend:
     build:
       context: apps/frontend
       dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
-        BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend-api:8000}
     restart: unless-stopped
     healthcheck:
       test:
@@ -94,3 +109,6 @@ services:
       - ALLOWED_FRAME_ORIGINS=${ALLOWED_FRAME_ORIGINS:-}
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
       - BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL:-http://backend-api:8000}
+
+volumes:
+  law-updater-data:
