@@ -1,7 +1,10 @@
+# Coolify runs this file with `--project-directory` set to the repo root,
+# so build contexts here must stay repo-root-relative.
+
 services:
   backend-api:
     build:
-      context: ../apps/backend
+      context: apps/backend
       dockerfile: api/Dockerfile
     restart: unless-stopped
     healthcheck:
@@ -43,7 +46,7 @@ services:
   law-updater:
     profiles: ["jobs"]
     build:
-      context: ../apps/backend/law-updater
+      context: apps/backend/law-updater
       dockerfile: Dockerfile
     restart: "no"
     environment:
@@ -69,7 +72,7 @@ services:
 
   frontend:
     build:
-      context: ../apps/frontend
+      context: apps/frontend
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
