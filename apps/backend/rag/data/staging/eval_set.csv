@@ -2,28 +2,43 @@ query,intent,gold_law,gold_article,expected_doc_type,notes
 연장근로 허용 한도가 어떻게 되나요,normative,근로기준법,제53조,law,
 근로계약서 미작성 시 법적 문제가 있나요,normative,근로기준법,제17조,law,
 직원 해고 시 사전 통보 기간은 어떻게 되나요,normative,근로기준법,제26조,law,
-내년도 최저임금 기준은 어떻게 결정되나요,normative,최저임금법,제4조,law,
-임금 체불 시 회사가 부담하는 법적 책임은 무엇인가요,normative,근로기준법,제36조,law,
+최저임금은 어떤 기준과 절차로 결정되나요,normative,최저임금법,제4조,law,
+임금 체불 시 회사가 부담하는 법적 책임은 무엇인가요,normative,근로기준법,제43조,law,
 하도급 대금 지급 기한을 어기면 어떤 불이익이 있나요,normative,하도급거래 공정화에 관한 법률,제13조,law,
 직원이 업무 중 부상을 입은 경우 회사의 보상 의무는 어떻게 되나요,normative,산업재해보상보험법,제37조,law,
-프리랜서로 계약한 인력이 근로자로 인정될 수 있나요,case_law,,,prec,
-업무상 사망 사고 발생 시 유족에게 어떤 보상을 해줘야 하나요,case_law,,,prec,
-도급계약으로 체결한 외주 인력이 근로자로 인정될 가능성이 있나요,case_law,,,prec,
-직원의 대기시간을 근로시간으로 인정해야 하는 경우가 있나요,case_law,,,prec,
-연장근로 수당 산정 방식은 어떻게 되나요,mixed,근로기준법,제53조,mixed,allowed_doc_types=law|prec|decc
-직원이 부당해고를 주장할 경우 회사가 어떻게 대응해야 하나요,mixed,근로기준법,제26조,mixed,allowed_doc_types=law|prec|decc
+업무상 사망 사고 발생 시 유족에게 어떤 보상을 해줘야 하나요,normative,산업재해보상보험법,제62조,law,
+프리랜서로 계약한 인력이 근로자로 인정될 수 있나요,case_law,,,prec,query_group=근로자성_판단|gold_issue_keyword=근로자성|사용종속관계
+도급계약으로 체결한 외주 인력이 근로자로 인정될 가능성이 있나요,case_law,,,prec,query_group=근로자성_판단|gold_issue_keyword=근로자성|파견도급구별
+직원의 대기시간을 근로시간으로 인정해야 하는 경우가 있나요,case_law,,,prec,gold_issue_keyword=근로시간|대기시간
+연장근로 수당 산정 방식은 어떻게 되나요,mixed,근로기준법,제56조,mixed,allowed_doc_types=law|prec|decc
+직원이 부당해고를 주장할 경우 회사가 어떻게 대응해야 하나요,mixed,근로기준법,제23조,mixed,allowed_doc_types=law|prec|decc
 하도급 대금 지급 지연 시 법적 제재는 무엇인가요,mixed,하도급거래 공정화에 관한 법률,제13조,mixed,allowed_doc_types=law|prec|decc
 근무시간에 따른 휴게시간 부여 기준이 어떻게 되나요,normative,근로기준법,제54조,law,
 주말 근무 시 추가 수당 지급 의무가 있나요,normative,근로기준법,제56조,law,
-급여 지급일을 정할 때 법적 기준이 있나요,normative,근로기준법,제36조,law,
-도급 계약 인력에게 업무 지시를 하면 근로자로 볼 수 있나요,case_law,,,prec,
-사업장 밖 근무 시 근로시간 산정은 어떻게 하나요,mixed,근로기준법,제50조,mixed,allowed_doc_types=law|prec|decc
+급여 지급일을 정할 때 법적 기준이 있나요,normative,근로기준법,제43조,law,
+도급 계약 인력에게 업무 지시를 하면 근로자로 볼 수 있나요,case_law,,,prec,query_group=근로자성_판단|gold_issue_keyword=근로자성|사용종속관계|업무지시
+사업장 밖 근무 시 근로시간 산정은 어떻게 하나요,mixed,근로기준법,제58조,mixed,allowed_doc_types=law|prec|decc
 직원 해고가 정당한지 어떤 기준으로 판단하나요,mixed,근로기준법,제23조,mixed,allowed_doc_types=law|prec|decc
-고용보험료 추가 부과 처분을 받았을 때 이의를 제기할 수 있나요,case_law,,,decc,
-폐업 후 도산 사실 인정이 거부된 경우 어떻게 대응해야 하나요,case_law,,,decc,
-직원 점심시간 중 업무 대기를 시키면 휴게시간으로 인정되지 않나요,case_law,,,expc,
-근로기준법 위반으로 제재받은 사례가 있나요,case_law,근로기준법,,relation,
-하도급법 위반으로 시정명령을 받은 경우 법원 판단은 어떤가요,case_law,하도급거래 공정화에 관한 법률,,relation,
-최저임금 미준수로 소송이 제기된 경우 법원 판단 기준은 무엇인가요,case_law,최저임금법,,relation,
-산재보험 관련 분쟁에서 회사가 불리하게 판결난 사례가 있나요,case_law,산업재해보상보험법,,relation,
-연장근로 수당 관련 분쟁 판례나 해석 사례가 있나요,mixed,근로기준법,제53조,mixed,allowed_doc_types=law|prec|decc|relation
+고용보험료 추가 부과 처분을 받았을 때 이의를 제기할 수 있나요,case_law,,,decc,gold_issue_keyword=고용보험|이의신청|행정심판
+폐업 후 도산 사실 인정이 거부된 경우 어떻게 대응해야 하나요,case_law,,,decc,gold_issue_keyword=도산인정|고용보험|행정불복
+직원 점심시간 중 업무 대기를 시키면 휴게시간으로 인정되지 않나요,case_law,,,expc,gold_issue_keyword=휴게시간|대기시간|근로시간해석
+근로기준법 위반으로 제재받은 사례가 있나요,case_law,근로기준법,,relation,relation_type=법령연관사례
+하도급법 위반으로 시정명령을 받은 경우 법원 판단은 어떤가요,case_law,하도급거래 공정화에 관한 법률,,relation,relation_type=법령연관사례
+최저임금 미준수로 소송이 제기된 경우 법원 판단 기준은 무엇인가요,case_law,최저임금법,,relation,relation_type=법령연관사례
+산재보험 관련 분쟁에서 회사가 불리하게 판결난 사례가 있나요,case_law,산업재해보상보험법,,relation,relation_type=법령연관사례
+연장근로 수당 관련 분쟁 판례나 해석 사례가 있나요,mixed,근로기준법,제56조,mixed,allowed_doc_types=law|prec|decc|relation
+기간제 근로자를 2년 넘게 사용하면 어떻게 되나요,normative,기간제 및 단시간근로자 보호 등에 관한 법률,제4조,law,
+기간제 근로자에게 정규직과 다른 처우를 하면 문제가 되나요,normative,기간제 및 단시간근로자 보호 등에 관한 법률,제8조,law,
+기간제 근로자 계약 만료 후 묵시적 갱신이 인정될 수 있나요,case_law,,,prec,gold_issue_keyword=기간제|묵시적갱신
+파견 근로자를 사용할 수 있는 업무 범위에 제한이 있나요,normative,파견근로자 보호 등에 관한 법률,제5조,law,
+파견 기간이 초과된 경우 직접 고용 의무가 발생하나요,mixed,파견근로자 보호 등에 관한 법률,제6조의2,mixed,allowed_doc_types=law|prec
+퇴직금 산정 시 평균임금 계산 방법이 어떻게 되나요,normative,근로자퇴직급여 보장법,제8조,law,
+퇴직연금 가입 대신 퇴직금 제도를 유지할 수 있나요,normative,근로자퇴직급여 보장법,제8조,law,
+퇴직금을 미지급하면 어떤 법적 제재를 받나요,mixed,근로자퇴직급여 보장법,제9조,mixed,allowed_doc_types=law|prec
+출산전후휴가 기간과 급여 지원 기준이 어떻게 되나요,normative,남녀고용평등과 일·가정 양립 지원에 관한 법률,제18조,law,
+육아휴직 신청을 거부하면 어떤 제재를 받나요,normative,남녀고용평등과 일·가정 양립 지원에 관한 법률,제19조,law,
+직장 내 성희롱 발생 시 회사가 취해야 할 조치는 무엇인가요,normative,남녀고용평등과 일·가정 양립 지원에 관한 법률,제14조,law,
+건설공사를 재하도급할 때 법적 제한이 있나요,normative,건설산업기본법,제29조,law,
+건설공사 하도급 계약 시 서면 작성 의무가 있나요,normative,건설산업기본법,제22조,law,
+건설산업기본법 위반으로 영업정지 처분을 받은 사례가 있나요,case_law,건설산업기본법,,relation,relation_type=법령연관사례
+최저임금 위반 시 사용자가 받는 처벌은 무엇인가요,normative,최저임금법,제28조,law,
