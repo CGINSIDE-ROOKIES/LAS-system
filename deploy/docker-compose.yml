@@ -49,7 +49,6 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql://user:password@postgres:5432/las}
 
   law-updater:
-    profiles: ["jobs"]
     build:
       context: apps/backend/law-updater
       dockerfile: Dockerfile
@@ -74,7 +73,7 @@ services:
       - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
     volumes:
       - law-updater-data:/app/data
-    command: ["tail", "-f", "/dev/null"]
+    command: ["python", "-c", "import time; time.sleep(10**9)"]
 
   frontend:
     build:
