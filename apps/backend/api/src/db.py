@@ -19,7 +19,9 @@ _ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
 
 def _run_migrations() -> None:
     cfg = Config(_ALEMBIC_INI)
-    cfg.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
+    # SQLAlchemy 2.0은 postgres:// 미지원 → postgresql://로 정규화
+    url = os.environ["DATABASE_URL"].replace("postgres://", "postgresql://", 1)
+    cfg.set_main_option("sqlalchemy.url", url)
     command.upgrade(cfg, "head")
     logger.info("DB 마이그레이션 완료 (alembic upgrade head)")
 
