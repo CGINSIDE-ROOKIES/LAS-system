@@ -7,10 +7,12 @@ export interface ChatMessage {
   content: string;
   isStreaming?: boolean;
   statusMessage?: string;
+  qa_id?: string;
   answerData?: {
     summary: string;
     citations: { article: string; content: string }[];
     references: string[];
+    isIrrelevant?: boolean;
   };
 }
 
@@ -56,7 +58,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             )}
           </div>
         ) : message.answerData ? (
-          <AnswerCard data={message.answerData} />
+          <AnswerCard data={message.answerData} qaId={message.qa_id} />
         ) : (
           <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground">
             {message.content}
