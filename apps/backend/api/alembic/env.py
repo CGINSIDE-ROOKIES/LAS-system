@@ -15,6 +15,8 @@ target_metadata = None
 database_url = os.environ.get("DATABASE_URL")
 if not database_url:
     raise RuntimeError("DATABASE_URL 환경변수가 설정되지 않았습니다.")
+# SQLAlchemy 2.0은 postgres:// 미지원 → postgresql://로 정규화
+database_url = database_url.replace("postgres://", "postgresql://", 1)
 config.set_main_option("sqlalchemy.url", database_url)
 
 
