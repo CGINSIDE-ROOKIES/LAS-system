@@ -48,14 +48,22 @@ def _extract_text_from_gemini_response(data: dict[str, Any]) -> str:
 
 
 def _build_gemini_payload(
-    *, prompt_text: str, system_prompt: str | None, max_tokens: int, temperature: float
+    *,
+    prompt_text: str,
+    system_prompt: str | None,
+    max_tokens: int,
+    temperature: float,
+    response_mime_type: str | None = None,
 ) -> dict[str, Any]:
+    generation_config: dict[str, Any] = {
+        "temperature": temperature,
+        "maxOutputTokens": max_tokens,
+    }
+    if response_mime_type:
+        generation_config["responseMimeType"] = response_mime_type
     payload: dict[str, Any] = {
         "contents": [{"role": "user", "parts": [{"text": prompt_text}]}],
-        "generationConfig": {
-            "temperature": temperature,
-            "maxOutputTokens": max_tokens,
-        },
+        "generationConfig": generation_config,
     }
     if system_prompt and system_prompt.strip():
         payload["systemInstruction"] = {"parts": [{"text": system_prompt.strip()}]}
@@ -75,6 +83,7 @@ def generate_answer(
     max_tokens: int,
     temperature: float,
     system_prompt: str | None = None,
+    response_mime_type: str | None = None,
 ) -> str:
     """주어진 프롬프트를 LLM에 전달하고 답변 텍스트를 반환한다."""
     prompt_text = prompt.strip()
@@ -89,6 +98,7 @@ def generate_answer(
             system_prompt=system_prompt,
             max_tokens=max_tokens,
             temperature=temperature,
+            response_mime_type=response_mime_type,
         )
         sep = "&" if "?" in url else "?"
         call_url = f"{url}{sep}key={urllib.parse.quote(api_key)}"

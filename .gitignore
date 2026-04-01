@@ -1,6 +1,8 @@
 # doc-processor
 reference-docs/
 .claude/
+.codex/
+.codex
 results/
 
 # Byte-compiled / optimized / DLL files

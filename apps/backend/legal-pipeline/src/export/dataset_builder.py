@@ -19,6 +19,7 @@ from src.collector.legal_doc_collector import (
 from src.common.law_meta import (
     build_law_uid,
     build_record_id,
+    build_strict_law_uid,
     normalize_classified_level,
     normalize_kind_name,
 )
@@ -646,7 +647,7 @@ def build_law_records(
         kind_name, classified_level = _normalize_law_meta(parsed_law)
         scope_source = parsed_law.get("scope_source")
         law_uid = build_law_uid(law_id, mst, law_name)
-        root_law_uid = build_law_uid(None, None, root_law_name)
+        root_law_uid = build_strict_law_uid(law_id, mst)
 
         articles = parsed_law.get("articles", [])
         if isinstance(articles, list):
@@ -940,7 +941,7 @@ def _build_related_doc_records_from_text(
                 "doc_type_label": DOC_TYPE_LABELS[target],
                 "source_group": "02_related_legal_docs",
                 "root_law_name": root_law_name,
-                "root_law_uid": build_law_uid(None, None, root_law_name),
+                "root_law_uid": build_strict_law_uid(None, None),
                 "related_law_name": source_law_name,
                 "doc_id": doc_meta.get("doc_id"),
                 "title": doc_meta.get("title"),
@@ -1085,7 +1086,7 @@ def _build_relation_records_legacy(
                 "target": payload.get("target"),
                 "doc_type_label": payload.get("doc_type_label"),
                 "root_law_name": payload.get("root_law_name"),
-                "root_law_uid": build_law_uid(None, None, payload.get("root_law_name")),
+                "root_law_uid": build_strict_law_uid(None, None),
                 "source_law_name": payload.get("source_law_name"),
                 "source_law_uid": build_law_uid(None, None, payload.get("source_law_name")),
                 "law_name": payload.get("source_law_name"),

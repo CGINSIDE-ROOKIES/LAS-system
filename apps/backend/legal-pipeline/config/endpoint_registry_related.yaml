@@ -17,7 +17,7 @@ runtime:
 validation:
   require_json_capable_for_enabled: true
   allow_html_only_if_enabled_false: true
-  enabled_html_only_whitelist: [interpretation_detail]
+  enabled_html_only_whitelist: []
 
 endpoints:
   precedent_list:
@@ -84,13 +84,11 @@ endpoints:
     enabled: true
     path: /lawService.do
     target: expc
-    response_types: [HTML]
-    preferred_type: HTML
-    required_params: [OC, target, ID, type, mobileYn]
-    default_params:
-      mobileYn: "Y"
-      type: HTML
-    reason: "모바일 상세 본문은 HTML-only 허용"
+    response_types: [HTML, XML, JSON]
+    preferred_type: JSON
+    required_params: [OC, target, type, ID]
+    optional_params: [mobileYn]
+    reason: "JSON 상세 본문을 우선 사용하고 모바일 HTML은 fallback/debug 용도로만 허용"
 
   admin_appeal_list:
     enabled: true

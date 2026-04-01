@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from src.collector.legal_doc_collector import DOC_TYPE_LABELS
-from src.common.law_meta import build_law_uid
+from src.common.law_meta import build_law_uid, build_strict_law_uid
 from src.common.io_utils import _iter_jsonl, _read_json
 from src.parser.legal_case_parser import parse_case_payload
 
@@ -67,6 +67,36 @@ def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 150) -> list[st
         if end >= len(text):
             break
         start = max(0, end - overlap)
+
+    return chunks
+
+
+def _chunk_blocks(blocks: list[str], max_chars: int = 1200, overlap: int = 150) -> list[str]:
+    normalized_blocks = [_normalize_structure(block) for block in blocks if _normalize_structure(block)]
+    if not normalized_blocks:
+        return []
+
+    chunks: list[str] = []
+    current = ""
+
+    for block in normalized_blocks:
+        candidate = block if not current else f"{current}\n\n{block}"
+        if len(candidate) <= max_chars:
+            current = candidate
+            continue
+
+        if current:
+            chunks.append(current)
+            current = ""
+
+        if len(block) <= max_chars:
+            current = block
+            continue
+
+        chunks.extend(_chunk_text(block, max_chars=max_chars, overlap=overlap))
+
+    if current:
+        chunks.append(current)
 
     return chunks
 
@@ -196,6 +226,38 @@ def _build_case_text(parsed: dict[str, Any], row: dict[str, Any]) -> str:
     return "\n".join(line for line in lines if line).strip()
 
 
+def _build_case_blocks(parsed: dict[str, Any], row: dict[str, Any]) -> list[str]:
+    target = str(parsed.get("target") or row.get("target") or "").strip()
+    source_law_names = row.get("source_law_names") or []
+    preamble_lines = [f"문서 유형: {DOC_TYPE_LABELS.get(target, target)}"]
+
+    if parsed.get("title"):
+        preamble_lines.append(f"문서 제목: {parsed['title']}")
+    if parsed.get("doc_number"):
+        preamble_lines.append(f"문서 번호: {parsed['doc_number']}")
+    if parsed.get("decision_date"):
+        preamble_lines.append(f"결정/선고일: {parsed['decision_date']}")
+    if source_law_names:
+        preamble_lines.append(f"관련 법령 검색 hit: {', '.join(source_law_names)}")
+
+    blocks = ["\n".join(line for line in preamble_lines if line).strip()]
+
+    body_sections = parsed.get("body_sections") or []
+    if isinstance(body_sections, list) and body_sections:
+        for section in body_sections:
+            if not isinstance(section, dict):
+                continue
+            label = str(section.get("label") or "").strip()
+            text = _normalize_structure(str(section.get("text") or ""))
+            if not text:
+                continue
+            blocks.append(f"{label}\n{text}" if label else text)
+        return [block for block in blocks if block]
+
+    full_text = _build_case_text(parsed, row)
+    return [full_text] if full_text else []
+
+
 
 def build_legal_case_records(
     raw_related_base_dir: str | Path = "data/raw/02_related_legal_docs",
@@ -216,8 +278,9 @@ def build_legal_case_records(
 
         payload = _load_detail_payload(row)
         parsed = parse_case_payload(target, payload or {}, fallback=row)
-        full_text = _build_case_text(parsed, row)
-        chunks = _chunk_text(full_text, max_chars=max_chars, overlap=overlap)
+        blocks = _build_case_blocks(parsed, row)
+        full_text = "\n\n".join(blocks).strip()
+        chunks = _chunk_blocks(blocks, max_chars=max_chars, overlap=overlap)
         if not chunks and full_text:
             chunks = [full_text]
         if not chunks:
@@ -233,7 +296,7 @@ def build_legal_case_records(
         first_related_law_name = related_law_names[0] if related_law_names else None
         first_root_law_name = root_law_names[0] if root_law_names else row.get("root_law_name")
         first_source_law_uid = source_law_uids[0] if source_law_uids else None
-        root_law_uid = build_law_uid(None, None, first_root_law_name)
+        root_law_uid = first_source_law_uid if first_root_law_name == first_related_law_name else build_strict_law_uid(None, None)
 
         for chunk_index, chunk in enumerate(chunks):
             search_parts = [

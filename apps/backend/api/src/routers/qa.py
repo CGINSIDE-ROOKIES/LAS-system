@@ -19,14 +19,18 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from src.db import get_db
-from src.dependencies import get_rag_pipeline
+from src.dependencies import get_query_parser, get_rag_pipeline
 from rag_pipeline.generation.pipeline import RagPipeline
+from rag_pipeline.query_parser import QueryParser
 from src.history import delete_history_item, delete_history_items, get_history, get_history_item, save_qa
 from rag_pipeline.retrieval.common import RetrievalError
 
 router = APIRouter(tags=["qa"])
 
-
+_IRRELEVANT_ANSWER = (
+    "저는 노동법·하도급법 전문 법률 Q&A 어시스턴트입니다. "
+    "법률 관련 질문을 해주시면 도움을 드릴 수 있습니다."
+)
 _VALID_DOC_TYPES = {"law", "prec", "detc", "decc", "expc"}
 
 
@@ -134,16 +138,40 @@ def history_item(
 def ask(
     request: AskRequest,
     pipeline: RagPipeline = Depends(get_rag_pipeline),
+    parser: QueryParser = Depends(get_query_parser),
     conn: psycopg2.extensions.connection = Depends(get_db),
 ) -> AskResponse:
     """질문을 받아 RAG 파이프라인을 실행하고 답변을 반환합니다."""
     t0 = time.perf_counter()
     logger.info("ask 요청: %s", request.question[:80])
+
+    parsed = parser.parse(request.question)
+    logger.info(
+        "query_parser: law_names=%r article_no=%r intent=%r is_legal=%r parser_fallback=%r",
+        parsed.law_names, parsed.article_no, parsed.intent, parsed.is_legal, parsed.parser_fallback,
+    )
+
+    if not parsed.is_legal:
+        logger.info("ask 조기 반환: 법률 무관 질문")
+        return AskResponse(
+            answer=_IRRELEVANT_ANSWER,
+            retrieved_docs=[],
+            law_context_status="irrelevant",
+        )
+
+    # 사용자가 명시한 law_names 우선, 없으면 파서 결과 사용
+    effective_law_names = (
+        request.law_names
+        if request.law_names is not None
+        else (parsed.law_names or None)
+    )
+
     try:
         result = pipeline.run(
             request.question,
             doc_types=request.doc_types,
-            law_names=request.law_names,
+            law_names=effective_law_names,
+            intent=parsed.intent,
         )
     except RetrievalError as exc:
         logger.error("ask RetrievalError: %s", exc)
@@ -175,21 +203,54 @@ def ask(
 def ask_stream(
     request: AskRequest,
     pipeline: RagPipeline = Depends(get_rag_pipeline),
+    parser: QueryParser = Depends(get_query_parser),
     conn: psycopg2.extensions.connection = Depends(get_db),
 ) -> StreamingResponse:
     """질문을 받아 RAG 파이프라인을 실행하고 답변을 SSE로 스트리밍합니다."""
+    parsed = parser.parse(request.question)
+    logger.info(
+        "query_parser: law_names=%r article_no=%r intent=%r is_legal=%r parser_fallback=%r",
+        parsed.law_names, parsed.article_no, parsed.intent, parsed.is_legal, parsed.parser_fallback,
+    )
+
+    if not parsed.is_legal:
+        logger.info("ask_stream 조기 반환: 법률 무관 질문")
+        def _irrelevant():
+            yield f"data: {json.dumps({'type': 'chunk', 'content': _IRRELEVANT_ANSWER}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'retrieved_docs': [], 'law_context_status': 'irrelevant'}, ensure_ascii=False)}\n\n"
+        return StreamingResponse(_irrelevant(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
+
+    effective_law_names = (
+        request.law_names
+        if request.law_names is not None
+        else (parsed.law_names or None)
+    )
+
     def generate():
         t0 = time.perf_counter()
         logger.info("ask_stream 요청: %s", request.question[:80])
         answer_parts: list[str] = []
         meta = None
         try:
+            if pipeline.is_embedding_cold_start():
+                logger.info("ask_stream cold start: embedding model initialization required")
+                status_payload = {
+                    "type": "status",
+                    "code": "EMBEDDING_COLD_START",
+                    "message": "초기 요청이라 임베딩 모델을 준비 중입니다. 첫 응답은 30~90초 정도 걸릴 수 있습니다.",
+                }
+                yield f"data: {json.dumps(status_payload, ensure_ascii=False)}\n\n"
             meta, chunks = pipeline.stream(
                 request.question,
                 doc_types=request.doc_types,
-                law_names=request.law_names,
+                law_names=effective_law_names,
+                intent=parsed.intent,
             )
+            first_chunk = True
             for chunk in chunks:
+                if first_chunk:
+                    logger.info("ask_stream 첫 토큰: %.2fs", time.perf_counter() - t0)
+                    first_chunk = False
                 answer_parts.append(chunk)
                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
             done_payload = {

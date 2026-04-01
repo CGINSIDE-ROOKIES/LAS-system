@@ -23,6 +23,49 @@ def test_parse_case_payload_from_prec_json_fixture():
     assert parsed["doc_number"] == "2019다12345"
     assert parsed["decision_date"] == "2019.05.30"
     assert "근로기준법 제43조의2" in parsed["body_text"]
+    assert parsed["structured_case_refs"] == [
+        {
+            "case_number": "2018다12345",
+            "source": "structured_field",
+            "field_name": "참조판례",
+        }
+    ]
+    assert parsed["structured_article_refs"] == [
+        {
+            "law_name": "근로기준법",
+            "article_key": "43-2",
+            "article_no_display": "제43조의2",
+            "source": "structured_field",
+            "field_name": "참조조문",
+        }
+    ]
+
+
+def test_parse_case_payload_from_expc_json_fixture():
+    payload = json.loads((FIXTURE_DIR / "expc_detail.json").read_text(encoding="utf-8"))
+
+    parsed = parse_case_payload("expc", payload)
+
+    assert parsed["canonical_case_id"] == "case::expc::330471"
+    assert parsed["title"] == "민원인 - 근로기준법 관련 질의"
+    assert parsed["doc_number"] == "16-0305"
+    assert parsed["decision_date"] == "2016.09.01"
+    assert "근로기준법 제43조의2" in parsed["body_text"]
+    assert "사업주의 의무를 해석한다." in parsed["body_text"]
+
+
+def test_parse_case_payload_from_detc_json_fixture_uses_jongguk_date():
+    payload = json.loads((FIXTURE_DIR / "detc_detail.json").read_text(encoding="utf-8"))
+
+    parsed = parse_case_payload("detc", payload)
+
+    assert parsed["canonical_case_id"] == "case::detc::58400"
+    assert parsed["title"] == "참전유공자예우에관한법률 제6조 제1항 위헌확인"
+    assert parsed["doc_number"] == "2002헌마522"
+    assert parsed["decision_date"] == "2003.07.24"
+    assert parsed["body_sections"][0]["label"] == "판시사항"
+    assert parsed["body_sections"][-1]["label"] == "전문"
+
 
 def test_parse_case_payload_from_expc_html_fixture_uses_fallback_meta():
     payload = json.loads((FIXTURE_DIR / "expc_detail_html.json").read_text(encoding="utf-8"))

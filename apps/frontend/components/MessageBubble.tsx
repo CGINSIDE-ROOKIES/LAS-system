@@ -6,6 +6,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   isStreaming?: boolean;
+  statusMessage?: string;
   answerData?: {
     summary: string;
     citations: { article: string; content: string }[];
@@ -47,6 +48,9 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse-dot" style={{ animationDelay: "0.4s" }} />
               </span>
             </div>
+            {message.statusMessage && (
+              <p className="mt-2 text-sm text-muted-foreground">{message.statusMessage}</p>
+            )}
             {message.content && (
               <p className="mt-2 text-sm text-foreground">{message.content}</p>
             )}

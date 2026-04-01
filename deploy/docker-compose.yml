@@ -1,18 +1,38 @@
+# Coolify runs this file with `--project-directory` set to the repo root,
+# so build contexts here must stay repo-root-relative.
+
 services:
   backend-api:
     build:
       context: apps/backend
       dockerfile: api/Dockerfile
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     environment:
       - MIDM_LLM_URL=${MIDM_LLM_URL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-flash-latest}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash-lite}
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-sentence_transformers}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-mpnet-base-v2}
       - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-cpu}
       - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-CPU}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENAI_EMBEDDING_DIMENSIONS=${OPENAI_EMBEDDING_DIMENSIONS:-}
+      - QUERY_PARSER_MODEL=${QUERY_PARSER_MODEL:-}
+      - QUERY_PARSER_TIMEOUT=${QUERY_PARSER_TIMEOUT:-10}
+      - QUERY_PARSER_STRICT=${QUERY_PARSER_STRICT:-false}
       - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
       - QDRANT_COLLECTIONS=${QDRANT_COLLECTIONS:-law_article,legal_case,legal_relation}
       - QDRANT_API_KEY=${QDRANT_API_KEY:-}
@@ -25,36 +45,70 @@ services:
       - LLM_CHAT_COMPLETIONS_URL=${LLM_CHAT_COMPLETIONS_URL:-}
       - LLM_MODEL=${LLM_MODEL:-}
       - LLM_API_KEY=${LLM_API_KEY:-}
-      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-4096}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-2048}
       - DATABASE_URL=${DATABASE_URL:-postgresql://user:password@postgres:5432/las}
 
-  backend-doc-pipeline:
+  law-updater:
     build:
-      context: apps/backend/doc-processor
+      context: apps/backend/law-updater
       dockerfile: Dockerfile
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     environment:
-      - MIDM_LLM_URL=${MIDM_LLM_URL:-}
+      - LAW_OC=${LAW_OC:-}
+      - LAW_API_BASE_URL=${LAW_API_BASE_URL:-}
+      - EMBEDDING_PROVIDER=${LAW_UPDATER_EMBEDDING_PROVIDER:-openai}
+      - EMBEDDING_MODEL=${LAW_UPDATER_EMBEDDING_MODEL:-text-embedding-3-large}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-flash-latest}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-mpnet-base-v2}
-      - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-cpu}
-      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-CPU}
+      - OPENAI_BASE_URL=${LAW_UPDATER_OPENAI_BASE_URL:-}
+      - OPENAI_EMBEDDING_DIMENSIONS=${LAW_UPDATER_OPENAI_EMBEDDING_DIMENSIONS:-}
+      - OPENAI_MAX_INPUT_TOKENS=${LAW_UPDATER_OPENAI_MAX_INPUT_TOKENS:-8192}
+      - OPENAI_MAX_BATCH_TOKENS=${LAW_UPDATER_OPENAI_MAX_BATCH_TOKENS:-300000}
+      - OPENAI_MAX_RETRIES=${LAW_UPDATER_OPENAI_MAX_RETRIES:-5}
+      - OPENAI_RETRY_BASE_DELAY_SEC=${LAW_UPDATER_OPENAI_RETRY_BASE_DELAY_SEC:-1.0}
       - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
-      - QDRANT_COLLECTION=${QDRANT_COLLECTION:-law_article}
       - QDRANT_API_KEY=${QDRANT_API_KEY:-}
-      - QDRANT_VECTOR_NAME_MAP=${QDRANT_VECTOR_NAME_MAP:-}
       - OPENSEARCH_URL=${OPENSEARCH_URL:-http://opensearch:9200}
-      - OPENSEARCH_INDEX=${OPENSEARCH_INDEX:-las_legal_docs}
+      - OPENSEARCH_API_KEY=${OPENSEARCH_API_KEY:-}
       - OPENSEARCH_USERNAME=${OPENSEARCH_USERNAME:-}
       - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
+    volumes:
+      - law-updater-data:/app/data
+    command: ["python", "-m", "http.server", "8080", "--bind", "0.0.0.0", "--directory", "/tmp"]
 
   frontend:
     build:
       context: apps/frontend
       dockerfile: Dockerfile
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     environment:
+      - HOSTNAME=0.0.0.0
       - ALLOWED_FRAME_ORIGINS=${ALLOWED_FRAME_ORIGINS:-}
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
+      - BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL:-http://backend-api:8000}
+
+volumes:
+  law-updater-data:

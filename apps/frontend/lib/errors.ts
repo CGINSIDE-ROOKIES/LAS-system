@@ -6,6 +6,30 @@ export const ERROR_MESSAGES = {
   VALIDATION_ERROR: "잘못된 요청입니다. 입력 내용을 확인해주세요.",
 } as const;
 
+export const QA_STREAM_TIMEOUT_MS = 120_000;
+
+export function streamTransportErrorMessage(error: unknown): string | null {
+  if (error === "timeout") {
+    return ERROR_MESSAGES.TIMEOUT;
+  }
+
+  if (typeof error === "object" && error !== null) {
+    const { name, message } = error as { name?: string; message?: string };
+
+    if (message === "timeout") {
+      return ERROR_MESSAGES.TIMEOUT;
+    }
+    if (name === "AbortError") {
+      return null;
+    }
+    if (name === "TypeError") {
+      return ERROR_MESSAGES.NETWORK;
+    }
+  }
+
+  return ERROR_MESSAGES.SERVER;
+}
+
 export function sseErrorMessage(code: string): string {
   switch (code) {
     case "PIPELINE_ERROR":

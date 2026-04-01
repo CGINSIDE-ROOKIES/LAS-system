@@ -39,25 +39,16 @@ RUN pnpm install --frozen-lockfile
 # ── Stage 2: build ───────────────────────────────────
 FROM node:20-alpine AS builder
 
-ARG NEXT_PUBLIC_API_URL
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-
 WORKDIR /app
 
 # Restore workspace packages (symlinks in node_modules point to /app/packages/*)
 COPY --from=deps /app/packages ./packages
 COPY --from=deps /app/apps/frontend/node_modules ./apps/frontend/node_modules
 
-# Copy all frontend sources (.dockerignore excludes node_modules and .next)
+# Copy all frontend sources (.dockerignore excludes local build artifacts)
 COPY . ./apps/frontend/
 
-RUN cd apps/frontend && node_modules/.bin/next build \
-    && echo "=== standalone root ===" \
-    && ls -la .next/standalone/ \
-    && echo "=== standalone apps/frontend ===" \
-    && ls -la .next/standalone/apps/frontend/ \
-    && echo "=== standalone node_modules (.pnpm check) ===" \
-    && ls .next/standalone/node_modules/ | head -5
+RUN cd apps/frontend && node_modules/.bin/next build
 
 # ── Stage 3: runtime ────────────────────────────────
 FROM node:20-alpine AS runner

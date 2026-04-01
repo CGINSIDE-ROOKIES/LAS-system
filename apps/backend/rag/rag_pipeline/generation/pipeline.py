@@ -9,16 +9,17 @@ from __future__ import annotations
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
-from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError
+from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, embed_query, is_embedding_model_cached
 from ..retrieval.context import build_llm_context_rows, build_llm_context_text
 from ..retrieval.fusion import fuse_rrf, fuse_rrf_multi
 from ..retrieval.opensearch import search_bm25
-from ..retrieval.qdrant import search_qdrant
+from ..retrieval.qdrant import search_qdrant, search_qdrant_with_vector
 from ..retrieval.ranking import apply_law_boost, select_rows_with_law_policy
 from ..retrieval.service import RetrievalConfig
 from .service import GenerationConfig, GenerationService
@@ -44,7 +45,7 @@ class RagPipelineConfig:
     retrieval: RetrievalConfig
     generation: GenerationConfig
     enforce_min_law_contexts: bool = True
-    max_input_chars: int = 12000
+    max_input_chars: int = 6000
     snippet_max_chars: int = 200
 
 
@@ -132,6 +133,10 @@ class RagPipeline:
                     opensearch_username=os.getenv("OPENSEARCH_USERNAME") or None,
                     opensearch_password=os.getenv("OPENSEARCH_PASSWORD") or None,
                     embedding_model=os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
+                    embedding_provider=os.getenv("EMBEDDING_PROVIDER", "sentence_transformers"),
+                    embedding_api_key=os.getenv("OPENAI_API_KEY") or None,
+                    embedding_api_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+                    embedding_dimensions=int(d) if (d := os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "").strip()) else None,
                 ),
                 generation=GenerationConfig.from_env(),
             )
@@ -143,8 +148,15 @@ class RagPipeline:
         *,
         doc_types: list[str] | None,
         law_names: list[str] | None,
+        intent: str | None = None,
     ) -> tuple[list[dict[str, Any]], str, str, bool]:
         """검색 → 융합 → 순위 조정 → 컨텍스트 빌드.
+
+        intent에 따라 law_names 필터 전략과 law 문서 보강 강제 여부를 조정한다.
+          - case_law : 판례 중심 질의. law_names 필터 미적용, law 문서 강제 보강 해제.
+          - mixed    : 법령+판례 혼합. law_names 유지하되 강제 보강 해제.
+          - normative: 조문 중심 질의. 현재 동작 유지 (law_names 필터 + 강제 보강).
+          - None     : 파서 미적용. 현재 동작 유지.
 
         Returns:
             (llm_rows, context_text, law_context_status, law_context_added)
@@ -152,14 +164,33 @@ class RagPipeline:
         rcfg = self._cfg.retrieval
         candidate_k = max(rcfg.top_k, rcfg.candidate_k)
 
+        if intent == "case_law":
+            law_names = None
+            enforce = False
+        elif intent == "mixed":
+            enforce = False
+        else:
+            enforce = self._cfg.enforce_min_law_contexts
+
         t0 = time.perf_counter()
-        collection_rows = [
-            search_qdrant(
-                question, candidate_k,
+
+        # 임베딩을 한 번만 계산한 뒤 Qdrant(복수 컬렉션) + OpenSearch를 병렬 실행한다.
+        vector = embed_query(
+            question,
+            rcfg.embedding_model,
+            provider=rcfg.embedding_provider,
+            api_key=rcfg.embedding_api_key,
+            api_base_url=rcfg.embedding_api_base_url,
+            dimensions=rcfg.embedding_dimensions,
+        )
+        logger.info("임베딩 완료: %.2fs", time.perf_counter() - t0)
+
+        def _qdrant_task(collection: str) -> list[dict[str, Any]]:
+            return search_qdrant_with_vector(
+                vector, candidate_k,
                 qdrant_url=rcfg.qdrant_url,
                 collection=collection,
                 timeout=rcfg.timeout,
-                embedding_model=rcfg.embedding_model,
                 api_key=rcfg.qdrant_api_key,
                 doc_types=doc_types,
                 law_names=law_names,
@@ -167,29 +198,39 @@ class RagPipeline:
                 fetch_multiplier=2,
                 vector_name=(rcfg.qdrant_vector_name_map or {}).get(collection),
             )
-            for collection in rcfg.qdrant_collections
-        ]
-        qdrant_rows = fuse_rrf_multi(collection_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
 
-        if rcfg.opensearch_url:
-            try:
-                bm25_rows = search_bm25(
-                    question, candidate_k,
-                    opensearch_url=rcfg.opensearch_url,
-                    index_name=rcfg.opensearch_index,
-                    timeout=rcfg.timeout,
-                    api_key=rcfg.opensearch_api_key,
-                    username=rcfg.opensearch_username,
-                    password=rcfg.opensearch_password,
-                    doc_types=doc_types,
-                    law_names=law_names,
-                    dedup=True,
-                    fetch_multiplier=5,
-                )
-            except RetrievalError:
-                bm25_rows = []
-        else:
-            bm25_rows = []
+        def _bm25_task() -> list[dict[str, Any]]:
+            return search_bm25(
+                question, candidate_k,
+                opensearch_url=rcfg.opensearch_url,
+                index_name=rcfg.opensearch_index,
+                timeout=rcfg.timeout,
+                api_key=rcfg.opensearch_api_key,
+                username=rcfg.opensearch_username,
+                password=rcfg.opensearch_password,
+                doc_types=doc_types,
+                law_names=law_names,
+                dedup=True,
+                fetch_multiplier=5,
+            )
+
+        with ThreadPoolExecutor() as executor:
+            qdrant_futures = [
+                executor.submit(_qdrant_task, col)
+                for col in rcfg.qdrant_collections
+            ]
+            bm25_future = executor.submit(_bm25_task) if rcfg.opensearch_url else None
+
+            collection_rows = [f.result() for f in qdrant_futures]
+
+            bm25_rows: list[dict[str, Any]] = []
+            if bm25_future is not None:
+                try:
+                    bm25_rows = bm25_future.result()
+                except RetrievalError:
+                    bm25_rows = []
+
+        qdrant_rows = fuse_rrf_multi(collection_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
 
         # candidate_k 전체를 융합해야 law 보강 시 top_k 바깥 문서를 참조할 수 있음
         rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
@@ -204,7 +245,7 @@ class RagPipeline:
             rrf_rows,
             top_k=rcfg.top_k,
             min_law_contexts=rcfg.min_law_contexts,
-            enforce_min_law_contexts=self._cfg.enforce_min_law_contexts,
+            enforce_min_law_contexts=enforce,
         )
 
         contexts = build_llm_context_rows(
@@ -247,6 +288,13 @@ class RagPipeline:
             law_context_status=law_context_status,
         )
 
+    def is_embedding_cold_start(self) -> bool:
+        """현재 프로세스에서 임베딩 모델 첫 로드가 필요한 상태인지 반환한다."""
+        return not is_embedding_model_cached(
+            self._cfg.retrieval.embedding_model,
+            provider=self._cfg.retrieval.embedding_provider,
+        )
+
     def run(
         self,
         question: str,
@@ -254,10 +302,11 @@ class RagPipeline:
         system_prompt: str | None = DEFAULT_SYSTEM_PROMPT,
         doc_types: list[str] | None = None,
         law_names: list[str] | None = None,
+        intent: str | None = None,
     ) -> RagResult:
         """검색 + 생성 파이프라인을 실행하고 최종 결과를 반환한다."""
         llm_rows, context_text, law_context_status, law_context_added = self._retrieve(
-            question, doc_types=doc_types, law_names=law_names
+            question, doc_types=doc_types, law_names=law_names, intent=intent
         )
         prompt = build_user_prompt_with_limit(
             retrieved_context_text=context_text,
@@ -277,6 +326,7 @@ class RagPipeline:
         system_prompt: str | None = DEFAULT_SYSTEM_PROMPT,
         doc_types: list[str] | None = None,
         law_names: list[str] | None = None,
+        intent: str | None = None,
     ) -> tuple[RagResult, Iterator[str]]:
         """검색 후 생성을 스트리밍으로 반환한다.
 
@@ -284,7 +334,7 @@ class RagPipeline:
             (meta, chunks): meta는 sources 등 메타데이터, chunks는 토큰 조각 이터레이터.
         """
         llm_rows, context_text, law_context_status, law_context_added = self._retrieve(
-            question, doc_types=doc_types, law_names=law_names
+            question, doc_types=doc_types, law_names=law_names, intent=intent
         )
         prompt = build_user_prompt_with_limit(
             retrieved_context_text=context_text,

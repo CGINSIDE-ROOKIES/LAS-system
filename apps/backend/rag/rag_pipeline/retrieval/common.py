@@ -18,9 +18,21 @@ import urllib.request
 from typing import Any
 
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-large"
+DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1"
 SNIPPET_MAX_LEN = 180
 
 _MODEL_CACHE: dict[str, Any] = {}
+
+
+def is_embedding_model_cached(model_name: str, provider: str = "sentence_transformers") -> bool:
+    """현재 프로세스에 임베딩 모델이 메모리 캐시되어 있으면 True.
+
+    OpenAI provider는 로컬 모델 로드가 없으므로 항상 True를 반환한다.
+    """
+    if provider == "openai":
+        return True
+    return model_name in _MODEL_CACHE
 
 
 class RetrievalError(Exception):
@@ -67,21 +79,45 @@ def http_json(
 
 # ── 임베딩 ────────────────────────────────────────────────────────────────────
 
-def embed_query(text: str, model_name: str) -> list[float]:
+def _embed_query_openai(
+    query_text: str,
+    model_name: str,
+    api_key: str,
+    api_base_url: str,
+    dimensions: int | None = None,
+) -> list[float]:
+    """OpenAI Embeddings API를 호출해 벡터를 반환한다."""
+    payload: dict[str, Any] = {"model": model_name, "input": query_text}
+    if dimensions:
+        payload["dimensions"] = dimensions
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    res = http_json("POST", f"{api_base_url}/embeddings", payload, headers, timeout=30)
+    try:
+        return list(res["data"][0]["embedding"])
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RetrievalError(f"OpenAI 임베딩 응답 파싱 실패: {exc}\n응답: {res}") from exc
+
+
+def embed_query(
+    text: str,
+    model_name: str,
+    provider: str = "sentence_transformers",
+    api_key: str | None = None,
+    api_base_url: str = DEFAULT_OPENAI_API_BASE_URL,
+    dimensions: int | None = None,
+) -> list[float]:
     """텍스트를 임베딩 벡터로 변환한다.
 
+    provider가 'openai'이면 OpenAI Embeddings API를 호출한다.
+    그 외(기본값)는 sentence-transformers 로컬 모델을 사용하며,
     모델은 _MODEL_CACHE에 캐싱되어 반복 호출 시 재로드하지 않는다.
 
     Raises:
-        RetrievalError: 패키지 미설치, 빈 텍스트, 토크나이징 실패 시.
+        RetrievalError: 패키지 미설치, 빈 텍스트, API 오류 시.
     """
-    try:
-        from sentence_transformers import SentenceTransformer
-    except Exception as exc:
-        raise RetrievalError(
-            "sentence-transformers가 필요합니다.\n설치: uv add sentence-transformers"
-        ) from exc
-
     if isinstance(text, str):
         query_text = text.strip()
     elif isinstance(text, (list, tuple)):
@@ -91,6 +127,19 @@ def embed_query(text: str, model_name: str) -> list[float]:
 
     if not query_text:
         raise RetrievalError("질문 텍스트가 비어 있습니다.")
+
+    if provider == "openai":
+        if not api_key:
+            raise RetrievalError("OpenAI 임베딩 사용 시 api_key가 필요합니다.")
+        return _embed_query_openai(query_text, model_name, api_key, api_base_url, dimensions)
+
+    # sentence_transformers
+    try:
+        from sentence_transformers import SentenceTransformer
+    except Exception as exc:
+        raise RetrievalError(
+            "sentence-transformers가 필요합니다.\n설치: uv add sentence-transformers"
+        ) from exc
 
     model = _MODEL_CACHE.get(model_name)
     if model is None:

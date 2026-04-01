@@ -1,0 +1,117 @@
+version: 0.1
+registry_name: endpoint_registry_related
+applies_to:
+  output_file_id: 02_related_legal_docs
+  output_file_name: 02_related_legal_docs.json
+  collection_group: related_legal_docs
+
+runtime:
+  api_base_url: "https://www.law.go.kr/DRF"
+  auth_param: OC
+  preferred_type: JSON
+  timeout_sec: 30
+  retries:
+    max_attempts: 3
+    backoff_sec: [1, 3, 5]
+
+validation:
+  require_json_capable_for_enabled: true
+  allow_html_only_if_enabled_false: true
+  enabled_html_only_whitelist: [interpretation_detail]
+
+endpoints:
+  precedent_list:
+    enabled: true
+    path: /lawSearch.do
+    target: prec
+    response_types: [HTML, XML, JSON]
+    preferred_type: JSON
+    required_params: [OC, target, type]
+    optional_params:
+      [search, query, display, page, JO, nb, org, curt, date, prncYd, datSrcNm, sort]
+    default_params:
+      display: 100
+      page: 1
+      sort: ddes
+
+  precedent_detail:
+    enabled: true
+    path: /lawService.do
+    target: prec
+    response_types: [HTML, XML, JSON]
+    preferred_type: JSON
+    required_params: [OC, target, type, ID]
+    optional_params: [LM]
+
+  constitutional_list:
+    enabled: true
+    path: /lawSearch.do
+    target: detc
+    response_types: [HTML, XML, JSON]
+    preferred_type: JSON
+    required_params: [OC, target, type]
+    optional_params:
+      [search, query, display, page, gana, sort, date, edYd, nb]
+    default_params:
+      display: 100
+      page: 1
+      sort: ddes
+
+  constitutional_detail:
+    enabled: true
+    path: /lawService.do
+    target: detc
+    response_types: [HTML, XML, JSON]
+    preferred_type: JSON
+    required_params: [OC, target, type, ID]
+    optional_params: [LM]
+
+  interpretation_list:
+    enabled: true
+    path: /lawSearch.do
+    target: expc
+    response_types: [HTML, XML, JSON]
+    preferred_type: JSON
+    required_params: [OC, target, type]
+    optional_params:
+      [search, query, display, page, inq, rpl, gana, itmno, regYd, explYd, sort]
+    default_params:
+      display: 100
+      page: 1
+      sort: ddes
+
+  interpretation_detail:
+    enabled: true
+    path: /lawService.do
+    target: expc
+    response_types: [HTML]
+    preferred_type: HTML
+    required_params: [OC, target, ID, type, mobileYn]
+    default_params:
+      mobileYn: "Y"
+      type: HTML
+    reason: "모바일 상세 본문은 HTML-only 허용"
+
+  admin_appeal_list:
+    enabled: true
+    path: /lawSearch.do
+    target: decc
+    response_types: [HTML, XML, JSON]
+    preferred_type: JSON
+    required_params: [OC, target, type, mobileYn]
+    optional_params:
+      [search, query, display, page, cls, gana, date, dpaYd, rslYd, sort]
+    default_params:
+      display: 100
+      page: 1
+      sort: ddes
+      mobileYn: "Y"
+
+  admin_appeal_detail:
+    enabled: true
+    path: /lawService.do
+    target: decc
+    response_types: [HTML, XML, JSON]
+    preferred_type: JSON
+    required_params: [OC, target, type, ID]
+    optional_params: [LM]
