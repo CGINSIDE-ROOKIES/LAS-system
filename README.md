@@ -75,24 +75,23 @@ AI 기반 법무지원 시스템 프로젝트입니다.
 
 ### Frontend
 
+> 모든 명령어는 프로젝트 루트에서 실행합니다.
+
 ```bash
 corepack enable
 corepack prepare pnpm@9.12.3 --activate
-cd apps/frontend
 pnpm install
-pnpm dev
+cp apps/frontend/.env.example apps/frontend/.env
+pnpm --filter @las/frontend dev
 ```
+
+접속: `http://localhost:3000`
 
 ### Backend
 
-Docker 스토어(Qdrant/OpenSearch) 실행 후 API 서버를 시작합니다.
-
 ```bash
-cd apps/backend/rag
-docker compose up -d
-
-cd ../api
-cp .env.example .env   # 최초 1회 — LLM 환경변수 추가 필요
+cd apps/backend/api
+cp .env.example .env   # 최초 1회
 uv run dev
 ```
 
