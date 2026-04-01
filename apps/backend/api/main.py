@@ -32,6 +32,7 @@ logging.config.dictConfig({
     "loggers": {
         "uvicorn": {"propagate": True},
         "uvicorn.access": {"propagate": True},
+        "alembic.runtime.plugins": {"level": "WARNING", "propagate": True},
     },
 })
 
