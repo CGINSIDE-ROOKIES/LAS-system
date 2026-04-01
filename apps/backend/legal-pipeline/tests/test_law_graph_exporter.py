@@ -148,6 +148,82 @@ def test_build_law_graph_export_rows_dedupes_article_nodes_and_splits_edges(tmp_
     assert edge["target_article_uid"] == "article::001::7"
 
 
+def test_build_law_graph_export_rows_skips_blank_law_name_and_restores_root_law_name(tmp_path):
+    corpus_path = tmp_path / "dataset" / "legal_corpus.jsonl"
+    relations_path = tmp_path / "dataset" / "legal_relations.jsonl"
+
+    write_jsonl(
+        [
+            {
+                "id": "law::000130::article::1::0",
+                "doc_type": "law",
+                "section_type": "article",
+                "law_uid": "000130",
+                "law_name": "남녀고용평등과 일ㆍ가정 양립 지원에 관한 법률",
+                "root_law_uid": "000130",
+                "root_law_name": "남녀고용평등과 일 가정 양립 지원에 관한 법률",
+                "classified_level": "법",
+                "kind_name": "법률",
+                "article_key": "1",
+                "article_no_display": "제1조",
+                "text": "본문",
+                "display_text": "본문",
+                "source_file_path": "root.json",
+            },
+            {
+                "id": "law::003140::article::1::0",
+                "doc_type": "law",
+                "section_type": "article",
+                "law_uid": "003140",
+                "law_name": "남녀고용평등과 일ㆍ가정 양립 지원에 관한 법률 시행령",
+                "root_law_uid": "000130",
+                "root_law_name": "남녀고용평등과 일 가정 양립 지원에 관한 법률",
+                "classified_level": "시행령",
+                "kind_name": "대통령령",
+                "article_key": "1",
+                "article_no_display": "제1조",
+                "text": "시행령 본문",
+                "display_text": "시행령 본문",
+                "source_file_path": "child.json",
+            },
+            {
+                "id": "law::unknown-law::article::1::0",
+                "doc_type": "law",
+                "section_type": "article",
+                "law_uid": "unknown-law",
+                "law_name": "",
+                "root_law_uid": None,
+                "root_law_name": "근로자퇴직급여 보장법",
+                "classified_level": "기타",
+                "kind_name": None,
+                "article_key": "1",
+                "article_no_display": "제1조",
+                "text": "이름 없는 본문",
+                "display_text": "이름 없는 본문",
+                "source_file_path": "unnamed.json",
+            },
+        ],
+        corpus_path,
+    )
+    write_jsonl([], relations_path)
+
+    rows = build_law_graph_export_rows(
+        legal_corpus_path=corpus_path,
+        legal_relations_path=relations_path,
+    )
+
+    assert len(rows["law_nodes"]) == 2
+    assert len(rows["article_nodes"]) == 2
+    assert all(row["law_uid"] != "unknown-law" for row in rows["law_nodes"])
+    assert all(row["law_uid"] != "unknown-law" for row in rows["article_nodes"])
+
+    child = next(row for row in rows["law_nodes"] if row["law_uid"] == "003140")
+    assert child["root_law_name"] == "남녀고용평등과 일ㆍ가정 양립 지원에 관한 법률"
+
+    child_article = next(row for row in rows["article_nodes"] if row["law_uid"] == "003140")
+    assert child_article["root_law_name"] == "남녀고용평등과 일ㆍ가정 양립 지원에 관한 법률"
+
+
 def test_write_law_graph_export_writes_manifest_and_files(tmp_path):
     corpus_path = tmp_path / "dataset" / "legal_corpus.jsonl"
     relations_path = tmp_path / "dataset" / "legal_relations.jsonl"
