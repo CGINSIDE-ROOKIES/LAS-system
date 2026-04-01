@@ -18,6 +18,11 @@ def _edge_id(prefix: str, source: str, target: str) -> str:
     return f"{prefix}::{source}::{target}"
 
 
+def _clean_str(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
 def build_law_graph_export_rows(
     *,
     legal_corpus_path: str | Path = "data/dataset/legal_corpus.jsonl",
@@ -39,16 +44,17 @@ def build_law_graph_export_rows(
             continue
 
         law_uid = str(row.get("law_uid") or "").strip()
+        law_name = _clean_str(row.get("law_name"))
         article_key = str(row.get("article_key") or "").strip()
         article_uid = _article_uid(law_uid, article_key)
-        if not law_uid or not article_uid:
+        if not law_uid or not law_name or not article_uid:
             continue
 
         if law_uid not in law_nodes:
             law_nodes[law_uid] = {
                 "node_type": "Law",
                 "law_uid": law_uid,
-                "law_name": row.get("law_name"),
+                "law_name": law_name,
                 "root_law_uid": row.get("root_law_uid"),
                 "root_law_name": row.get("root_law_name"),
                 "classified_level": row.get("classified_level"),
@@ -66,7 +72,7 @@ def build_law_graph_export_rows(
                 "article_uid": article_uid,
                 "law_uid": law_uid,
                 "root_law_uid": row.get("root_law_uid"),
-                "law_name": row.get("law_name"),
+                "law_name": law_name,
                 "root_law_name": row.get("root_law_name"),
                 "article_key": article_key,
                 "article_no_display": row.get("article_no_display"),
@@ -86,6 +92,20 @@ def build_law_graph_export_rows(
             },
         )
 
+    for node in law_nodes.values():
+        root_law_uid = _clean_str(node.get("root_law_uid"))
+        if root_law_uid and root_law_uid in law_nodes:
+            node["root_law_name"] = law_nodes[root_law_uid]["law_name"]
+        elif not _clean_str(node.get("root_law_name")):
+            node["root_law_name"] = node["law_name"]
+
+    for node in article_nodes.values():
+        root_law_uid = _clean_str(node.get("root_law_uid"))
+        if root_law_uid and root_law_uid in law_nodes:
+            node["root_law_name"] = law_nodes[root_law_uid]["law_name"]
+        elif not _clean_str(node.get("root_law_name")):
+            node["root_law_name"] = node["law_name"]
+
     for row in _iter_jsonl(legal_relations_path):
         if str(row.get("relation_model") or "").strip() != "law_to_law":
             continue
@@ -100,6 +120,8 @@ def build_law_graph_export_rows(
         source_article_uid = _article_uid(source_law_uid, source_article_key)
 
         if relation_type == "cited_law" and source_law_uid and target_law_uid:
+            if source_law_uid not in law_nodes or target_law_uid not in law_nodes:
+                continue
             edge_key = _edge_id("REFERS_TO_LAW", source_law_uid, target_law_uid)
             current = refers_to_law_edges.get(edge_key)
             if current is None:
