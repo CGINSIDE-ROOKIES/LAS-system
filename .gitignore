@@ -218,6 +218,7 @@ node_modules/
 .pnpm-store/
 .turbo/
 .next/
+*.tsbuildinfo
 
 # Windows ADS metadata
 *:Zone.Identifier
