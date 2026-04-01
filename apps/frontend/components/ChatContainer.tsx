@@ -172,6 +172,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
                     content: "",
                     isStreaming: false,
                     statusMessage: undefined,
+                    qa_id: event.qa_id ?? undefined,
                     answerData: {
                       summary: m.content,
                       citations: parsedCitations,

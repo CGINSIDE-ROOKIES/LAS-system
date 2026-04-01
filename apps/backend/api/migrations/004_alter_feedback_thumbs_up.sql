@@ -1,3 +1,3 @@
 ALTER TABLE feedback
-    DROP COLUMN rating,
-    ADD COLUMN thumbs_up BOOLEAN NOT NULL;
+    DROP COLUMN IF EXISTS rating,
+    ADD COLUMN IF NOT EXISTS thumbs_up BOOLEAN NOT NULL DEFAULT false;

@@ -189,6 +189,10 @@ def save_feedback(
             """
             INSERT INTO feedback (qa_id, thumbs_up, comment)
             VALUES (%s, %s, %s)
+            ON CONFLICT (qa_id) DO UPDATE
+                SET thumbs_up = EXCLUDED.thumbs_up,
+                    comment   = EXCLUDED.comment,
+                    created_at = now()
             RETURNING id
             """,
             (qa_id, thumbs_up, comment),

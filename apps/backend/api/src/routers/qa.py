@@ -277,10 +277,28 @@ def ask_stream(
                     first_chunk = False
                 answer_parts.append(chunk)
                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
+
+            logger.info("ask_stream 완료: %.2fs | law_context_status=%s", time.perf_counter() - t0, meta.law_context_status)
+            answer = "".join(answer_parts)
+            qa_id = None
+            if answer.strip():
+                try:
+                    qa_id = save_qa(
+                        conn,
+                        question=request.question,
+                        answer=answer,
+                        law_context_status=meta.law_context_status,
+                        retrieved_docs=meta.retrieved_docs,
+                        session_id=request.session_id,
+                    )
+                except Exception:
+                    logger.error("DB save failed in ask_stream:\n%s", traceback.format_exc())
+
             done_payload = {
                 "type": "done",
                 "retrieved_docs": [RetrievedDoc(**doc).model_dump() for doc in meta.retrieved_docs],
                 "law_context_status": meta.law_context_status,
+                "qa_id": qa_id,
             }
             yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
         except RetrievalError as exc:
@@ -291,22 +309,6 @@ def ask_stream(
             logger.error("INTERNAL_ERROR in ask_stream:\n%s", traceback.format_exc())
             yield f"data: {json.dumps({'type': 'error', 'code': 'INTERNAL_ERROR', 'error': '서버 오류가 발생했습니다.'}, ensure_ascii=False)}\n\n"
             return
-
-        if meta is not None:
-            logger.info("ask_stream 완료: %.2fs | law_context_status=%s", time.perf_counter() - t0, meta.law_context_status)
-            answer = "".join(answer_parts)
-            if answer.strip():
-                try:
-                    save_qa(
-                        conn,
-                        question=request.question,
-                        answer=answer,
-                        law_context_status=meta.law_context_status,
-                        retrieved_docs=meta.retrieved_docs,
-                        session_id=request.session_id,
-                    )
-                except Exception:
-                    logger.error("DB save failed in ask_stream:\n%s", traceback.format_exc())
 
     return StreamingResponse(
         generate(),
