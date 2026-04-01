@@ -1,3 +1,12 @@
+"""Parse law article references for `law_to_law` relation building.
+
+Observed relation examples from the current dataset:
+- `explicit_law_article`: `민법 제750조`
+- `relative_scope`: `같은 법 제9조`, noisy fallback like `제43조(하도급계약의 특례) 법 제48조`
+- `previous_article` / `current_article`: `전조`, `동조`
+- `same_law_article`: `제7조부터 제9조까지`
+"""
+
 from __future__ import annotations
 
 import re
@@ -23,7 +32,7 @@ EXPLICIT_LAW_WITH_ARTICLE_PATTERN = re.compile(
     rf"(?<![가-힣0-9])(?P<law_name>{LAW_NAME_TOKEN_PATTERN}(?:\s+{LAW_NAME_TOKEN_PATTERN}){{0,7}})\s*(?P<article_block>{ARTICLE_BLOCK_PATTERN})"
 )
 RELATIVE_SCOPE_WITH_ARTICLE_PATTERN = re.compile(
-    r"(?P<prefix>이|같은)\s*(?P<scope>법|영|규칙|조례)\s*"
+    r"(?P<prefix>이|같은|동)\s*(?P<scope>법|영|규칙|조례)\s*"
     rf"(?P<article_block>{SINGLE_ARTICLE_BLOCK_PATTERN})"
 )
 BARE_ARTICLE_BLOCK_PATTERN = re.compile(
@@ -58,6 +67,12 @@ def _is_noisy_explicit_law_name(text: str) -> bool:
     if not candidate:
         return True
 
+    if re.match(r"^제\s*\d+\s*조(?:\s*의\s*\d+)?", candidate):
+        return True
+
+    if "(" in candidate or ")" in candidate:
+        return True
+
     if candidate in {"법", "법 시행령", "법 시행규칙", "같은 법 시행령", "같은 법 시행규칙"}:
         return True
 
@@ -65,15 +80,43 @@ def _is_noisy_explicit_law_name(text: str) -> bool:
     if len(tokens) >= 2 and tokens[0] == "법":
         return True
 
+    if len(tokens) >= 4 and candidate.endswith("법"):
+        return True
+
     topic_particles = ("은", "는", "이", "가")
     object_particles = ("을", "를")
     conjunctive_particles = ("과", "와")
+    institutional_suffixes = ("장관", "위원회", "청장", "협회", "원장", "시장", "군수", "구청장", "도지사")
 
     for token in tokens[:-1]:
         if token.endswith(topic_particles + object_particles + conjunctive_particles):
             return True
+        if token.endswith(institutional_suffixes):
+            return True
 
     return False
+
+
+def _infer_scope_from_noisy_candidate(text: str) -> str | None:
+    candidate = _normalize_space(text)
+    if not candidate or not _is_noisy_explicit_law_name(candidate):
+        return None
+
+    suffix_to_scope = (
+        ("시행규칙", "규칙"),
+        ("부령", "규칙"),
+        ("규칙", "규칙"),
+        ("시행령", "영"),
+        ("대통령령", "영"),
+        ("령", "영"),
+        ("법률", "법"),
+        ("법", "법"),
+        ("조례", "조례"),
+    )
+    for suffix, scope in suffix_to_scope:
+        if candidate.endswith(suffix):
+            return scope
+    return None
 
 
 def _article_ref(main_no: str, branch_no: str | None) -> dict[str, str]:
@@ -220,6 +263,12 @@ def _resolve_scope_target_law_names(
     if source_level == desired_level and source_law_name:
         return [source_law_name]
 
+    if desired_level == "법" and root_law_name:
+        for law in family_laws:
+            law_name = str(law.get("law_name") or "").strip()
+            if law_name == root_law_name:
+                return [law_name]
+
     resolved: list[str] = []
     for law in family_laws:
         law_name = str(law.get("law_name") or "").strip()
@@ -342,13 +391,37 @@ def parse_law_article_references(
     for match in EXPLICIT_LAW_WITH_ARTICLE_PATTERN.finditer(raw_text):
         candidate_law_name = _normalize_space(match.group("law_name"))
         article_refs = extract_article_refs(match.group("article_block"))
-        if (
-            not candidate_law_name
-            or not article_refs
-            or not _looks_like_law_name(candidate_law_name)
-            or _is_noisy_explicit_law_name(candidate_law_name)
-        ):
+        if not candidate_law_name or not article_refs or not _looks_like_law_name(candidate_law_name):
             continue
+
+        inferred_scope = _infer_scope_from_noisy_candidate(candidate_law_name)
+        if inferred_scope:
+            candidates = _resolve_scope_target_law_names(
+                scope=inferred_scope,
+                source_law_name=source_law_name,
+                source_law_level=source_law_level,
+                root_law_name=root_law_name,
+                family_laws=family_laws,
+            )
+            resolution_status = "resolved" if len(candidates) == 1 else "ambiguous"
+            target_law_name = candidates[0] if len(candidates) == 1 else None
+            _append_reference(
+                results,
+                seen,
+                reference_type="relative_scope",
+                reference_text=match.group(0),
+                target_law_name=target_law_name,
+                related_law_names=candidates,
+                article_refs=article_refs,
+                resolution_status=resolution_status,
+                resolution_confidence=0.88 if resolution_status == "resolved" else 0.55,
+            )
+            masked_text = _mask_span(masked_text, match.start(), match.end())
+            continue
+
+        if _is_noisy_explicit_law_name(candidate_law_name):
+            continue
+
         candidates, resolution_status = _resolve_law_name_candidates(
             candidate_law_name,
             root_law_name=root_law_name,
