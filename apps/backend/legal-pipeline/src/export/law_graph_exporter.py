@@ -144,6 +144,8 @@ def build_law_graph_export_rows(
             target_article_uid = _article_uid(target_law_uid, target_article_key)
             if not target_article_uid:
                 continue
+            if source_article_uid not in article_nodes or target_article_uid not in article_nodes:
+                continue
             edge_key = _edge_id("REFERS_TO_ARTICLE", source_article_uid, target_article_uid)
             current = refers_to_article_edges.get(edge_key)
             if current is None:
