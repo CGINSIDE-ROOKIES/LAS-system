@@ -173,6 +173,29 @@ def delete_history_items(
         return cur.rowcount
 
 
+def save_feedback(
+    conn: psycopg2.extensions.connection,
+    *,
+    qa_id: str,
+    thumbs_up: bool,
+    comment: str | None = None,
+) -> str:
+    """feedback 저장 후 feedback id(UUID) 반환. qa_id가 없으면 ValueError."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM qa_history WHERE id = %s", (qa_id,))
+        if cur.fetchone() is None:
+            raise ValueError(f"qa_id {qa_id} not found")
+        cur.execute(
+            """
+            INSERT INTO feedback (qa_id, thumbs_up, comment)
+            VALUES (%s, %s, %s)
+            RETURNING id
+            """,
+            (qa_id, thumbs_up, comment),
+        )
+        return str(cur.fetchone()[0])
+
+
 def get_history_item(
     conn: psycopg2.extensions.connection,
     qa_id: str,

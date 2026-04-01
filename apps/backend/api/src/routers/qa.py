@@ -1,8 +1,9 @@
 """Q&A 라우터.
 
 엔드포인트:
-  POST /api/v1/qa/ask        - 질문을 받아 RAG 기반 답변 반환 (단일 응답)
-  POST /api/v1/qa/ask/stream - 질문을 받아 RAG 기반 답변 스트리밍 반환 (SSE)
+  POST /api/v1/qa/ask              - 질문을 받아 RAG 기반 답변 반환 (단일 응답)
+  POST /api/v1/qa/ask/stream       - 질문을 받아 RAG 기반 답변 스트리밍 반환 (SSE)
+  POST /api/v1/qa/{qa_id}/feedback - Q&A 답변에 대한 사용자 피드백 저장
 """
 
 import json
@@ -22,7 +23,7 @@ from src.db import get_db
 from src.dependencies import get_query_parser, get_rag_pipeline
 from rag_pipeline.generation.pipeline import RagPipeline
 from rag_pipeline.query_parser import QueryParser
-from src.history import delete_history_item, delete_history_items, get_history, get_history_item, save_qa
+from src.history import delete_history_item, delete_history_items, get_history, get_history_item, save_feedback, save_qa
 from rag_pipeline.retrieval.common import RetrievalError
 
 router = APIRouter(tags=["qa"])
@@ -132,6 +133,29 @@ def history_item(
     if item is None:
         raise HTTPException(status_code=404, detail="히스토리를 찾을 수 없습니다.")
     return item
+
+
+class FeedbackRequest(BaseModel):
+    thumbs_up: bool
+    comment: str | None = Field(default=None, max_length=1000)
+
+
+class FeedbackResponse(BaseModel):
+    id: str
+
+
+@router.post("/{qa_id}/feedback", response_model=FeedbackResponse, status_code=201)
+def submit_feedback(
+    qa_id: str,
+    request: FeedbackRequest,
+    conn: psycopg2.extensions.connection = Depends(get_db),
+) -> FeedbackResponse:
+    """Q&A 답변에 대한 사용자 피드백(평점·코멘트)을 저장합니다."""
+    try:
+        feedback_id = save_feedback(conn, qa_id=qa_id, thumbs_up=request.thumbs_up, comment=request.comment)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="히스토리를 찾을 수 없습니다.")
+    return FeedbackResponse(id=feedback_id)
 
 
 @router.post("/ask", response_model=AskResponse)
