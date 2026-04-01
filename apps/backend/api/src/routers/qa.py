@@ -199,7 +199,7 @@ def ask(
         )
     except RetrievalError as exc:
         logger.error("ask RetrievalError: %s", exc)
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail="검색 서비스 오류가 발생했습니다.") from exc
     except Exception:
         logger.error("INTERNAL_ERROR in ask:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail="서버 오류가 발생했습니다.")
@@ -303,7 +303,7 @@ def ask_stream(
             yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
         except RetrievalError as exc:
             logger.error("ask_stream RetrievalError: %s", exc)
-            yield f"data: {json.dumps({'type': 'error', 'code': 'PIPELINE_ERROR', 'error': str(exc)}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'code': 'PIPELINE_ERROR', 'error': '검색 서비스 오류가 발생했습니다.'}, ensure_ascii=False)}\n\n"
             return
         except Exception:
             logger.error("INTERNAL_ERROR in ask_stream:\n%s", traceback.format_exc())

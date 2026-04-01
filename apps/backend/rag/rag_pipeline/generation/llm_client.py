@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import urllib.error
-import urllib.parse
 import urllib.request
 from typing import Any, Iterator
 
@@ -100,9 +99,8 @@ def generate_answer(
             temperature=temperature,
             response_mime_type=response_mime_type,
         )
-        sep = "&" if "?" in url else "?"
-        call_url = f"{url}{sep}key={urllib.parse.quote(api_key)}"
-        res = http_json("POST", call_url, payload, {"Content-Type": "application/json"}, timeout)
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+        res = http_json("POST", url, payload, headers, timeout)
         return _extract_text_from_gemini_response(res)
 
     headers = {"Content-Type": "application/json"}
@@ -214,8 +212,7 @@ def _stream_gemini(
         temperature=temperature,
     )
     stream_url = url.replace(":generateContent", ":streamGenerateContent")
-    sep = "&" if "?" in stream_url else "?"
-    call_url = f"{stream_url}{sep}alt=sse&key={urllib.parse.quote(api_key)}"
+    call_url = f"{stream_url}?alt=sse"
 
     req = urllib.request.Request(
         url=call_url,
@@ -223,6 +220,7 @@ def _stream_gemini(
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
     )
     req.add_header("Content-Type", "application/json")
+    req.add_header("x-goog-api-key", api_key)
 
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         for raw in resp:
