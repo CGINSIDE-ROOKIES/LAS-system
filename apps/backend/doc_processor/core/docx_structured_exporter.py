@@ -1,7 +1,6 @@
-"""DOCX structured markdown exporter.
+"""DOCX structured mapping exporter.
 
-Exports ``dict[str, str]`` in the same ID format used by HWPX exporters so
-upstream IR construction can stay format-agnostic.
+Exports a run-level mapping (unit-id -> text), not Markdown text.
 """
 
 from __future__ import annotations
@@ -21,11 +20,7 @@ def _iter_blocks(
     Paragraph,
     Table,
 ) -> Iterator[object]:
-    """Yield document blocks (paragraphs/tables) in source order.
-
-    Uses ``iter_inner_content`` when available. Falls back to XML traversal for
-    compatibility with python-docx versions that do not expose it.
-    """
+    """Yield document blocks (paragraphs/tables) in source order."""
     iter_inner_content = getattr(doc, "iter_inner_content", None)
     if callable(iter_inner_content):
         yield from iter_inner_content()
@@ -38,24 +33,13 @@ def _iter_blocks(
             yield Table(child, doc)
 
 
-def export_docx_markdown_structured(
+def export_docx_structured_mapping(
     source: "DocxDocument | str | Path",
     *,
     include_tables: bool = True,
     skip_empty: bool = False,
 ) -> dict[str, str]:
-    """Export DOCX text fragments keyed by HWPX-compatible IDs.
-
-    ID format (1-based indices):
-    - Body runs: ``s1.p{paragraph}.r{run}``
-    - Table cell runs:
-      ``s1.p{paragraph}.r1.tbl{table}.tr{row}.tc{col}.p{cell_para}.r{cell_run}``
-
-    Args:
-        source: Open python-docx ``Document`` or path to ``.docx``.
-        include_tables: Include table content in the output mapping.
-        skip_empty: If True, omit entries with empty text.
-    """
+    """Export DOCX text fragments keyed by HWPX-compatible unit IDs."""
     from docx import Document as load_docx
     from docx.document import Document as DocxDocument
     from docx.oxml.table import CT_Tbl
@@ -122,18 +106,18 @@ def export_docx_markdown_structured(
     return mapping
 
 
-def export_markdown_structured(
+def export_structured_mapping(
     source: "DocxDocument | str | Path",
     *,
     include_tables: bool = True,
     skip_empty: bool = False,
 ) -> dict[str, str]:
-    """Compatibility alias for a consistent exporter function name."""
-    return export_docx_markdown_structured(
+    """Compatibility alias for format-specific module parity."""
+    return export_docx_structured_mapping(
         source,
         include_tables=include_tables,
         skip_empty=skip_empty,
     )
 
 
-__all__ = ["export_docx_markdown_structured", "export_markdown_structured"]
+__all__ = ["export_docx_structured_mapping", "export_structured_mapping"]

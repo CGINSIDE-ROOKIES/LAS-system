@@ -1,7 +1,6 @@
-"""HWPX structured markdown exporter.
+"""HWPX structured mapping exporter.
 
-This module reproduces ``export_markdown_structured`` output shape without
-patching upstream ``python-hwpx``.
+Exports a run-level mapping (unit-id -> text), not Markdown text.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ import zipfile
 if TYPE_CHECKING:
     from hwpx import HwpxDocument
 
-_HP_NS = "http://www.hancom.co.kr/hwpml/2011/paragraph"
+_HP_NS = "http://www.hancom.co.kr/hwpml/2011/paragraph"  # XML namespace key
 _HP = f"{{{_HP_NS}}}"
 
 
@@ -102,7 +101,6 @@ def _export_from_section_roots(section_roots: list[ET.Element], *, skip_empty: b
 
 
 def _section_roots_from_bytes(source: bytes) -> list[ET.Element]:
-    names: list[str] = []
     section_name_pattern = re.compile(r"^Contents/section\d+\.xml$")
 
     with zipfile.ZipFile(BytesIO(source)) as zf:
@@ -121,17 +119,12 @@ def _section_roots_from_doc(doc: "HwpxDocument") -> list[ET.Element]:
     return [section.element for section in doc.sections]
 
 
-def export_hwpx_markdown_structured(
+def export_hwpx_structured_mapping(
     source: "HwpxDocument | str | Path | bytes",
     *,
     skip_empty: bool = False,
 ) -> dict[str, str]:
-    """Export HWPX text fragments keyed by structural run IDs.
-
-    Args:
-        source: ``HwpxDocument``, ``.hwpx`` path, or raw HWPX bytes.
-        skip_empty: If True, omit entries with empty text.
-    """
+    """Export HWPX text fragments keyed by structural unit IDs."""
     from hwpx import HwpxDocument
 
     if isinstance(source, HwpxDocument):
@@ -159,13 +152,13 @@ def export_hwpx_markdown_structured(
     )
 
 
-def export_markdown_structured(
+def export_structured_mapping(
     source: "HwpxDocument | str | Path | bytes",
     *,
     skip_empty: bool = False,
 ) -> dict[str, str]:
-    """Compatibility alias for a consistent exporter function name."""
-    return export_hwpx_markdown_structured(source, skip_empty=skip_empty)
+    """Compatibility alias for format-specific module parity."""
+    return export_hwpx_structured_mapping(source, skip_empty=skip_empty)
 
 
-__all__ = ["export_hwpx_markdown_structured", "export_markdown_structured"]
+__all__ = ["export_hwpx_structured_mapping", "export_structured_mapping"]
