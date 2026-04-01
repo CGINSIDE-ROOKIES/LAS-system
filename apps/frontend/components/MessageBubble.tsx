@@ -12,6 +12,7 @@ export interface ChatMessage {
     summary: string;
     citations: { article: string; content: string }[];
     references: string[];
+    isIrrelevant?: boolean;
   };
 }
 

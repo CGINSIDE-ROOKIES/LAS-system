@@ -92,7 +92,7 @@ pnpm --filter @las/frontend dev
 ```bash
 cd apps/backend/api
 cp .env.example .env   # 최초 1회
-uv run dev
+uv run uvicorn main:app --reload
 ```
 
 상세 설정은 `apps/backend/api/README.md` 참조.

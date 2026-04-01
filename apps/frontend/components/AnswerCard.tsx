@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { FileText, BookOpen, ExternalLink, ThumbsUp, ThumbsDown } from "lucide-react";
+import { FileText, BookOpen, ExternalLink, ThumbsUp, ThumbsDown, ChevronDown } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Separator } from "@/components/ui/separator";
 import { submitFeedback } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,7 @@ interface AnswerCardProps {
     summary: string;
     citations: { article: string; content: string }[];
     references: string[];
+    isIrrelevant?: boolean;
   };
   qaId?: string;
 }
@@ -54,20 +55,29 @@ export function AnswerCard({ data, qaId }: AnswerCardProps) {
       </div>
 
       {/* 근거 조문 */}
-      <div className="rounded-lg border-2 border-legal-citation-border bg-legal-citation p-4">
-        <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-primary">
-          <BookOpen className="h-3.5 w-3.5" />
-          근거 조문
-        </div>
-        <div className="space-y-2">
-          {data.citations.map((c, i) => (
-            <div key={i} className="rounded-md border border-border bg-card p-3">
-              <div className="mb-1 text-xs font-semibold text-primary">{c.article}</div>
-              <p className="text-xs leading-relaxed text-legal-citation-foreground whitespace-pre-wrap line-clamp-6">{c.content}</p>
-            </div>
-          ))}
-        </div>
-      </div>
+      {!data.isIrrelevant && (
+        <Collapsible defaultOpen>
+          <div className="rounded-lg border-2 border-legal-citation-border bg-legal-citation p-4">
+            <CollapsibleTrigger className="flex w-full items-center justify-between mb-1">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-primary">
+                <BookOpen className="h-3.5 w-3.5" />
+                근거 조문
+              </div>
+              <ChevronDown className="h-3.5 w-3.5 text-primary transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="space-y-2 mt-3">
+                {data.citations.map((c, i) => (
+                  <div key={i} className="rounded-md border border-border bg-card p-3">
+                    <div className="mb-1 text-xs font-semibold text-primary">{c.article}</div>
+                    <p className="text-xs leading-relaxed text-legal-citation-foreground whitespace-pre-wrap line-clamp-6">{c.content}</p>
+                  </div>
+                ))}
+              </div>
+            </CollapsibleContent>
+          </div>
+        </Collapsible>
+      )}
 
       {/* 관련 문서 */}
       {data.references.length > 0 && (
@@ -87,24 +97,23 @@ export function AnswerCard({ data, qaId }: AnswerCardProps) {
       {/* 피드백 */}
       {qaId && (
         <div className="space-y-2">
-          <Separator />
-          <div className="flex items-center gap-1.5 px-1">
-            <span className="text-xs text-muted-foreground">이 답변이 도움이 되었나요?</span>
+          <div className="flex items-center gap-0.5 px-1">
+            <span className="text-[10px] text-muted-foreground">이 답변이 도움이 되었나요?</span>
             <Button
               variant="ghost"
               size="sm"
-              className={cn("h-7 px-2", thumbsUp === true && "text-green-600 bg-green-50 hover:bg-green-50")}
+              className={cn("h-4 px-1", thumbsUp === true && "text-green-600 bg-green-50 hover:bg-green-50")}
               onClick={() => handleFeedback(true)}
             >
-              <ThumbsUp className="h-3.5 w-3.5" />
+              <ThumbsUp className="h-2 w-2" />
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              className={cn("h-7 px-2", thumbsUp === false && "text-red-500 bg-red-50 hover:bg-red-50")}
+              className={cn("h-4 px-1", thumbsUp === false && "text-red-500 bg-red-50 hover:bg-red-50")}
               onClick={() => handleFeedback(false)}
             >
-              <ThumbsDown className="h-3.5 w-3.5" />
+              <ThumbsDown className="h-2 w-2" />
             </Button>
           </div>
           {showComment && (
