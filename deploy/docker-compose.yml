@@ -23,7 +23,7 @@ services:
       - MIDM_LLM_URL=${MIDM_LLM_URL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-flash-latest}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash-lite}
       - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-sentence_transformers}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-mpnet-base-v2}
       - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-cpu}
@@ -45,7 +45,7 @@ services:
       - LLM_CHAT_COMPLETIONS_URL=${LLM_CHAT_COMPLETIONS_URL:-}
       - LLM_MODEL=${LLM_MODEL:-}
       - LLM_API_KEY=${LLM_API_KEY:-}
-      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-4096}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-2048}
       - DATABASE_URL=${DATABASE_URL:-postgresql://user:password@postgres:5432/las}
 
   law-updater:

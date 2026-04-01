@@ -51,18 +51,13 @@ def _build_qdrant_filter(
     return {"must": must} if must else None
 
 
-def search_qdrant(
-    query: str,
+def search_qdrant_with_vector(
+    vector: list[float],
     top_k: int,
     *,
     qdrant_url: str,
     collection: str,
     timeout: int,
-    embedding_model: str = DEFAULT_EMBEDDING_MODEL,
-    embedding_provider: str = "sentence_transformers",
-    embedding_api_key: str | None = None,
-    embedding_api_base_url: str = DEFAULT_OPENAI_API_BASE_URL,
-    embedding_dimensions: int | None = None,
     api_key: str | None = None,
     doc_types: list[str] | None = None,
     law_names: list[str] | None = None,
@@ -70,20 +65,10 @@ def search_qdrant(
     fetch_multiplier: int = 2,
     vector_name: str | None = None,
 ) -> list[dict[str, Any]]:
-    """쿼리를 임베딩 후 Qdrant에서 유사 문서 Top-K를 검색한다.
+    """사전 계산된 벡터로 Qdrant에서 유사 문서 Top-K를 검색한다.
 
-    dedup=True일 경우 top_k * fetch_multiplier 만큼 먼저 가져온 뒤
-    중복 제거 후 top_k개로 잘라낸다.
+    임베딩을 외부에서 한 번만 계산한 뒤 여러 컬렉션을 병렬로 검색할 때 사용한다.
     """
-    vector = embed_query(
-        query,
-        embedding_model,
-        provider=embedding_provider,
-        api_key=embedding_api_key,
-        api_base_url=embedding_api_base_url,
-        dimensions=embedding_dimensions,
-    )
-
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["api-key"] = api_key
@@ -113,3 +98,45 @@ def search_qdrant(
     for i, row in enumerate(trimmed, start=1):
         row["rank"] = i
     return trimmed
+
+
+def search_qdrant(
+    query: str,
+    top_k: int,
+    *,
+    qdrant_url: str,
+    collection: str,
+    timeout: int,
+    embedding_model: str = DEFAULT_EMBEDDING_MODEL,
+    embedding_provider: str = "sentence_transformers",
+    embedding_api_key: str | None = None,
+    embedding_api_base_url: str = DEFAULT_OPENAI_API_BASE_URL,
+    embedding_dimensions: int | None = None,
+    api_key: str | None = None,
+    doc_types: list[str] | None = None,
+    law_names: list[str] | None = None,
+    dedup: bool = True,
+    fetch_multiplier: int = 2,
+    vector_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """쿼리를 임베딩 후 Qdrant에서 유사 문서 Top-K를 검색한다."""
+    vector = embed_query(
+        query,
+        embedding_model,
+        provider=embedding_provider,
+        api_key=embedding_api_key,
+        api_base_url=embedding_api_base_url,
+        dimensions=embedding_dimensions,
+    )
+    return search_qdrant_with_vector(
+        vector, top_k,
+        qdrant_url=qdrant_url,
+        collection=collection,
+        timeout=timeout,
+        api_key=api_key,
+        doc_types=doc_types,
+        law_names=law_names,
+        dedup=dedup,
+        fetch_multiplier=fetch_multiplier,
+        vector_name=vector_name,
+    )

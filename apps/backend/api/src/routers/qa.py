@@ -246,7 +246,11 @@ def ask_stream(
                 law_names=effective_law_names,
                 intent=parsed.intent,
             )
+            first_chunk = True
             for chunk in chunks:
+                if first_chunk:
+                    logger.info("ask_stream 첫 토큰: %.2fs", time.perf_counter() - t0)
+                    first_chunk = False
                 answer_parts.append(chunk)
                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
             done_payload = {

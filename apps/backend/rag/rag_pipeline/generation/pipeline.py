@@ -9,16 +9,17 @@ from __future__ import annotations
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
-from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, is_embedding_model_cached
+from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, embed_query, is_embedding_model_cached
 from ..retrieval.context import build_llm_context_rows, build_llm_context_text
 from ..retrieval.fusion import fuse_rrf, fuse_rrf_multi
 from ..retrieval.opensearch import search_bm25
-from ..retrieval.qdrant import search_qdrant
+from ..retrieval.qdrant import search_qdrant, search_qdrant_with_vector
 from ..retrieval.ranking import apply_law_boost, select_rows_with_law_policy
 from ..retrieval.service import RetrievalConfig
 from .service import GenerationConfig, GenerationService
@@ -44,7 +45,7 @@ class RagPipelineConfig:
     retrieval: RetrievalConfig
     generation: GenerationConfig
     enforce_min_law_contexts: bool = True
-    max_input_chars: int = 12000
+    max_input_chars: int = 6000
     snippet_max_chars: int = 200
 
 
@@ -172,17 +173,24 @@ class RagPipeline:
             enforce = self._cfg.enforce_min_law_contexts
 
         t0 = time.perf_counter()
-        collection_rows = [
-            search_qdrant(
-                question, candidate_k,
+
+        # 임베딩을 한 번만 계산한 뒤 Qdrant(복수 컬렉션) + OpenSearch를 병렬 실행한다.
+        vector = embed_query(
+            question,
+            rcfg.embedding_model,
+            provider=rcfg.embedding_provider,
+            api_key=rcfg.embedding_api_key,
+            api_base_url=rcfg.embedding_api_base_url,
+            dimensions=rcfg.embedding_dimensions,
+        )
+        logger.info("임베딩 완료: %.2fs", time.perf_counter() - t0)
+
+        def _qdrant_task(collection: str) -> list[dict[str, Any]]:
+            return search_qdrant_with_vector(
+                vector, candidate_k,
                 qdrant_url=rcfg.qdrant_url,
                 collection=collection,
                 timeout=rcfg.timeout,
-                embedding_model=rcfg.embedding_model,
-                embedding_provider=rcfg.embedding_provider,
-                embedding_api_key=rcfg.embedding_api_key,
-                embedding_api_base_url=rcfg.embedding_api_base_url,
-                embedding_dimensions=rcfg.embedding_dimensions,
                 api_key=rcfg.qdrant_api_key,
                 doc_types=doc_types,
                 law_names=law_names,
@@ -190,29 +198,39 @@ class RagPipeline:
                 fetch_multiplier=2,
                 vector_name=(rcfg.qdrant_vector_name_map or {}).get(collection),
             )
-            for collection in rcfg.qdrant_collections
-        ]
-        qdrant_rows = fuse_rrf_multi(collection_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
 
-        if rcfg.opensearch_url:
-            try:
-                bm25_rows = search_bm25(
-                    question, candidate_k,
-                    opensearch_url=rcfg.opensearch_url,
-                    index_name=rcfg.opensearch_index,
-                    timeout=rcfg.timeout,
-                    api_key=rcfg.opensearch_api_key,
-                    username=rcfg.opensearch_username,
-                    password=rcfg.opensearch_password,
-                    doc_types=doc_types,
-                    law_names=law_names,
-                    dedup=True,
-                    fetch_multiplier=5,
-                )
-            except RetrievalError:
-                bm25_rows = []
-        else:
-            bm25_rows = []
+        def _bm25_task() -> list[dict[str, Any]]:
+            return search_bm25(
+                question, candidate_k,
+                opensearch_url=rcfg.opensearch_url,
+                index_name=rcfg.opensearch_index,
+                timeout=rcfg.timeout,
+                api_key=rcfg.opensearch_api_key,
+                username=rcfg.opensearch_username,
+                password=rcfg.opensearch_password,
+                doc_types=doc_types,
+                law_names=law_names,
+                dedup=True,
+                fetch_multiplier=5,
+            )
+
+        with ThreadPoolExecutor() as executor:
+            qdrant_futures = [
+                executor.submit(_qdrant_task, col)
+                for col in rcfg.qdrant_collections
+            ]
+            bm25_future = executor.submit(_bm25_task) if rcfg.opensearch_url else None
+
+            collection_rows = [f.result() for f in qdrant_futures]
+
+            bm25_rows: list[dict[str, Any]] = []
+            if bm25_future is not None:
+                try:
+                    bm25_rows = bm25_future.result()
+                except RetrievalError:
+                    bm25_rows = []
+
+        qdrant_rows = fuse_rrf_multi(collection_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
 
         # candidate_k 전체를 융합해야 law 보강 시 top_k 바깥 문서를 참조할 수 있음
         rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
