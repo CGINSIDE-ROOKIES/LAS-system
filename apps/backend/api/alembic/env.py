@@ -1,5 +1,4 @@
 import os
-from logging.config import fileConfig
 
 from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
@@ -10,15 +9,13 @@ load_dotenv()
 
 config = context.config
 
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
-
 target_metadata = None
 
 # DATABASE_URL 환경변수에서 읽어 alembic에 주입
 database_url = os.environ.get("DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+if not database_url:
+    raise RuntimeError("DATABASE_URL 환경변수가 설정되지 않았습니다.")
+config.set_main_option("sqlalchemy.url", database_url)
 
 
 def run_migrations_offline() -> None:

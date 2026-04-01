@@ -43,7 +43,12 @@ uv run uvicorn main:app --reload
 
 ### DB 마이그레이션
 
-서버 시작 시 `migrations/` 내 SQL 파일이 순서대로 자동 적용된다.
+서버 시작 시 Alembic이 자동으로 `alembic upgrade head`를 실행한다.
+기존 DB에 처음 적용할 때는 아래 명령으로 현재 상태를 등록해야 한다.
+
+```bash
+uv run alembic stamp 0001
+```
 
 ### 상세 문서
 
