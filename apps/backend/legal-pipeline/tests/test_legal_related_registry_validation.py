@@ -1,13 +1,10 @@
 from src.registry.validate_registry import validate_endpoint_registry
 
 
-
-def test_related_registry_allows_enabled_html_only_whitelisted_endpoint():
+def test_related_registry_requires_json_capable_enabled_interpretation_detail():
     registry = {
         "registry_name": "endpoint_registry_related",
-        "validation": {
-            "enabled_html_only_whitelist": ["interpretation_detail"],
-        },
+        "validation": {},
         "endpoints": {
             "precedent_list": {
                 "enabled": True,
@@ -49,7 +46,7 @@ def test_related_registry_allows_enabled_html_only_whitelisted_endpoint():
                 "path": "/lawService.do",
                 "target": "expc",
                 "required_params": ["OC", "ID"],
-                "response_types": ["HTML"],
+                "response_types": ["JSON", "HTML"],
             },
             "admin_appeal_list": {
                 "enabled": True,

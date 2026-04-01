@@ -121,8 +121,9 @@ def test_build_legal_relation_records_dedupes_by_case_and_law(tmp_path):
     assert labor_relation["id"] == "relation::case::prec::123456::law-001"
     assert labor_relation["source_hit_count"] == 2
     assert labor_relation["article_keys"] == ["43-2"]
+    assert labor_relation["article_reference_sources"] == ["body_regex", "structured_field"]
     assert "cited_law" in labor_relation["relation_types"]
-    assert labor_relation["relation_confidence"] == 0.95
+    assert labor_relation["relation_confidence"] == 0.98
 
     decree_relation = relation_by_law["근로기준법 시행령"]
     assert decree_relation["source_hit_count"] == 1
@@ -226,3 +227,71 @@ def test_build_legal_relation_records_sanitizes_existing_expanded_rows(tmp_path)
     assert record["detail_link"] == "/DRF/lawService.do?target=decc&ID=10073&type=HTML&mobileYn=Y"
     assert "OC=" not in record["text"]
     assert "OC=" not in record["display_text"]
+
+
+def test_build_legal_relation_records_uses_structured_article_reference_field(tmp_path):
+    raw_dir = tmp_path / "raw" / "02_related_legal_docs"
+    root = raw_dir / "근로기준법"
+    detail_path = root / "canonical" / "prec" / "case_prec_123456__detail.json"
+    _write_json(
+        detail_path,
+        {
+            "PrecService": {
+                "판례정보일련번호": "123456",
+                "사건명": "임금",
+                "사건번호": "2019다12345",
+                "선고일자": "2019.05.30",
+                "참조조문": "근로기준법 제43조의2",
+                "판례내용": "본문에는 조문 문자열이 직접 나오지 않는다.",
+            }
+        },
+    )
+
+    _write_jsonl(
+        root / "candidate_hits.jsonl",
+        [
+            {
+                "candidate_id": "cand1",
+                "canonical_case_id": "case::prec::123456",
+                "target": "prec",
+                "source_law_name": "근로기준법",
+                "source_law_uid": "law-001",
+                "doc_id": "123456",
+                "title": "임금",
+                "doc_number": "2019다12345",
+                "root_law_name": "근로기준법",
+                "source_file_path": "list1.json",
+            }
+        ],
+    )
+    _write_jsonl(
+        root / "canonical_cases.jsonl",
+        [
+            {
+                "id": "case::prec::123456",
+                "canonical_case_id": "case::prec::123456",
+                "canonical_id": "case::prec::123456",
+                "target": "prec",
+                "doc_type_label": "판례",
+                "doc_id": "123456",
+                "title": "임금",
+                "doc_number": "2019다12345",
+                "root_law_name": "근로기준법",
+                "source_law_names": ["근로기준법"],
+                "source_law_uids": ["law-001"],
+                "source_hit_count": 1,
+                "detail_available": True,
+                "detail_payload_path": str(detail_path),
+            }
+        ],
+    )
+
+    records = build_legal_relation_records(raw_related_base_dir=raw_dir)
+
+    assert len(records) == 1
+    record = records[0]
+    assert record["law_name"] == "근로기준법"
+    assert record["article_keys"] == ["43-2"]
+    assert record["article_no_displays"] == ["제43조의2"]
+    assert record["article_reference_sources"] == ["structured_field"]
+    assert record["relation_confidence"] == 0.98

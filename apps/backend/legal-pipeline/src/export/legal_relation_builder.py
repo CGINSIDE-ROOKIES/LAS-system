@@ -146,12 +146,70 @@ def _confidence(
     article_refs: list[dict[str, str]],
     matched_law_names: list[str],
     law_name: str,
+    has_structured_article_ref: bool = False,
 ) -> float:
+    if has_structured_article_ref:
+        return 0.98
     if article_refs:
         return 0.95
     if law_name in matched_law_names:
         return 0.85
     return 0.65
+
+
+def _merge_article_refs(
+    parsed: dict[str, Any],
+    body_text: str,
+    family_law_names: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    merged: dict[str, list[dict[str, Any]]] = {}
+
+    for item in parsed.get("structured_article_refs") or []:
+        if not isinstance(item, dict):
+            continue
+        law_name = str(item.get("law_name") or "").strip()
+        article_key = str(item.get("article_key") or "").strip()
+        article_no_display = str(item.get("article_no_display") or "").strip()
+        if not law_name or not article_key or not article_no_display:
+            continue
+        merged.setdefault(law_name, [])
+        article = {
+            "article_key": article_key,
+            "article_no_display": article_no_display,
+            "reference_sources": ["structured_field"],
+        }
+        if not any(
+            existing["article_key"] == article["article_key"]
+            and existing["article_no_display"] == article["article_no_display"]
+            for existing in merged[law_name]
+        ):
+            merged[law_name].append(article)
+
+    body_refs_map = extract_explicit_article_refs(body_text, family_law_names) if body_text else {}
+    for law_name, refs in body_refs_map.items():
+        merged.setdefault(law_name, [])
+        for article in refs:
+            existing = next(
+                (
+                    item
+                    for item in merged[law_name]
+                    if item["article_key"] == article["article_key"]
+                    and item["article_no_display"] == article["article_no_display"]
+                ),
+                None,
+            )
+            if existing is None:
+                merged[law_name].append(
+                    {
+                        **article,
+                        "reference_sources": ["body_regex"],
+                    }
+                )
+                continue
+            if "body_regex" not in existing["reference_sources"]:
+                existing["reference_sources"].append("body_regex")
+
+    return merged
 
 
 
@@ -221,8 +279,13 @@ def build_root_relation_payloads(
             }
         )
         matched_law_names = find_related_law_names(body_text, family_law_names) if body_text else []
-        article_refs_map = extract_explicit_article_refs(body_text, family_law_names) if body_text else {}
+        article_refs_map = _merge_article_refs(parsed, body_text, family_law_names)
         article_refs = article_refs_map.get(law_name, [])
+        has_structured_article_ref = any(
+            str(item.get("law_name") or "").strip() == law_name
+            for item in (parsed.get("structured_article_refs") or [])
+            if isinstance(item, dict)
+        )
         referenced_case_numbers = (
             extract_case_number_refs(body_text, exclude_numbers=[parsed.get("doc_number")])
             if body_text and "cited_case" in relation_rules
@@ -241,6 +304,14 @@ def build_root_relation_payloads(
         evidence_preview = build_evidence_preview(body_text, law_name=law_name, anchor=preview_anchor)
         article_keys = [item["article_key"] for item in article_refs]
         article_no_displays = [item["article_no_display"] for item in article_refs]
+        article_reference_sources = sorted(
+            {
+                source
+                for item in article_refs
+                for source in (item.get("reference_sources") or [])
+                if str(source).strip()
+            }
+        )
         source_file_paths = sorted(
             {
                 str(hit.get("source_file_path") or "").strip()
@@ -276,7 +347,8 @@ def build_root_relation_payloads(
             "relation_types": relation_types,
             "article_keys": article_keys,
             "article_no_displays": article_no_displays,
-            "relation_confidence": _confidence(article_refs, matched_law_names, law_name),
+            "article_reference_sources": article_reference_sources,
+            "relation_confidence": _confidence(article_refs, matched_law_names, law_name, has_structured_article_ref),
             "evidence_preview": evidence_preview,
             "display_text": _display_text(evidence_preview or body_text),
             "source_hit_count": len(hits),
