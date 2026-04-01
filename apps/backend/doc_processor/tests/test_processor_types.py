@@ -16,9 +16,11 @@ from processor_types import (
     DocumentProcessState,
     ParaStyleInfo,
     ParagraphProcessState,
+    ParagraphReviewResult,
     ParserSignals,
     RunStyleInfo,
     SourceType,
+    SplitOp,
     StyleMap,
     TableStyleInfo,
     build_doc_ir_from_mapping,
@@ -116,23 +118,130 @@ class ProcessorTypesTests(unittest.TestCase):
         self.assertTrue(cp.runs[0].run_style is not None and cp.runs[0].run_style.underline)
 
     def test_signals_validation(self) -> None:
-        signals = ParserSignals(regex_article=True, bold=True, custom_feature=0.73)
-        self.assertTrue(signals.regex_article)
-        self.assertTrue(signals.bold)
+        signals = ParserSignals(
+            regex_clause={"value": "1", "span": (0, 3), "pattern": "x", "matched_text": "제1조"},
+            bold=0.5,
+            custom_feature=0.73,
+        )
+        self.assertIsNotNone(signals.regex_clause)
+        self.assertAlmostEqual(signals.bold or 0.0, 0.5)
         self.assertEqual(signals.model_extra.get("custom_feature"), 0.73)
 
         paragraph = build_doc_ir_from_mapping({"s1.p1.r1": "X"}).paragraphs[0]
         self.assertIsNone(paragraph.parser_confidence)
 
         paragraph.parser_confidence = 0.61
-        paragraph.candidate_labels = ["article_header", "body"]
+        paragraph.candidate_labels = ["clause", "body"]
         paragraph.final_label = "body"
         paragraph.propagate_semantics_to_runs()
 
         run = paragraph.runs[0]
-        self.assertEqual(run.candidate_labels, ["article_header", "body"])
+        self.assertEqual(run.candidate_labels, ["clause", "body"])
         self.assertEqual(run.parser_confidence, 0.61)
         self.assertEqual(run.final_label, "body")
+
+    def test_from_mapping_stays_pure_no_regex_preprocess(self) -> None:
+        doc_ir = DocIR.from_mapping(
+            {
+                "s1.p1.r1": "제1조 (목적)",
+                "s1.p2.r1": "(1) 항목",
+            }
+        )
+        self.assertIsNone(doc_ir.paragraphs[0].parser_signals.regex_clause)
+        self.assertIsNone(doc_ir.paragraphs[1].parser_signals.regex_subclause)
+
+    def test_annotate_numbering_signals_primary_and_subclause(self) -> None:
+        doc_ir = DocIR.from_mapping(
+            {
+                "s1.p1.r1": "제1조 (목적)",
+                "s1.p2.r1": "(1) 첫째",
+                "s1.p3.r1": "(2) 둘째",
+                "s1.p4.r1": "가. 하위 항목",
+                "s1.p5.r1": "제2조 (범위)",
+            }
+        ).annotate_numbering_signals()
+
+        self.assertEqual(doc_ir.paragraphs[0].parser_signals.regex_clause.value, "1")
+        self.assertEqual(doc_ir.paragraphs[1].parser_signals.regex_subclause.value, "1")
+        self.assertEqual(doc_ir.paragraphs[1].parser_signals.provisional_subclause_no, "1.1")
+        self.assertEqual(doc_ir.paragraphs[2].parser_signals.provisional_subclause_no, "1.2")
+        self.assertIsNone(doc_ir.paragraphs[3].parser_signals.regex_subclause)
+        self.assertEqual(doc_ir.paragraphs[3].parser_signals.provisional_clause_no, "1")
+        self.assertEqual(doc_ir.paragraphs[4].parser_signals.regex_clause.value, "2")
+
+    def test_annotate_numbering_signals_fallback_when_no_primary(self) -> None:
+        doc_ir = DocIR.from_mapping(
+            {
+                "s1.p1.r1": "1. 시작",
+                "s1.p2.r1": "본문",
+                "s1.p3.r1": "2. 다음",
+            }
+        ).annotate_numbering_signals()
+
+        self.assertEqual(doc_ir.paragraphs[0].parser_signals.regex_clause.value, "1")
+        self.assertEqual(doc_ir.paragraphs[1].parser_signals.provisional_clause_no, "1")
+        self.assertEqual(doc_ir.paragraphs[2].parser_signals.regex_clause.value, "2")
+
+    def test_table_inherits_clause_context_from_parent_paragraph(self) -> None:
+        doc_ir = DocIR.from_mapping(
+            {
+                "s1.p1.r1": "제1조 (목적)",
+                "s1.p2.r1.tbl1.tr1.tc1.p1.r1": "표 내용",
+            }
+        ).annotate_numbering_signals()
+
+        p_table = doc_ir.paragraphs[1]
+        self.assertEqual(p_table.source_type, SourceType.TABLE_BLOCK)
+        self.assertEqual(p_table.parser_signals.provisional_clause_no, "1")
+
+    def test_split_ops_create_segments_without_modifying_runs(self) -> None:
+        mapping = {
+            "s1.p1.r1": "AAABBB",
+            "s1.p1.r2": "CCCDDD",
+        }
+        doc_ir = DocIR.from_mapping(mapping)
+        paragraph = doc_ir.paragraphs[0]
+        original_run_ids = [run.unit_id for run in paragraph.runs]
+        original_run_texts = [run.text for run in paragraph.runs]
+
+        doc_ir.apply_review_results(
+            [
+                ParagraphReviewResult(
+                    unit_id="s1.p1",
+                    status="split",
+                    reason="mixed units",
+                    ops=[
+                        SplitOp(op="split_unit", anchor_text="BBB", occurrence=1),
+                        SplitOp(op="split_unit", anchor_text="DDD", occurrence=1),
+                    ],
+                )
+            ]
+        )
+
+        self.assertEqual([run.unit_id for run in paragraph.runs], original_run_ids)
+        self.assertEqual([run.text for run in paragraph.runs], original_run_texts)
+        self.assertEqual(len(paragraph.segments), 3)
+        self.assertEqual(paragraph.segments[1].text, "BBBCCC")
+        self.assertEqual(len(paragraph.segments[1].run_spans), 2)
+
+    def test_style_signal_aggregation_mean_and_bold_ratio(self) -> None:
+        style_map = StyleMap(
+            runs={
+                "s1.p1.r1": RunStyleInfo(size_pt=10.0, bold=True),
+                "s1.p1.r2": RunStyleInfo(size_pt=14.0, bold=False),
+            }
+        )
+        doc_ir = DocIR.from_mapping(
+            {
+                "s1.p1.r1": "AB ",
+                "s1.p1.r2": "CD",
+            },
+            style_map=style_map,
+        ).recompute_style_signals()
+
+        p1 = doc_ir.paragraphs[0]
+        self.assertAlmostEqual(p1.parser_signals.font_size or 0.0, 12.0)
+        self.assertAlmostEqual(p1.parser_signals.bold or 0.0, 0.5)
 
     def test_state_models_readiness(self) -> None:
         doc_ir = DocIR.from_mapping(
