@@ -32,26 +32,22 @@ uv run uvicorn main:app --reload
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| `POST` | `/api/v1/qa/ask` | 질문 → 단일 응답 |
-| `POST` | `/api/v1/qa/ask/stream` | 질문 → SSE 스트리밍 응답 |
+| `GET` | `/health` | 서버 상태 확인 |
+| `POST` | `/api/v1/qa/ask` | Q&A 단일 응답 |
+| `POST` | `/api/v1/qa/ask/stream` | Q&A SSE 스트리밍 응답 |
 | `GET` | `/api/v1/qa/history` | Q&A 히스토리 목록 |
 | `GET` | `/api/v1/qa/history/{id}` | 히스토리 단건 조회 |
 | `DELETE` | `/api/v1/qa/history/{id}` | 히스토리 단건 삭제 |
 | `DELETE` | `/api/v1/qa/history` | 히스토리 다건 삭제 |
-| `POST` | `/api/v1/qa/{id}/feedback` | 답변 피드백 제출 (👍/👎) |
-| `GET` | `/health` | 상태 확인 |
+| `POST` | `/api/v1/qa/{id}/feedback` | 답변 피드백 제출 (👍/👎, upsert) |
 
 ### DB 마이그레이션
 
-서버 시작 시 `migrations/` 내 SQL 파일이 자동 적용된다 (멱등성 보장).
-
-```bash
-# 수동 실행이 필요한 경우
-psql $DATABASE_URL -f migrations/004_alter_feedback_thumbs_up.sql
-```
+서버 시작 시 `migrations/` 내 SQL 파일이 순서대로 자동 적용된다.
 
 ### 상세 문서
 
+- API 상세: [`api/README.md`](api/README.md)
 - DB 스키마: [`rag/docs/04_db_schema.md`](rag/docs/04_db_schema.md)
 - 기능 명세: [`rag/docs/01_frd.md`](rag/docs/01_frd.md)
 - 아키텍처: [`rag/docs/02_architecture.md`](rag/docs/02_architecture.md)
