@@ -65,6 +65,10 @@ def build_doc_ir_from_mapping(
 ) -> DocIR:
     """Build :class:`DocIR` from legacy run-level mapping.
 
+    This builder only reconstructs document hierarchy and style/text fields.
+    Clause/subclause parser signals are populated later by
+    :meth:`DocIR.annotate_numbering_signals`.
+
     Args:
         mapping: Legacy structured mapping keyed by unit IDs.
         style_map: Optional style lookup keyed by the same IDs.

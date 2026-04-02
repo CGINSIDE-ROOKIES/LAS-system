@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -169,6 +170,25 @@ class ProcessorTypesTests(unittest.TestCase):
         self.assertEqual(doc_ir.paragraphs[3].parser_signals.provisional_clause_no, "1")
         self.assertEqual(doc_ir.paragraphs[4].parser_signals.regex_clause.value, "2")
 
+    def test_annotate_numbering_signals_persists_across_following_paragraphs(self) -> None:
+        doc_ir = DocIR.from_mapping(
+            {
+                "s1.p1.r1": "제1조 (목적) ① 첫째 문장",
+                "s1.p2.r1": "같은 항의 이어지는 문장",
+                "s1.p3.r1": "",
+                "s1.p4.r1": "② 다음 항",
+            }
+        ).annotate_numbering_signals()
+
+        self.assertEqual(doc_ir.paragraphs[0].parser_signals.provisional_clause_no, "1")
+        self.assertEqual(doc_ir.paragraphs[0].parser_signals.provisional_subclause_no, "1.1")
+        self.assertEqual(doc_ir.paragraphs[1].parser_signals.provisional_clause_no, "1")
+        self.assertEqual(doc_ir.paragraphs[1].parser_signals.provisional_subclause_no, "1.1")
+        self.assertEqual(doc_ir.paragraphs[2].parser_signals.provisional_clause_no, "1")
+        self.assertEqual(doc_ir.paragraphs[2].parser_signals.provisional_subclause_no, "1.1")
+        self.assertEqual(doc_ir.paragraphs[3].parser_signals.provisional_clause_no, "1")
+        self.assertEqual(doc_ir.paragraphs[3].parser_signals.provisional_subclause_no, "1.2")
+
     def test_annotate_numbering_signals_fallback_when_no_primary(self) -> None:
         doc_ir = DocIR.from_mapping(
             {
@@ -256,6 +276,31 @@ class ProcessorTypesTests(unittest.TestCase):
         dumped = worker_state.model_dump()
         self.assertEqual(dumped["paragraph_idx"], 0)
         self.assertIn("paragraph_ir", dumped)
+
+    def test_from_file_all_in_one_docx(self) -> None:
+        from docx import Document
+        from docx.shared import Pt
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            docx_path = Path(tmp_dir) / "all_in_one.docx"
+
+            doc = Document()
+            p1 = doc.add_paragraph()
+            p1.add_run("제1조 ")
+            r = p1.add_run("본문")
+            r.bold = True
+            r.font.size = Pt(12)
+            doc.add_paragraph("(1) 하위 항목")
+            doc.save(str(docx_path))
+
+            doc_ir = DocIR.from_file(docx_path)
+
+        self.assertEqual(doc_ir.source_doc_type, "docx")
+        self.assertEqual(doc_ir.source_path, str(docx_path))
+        self.assertEqual(doc_ir.paragraphs[0].parser_signals.regex_clause.value, "1")
+        self.assertEqual(doc_ir.paragraphs[1].parser_signals.regex_subclause.value, "1")
+        self.assertIsNotNone(doc_ir.paragraphs[0].parser_signals.bold)
+        self.assertGreaterEqual(doc_ir.paragraphs[0].parser_signals.bold or 0.0, 0.0)
 
 
 if __name__ == "__main__":

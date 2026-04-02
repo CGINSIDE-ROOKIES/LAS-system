@@ -444,6 +444,84 @@ class DocIR(BaseModel):
     paragraphs: list[ParagraphIR] = Field(default_factory=list)
 
     @classmethod
+    def from_file(
+        cls,
+        source: str | Path,
+        *,
+        doc_type: Literal["auto", "hwp", "hwpx", "docx"] = "auto",
+        include_tables: bool = True,
+        skip_empty: bool = False,
+        include_table_cells_for_numbering: bool = False,
+        metadata: dict[str, Any] | None = None,
+        normalizer: Callable[[str], str] | None = None,
+        doc_id: str | None = None,
+    ) -> DocIR:
+        """Build and preprocess :class:`DocIR` from a file path in one call."""
+        source_path = Path(source)
+
+        if doc_type == "auto":
+            suffix = source_path.suffix.lower()
+            if suffix == ".hwp":
+                resolved_doc_type: Literal["hwp", "hwpx", "docx"] = "hwp"
+            elif suffix == ".hwpx":
+                resolved_doc_type = "hwpx"
+            elif suffix == ".docx":
+                resolved_doc_type = "docx"
+            else:
+                raise ValueError(
+                    "Could not infer document type from file extension. "
+                    "Pass doc_type='hwp', 'hwpx', or 'docx'."
+                )
+        else:
+            resolved_doc_type = doc_type
+
+        from core.structured_mapping_exporter import export_structured_mapping
+        from core.style_extractor import extract_styles
+
+        if resolved_doc_type == "hwp":
+            from core.hwp_converter import convert_hwp_to_hwpx_bytes
+
+            hwpx_bytes = convert_hwp_to_hwpx_bytes(source_path)
+            mapping = export_structured_mapping(
+                hwpx_bytes,
+                doc_type="hwpx",
+                skip_empty=skip_empty,
+                include_tables=include_tables,
+            )
+            style_map = extract_styles(
+                hwpx_bytes,
+                doc_type="hwpx",
+                include_tables=include_tables,
+            )
+        else:
+            mapping = export_structured_mapping(
+                source_path,
+                doc_type=resolved_doc_type,
+                skip_empty=skip_empty,
+                include_tables=include_tables,
+            )
+            style_map = extract_styles(
+                source_path,
+                doc_type=resolved_doc_type,
+                include_tables=include_tables,
+            )
+
+        doc_ir = cls.from_mapping(
+            mapping,
+            style_map=style_map,
+            source_path=source_path,
+            source_doc_type=resolved_doc_type,
+            metadata=metadata,
+            normalizer=normalizer,
+            doc_id=doc_id,
+        )
+        doc_ir.annotate_numbering_signals(
+            include_table_cells=include_table_cells_for_numbering
+        )
+        doc_ir.recompute_style_signals(include_table_runs=True)
+        return doc_ir
+
+    @classmethod
     def from_mapping(
         cls,
         mapping: dict[str, str],
