@@ -23,6 +23,99 @@ def _clean_str(value: Any) -> str | None:
     return text or None
 
 
+def _family_key(value: Any) -> str | None:
+    text = _clean_str(value)
+    if not text:
+        return None
+    return (
+        text.replace("ㆍ", "")
+        .replace("·", "")
+        .replace(" ", "")
+        .replace("_", "")
+        .strip()
+        .lower()
+    ) or None
+
+
+def _law_level_rank(classified_level: Any) -> int:
+    level = _clean_str(classified_level)
+    if level == "법":
+        return 0
+    if level == "시행령":
+        return 1
+    if level == "시행규칙":
+        return 2
+    return 3
+
+
+def _build_has_child_law_edges(law_nodes: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    families: dict[str, list[dict[str, Any]]] = {}
+    for node in law_nodes.values():
+        family_key = _family_key(node.get("root_law_name")) or _family_key(node.get("law_name"))
+        if not family_key:
+            continue
+        families.setdefault(family_key, []).append(node)
+
+    has_child_law_edges: dict[str, dict[str, Any]] = {}
+
+    for _family_name_key, family_nodes in families.items():
+        ordered_nodes = sorted(
+            family_nodes,
+            key=lambda row: (
+                _law_level_rank(row.get("classified_level")),
+                str(row.get("law_name") or ""),
+                str(row.get("law_uid") or ""),
+            ),
+        )
+        root_node = next((row for row in ordered_nodes if _clean_str(row.get("classified_level")) == "법"), None)
+        if root_node is None:
+            root_node = ordered_nodes[0] if ordered_nodes else None
+        if root_node is None:
+            continue
+
+        root_law_uid = str(root_node.get("law_uid") or "").strip()
+        if not root_law_uid:
+            continue
+
+        decree_node = next(
+            (
+                row
+                for row in ordered_nodes
+                if str(row.get("law_uid") or "").strip() != root_law_uid
+                and _clean_str(row.get("classified_level")) == "시행령"
+            ),
+            None,
+        )
+
+        for node in ordered_nodes:
+            law_uid = str(node.get("law_uid") or "").strip()
+            if not law_uid or law_uid == root_law_uid:
+                continue
+
+            parent_law_uid = root_law_uid
+            if (
+                decree_node is not None
+                and str(decree_node.get("law_uid") or "").strip() != law_uid
+                and _clean_str(node.get("classified_level")) == "시행규칙"
+            ):
+                parent_law_uid = str(decree_node.get("law_uid") or "").strip()
+
+            edge_key = _edge_id("HAS_CHILD_LAW", parent_law_uid, law_uid)
+            has_child_law_edges.setdefault(
+                edge_key,
+                {
+                    "edge_id": edge_key,
+                    "edge_type": "HAS_CHILD_LAW",
+                    "source_law_uid": parent_law_uid,
+                    "target_law_uid": law_uid,
+                    "root_law_uid": root_law_uid,
+                    "root_law_name": _clean_str(root_node.get("law_name")),
+                },
+            )
+
+    return sorted(has_child_law_edges.values(), key=lambda row: str(row.get("edge_id") or ""))
+
+
 def build_law_graph_export_rows(
     *,
     legal_corpus_path: str | Path = "data/dataset/legal_corpus.jsonl",
@@ -34,6 +127,7 @@ def build_law_graph_export_rows(
     law_nodes: dict[str, dict[str, Any]] = {}
     article_nodes: dict[str, dict[str, Any]] = {}
     has_article_edges: dict[str, dict[str, Any]] = {}
+    has_child_law_edges: list[dict[str, Any]] = []
     refers_to_law_edges: dict[str, dict[str, Any]] = {}
     refers_to_article_edges: dict[str, dict[str, Any]] = {}
 
@@ -92,19 +186,41 @@ def build_law_graph_export_rows(
             },
         )
 
+    family_roots: dict[str, dict[str, Any]] = {}
+    for node in sorted(
+        law_nodes.values(),
+        key=lambda row: (
+            _family_key(row.get("root_law_name")) or _family_key(row.get("law_name")) or "",
+            _law_level_rank(row.get("classified_level")),
+            str(row.get("law_name") or ""),
+        ),
+    ):
+        family_key = _family_key(node.get("root_law_name")) or _family_key(node.get("law_name"))
+        if not family_key:
+            continue
+        current = family_roots.get(family_key)
+        if current is None or _law_level_rank(node.get("classified_level")) < _law_level_rank(current.get("classified_level")):
+            family_roots[family_key] = node
+
     for node in law_nodes.values():
-        root_law_uid = _clean_str(node.get("root_law_uid"))
-        if root_law_uid and root_law_uid in law_nodes:
-            node["root_law_name"] = law_nodes[root_law_uid]["law_name"]
+        family_key = _family_key(node.get("root_law_name")) or _family_key(node.get("law_name"))
+        family_root = family_roots.get(family_key) if family_key else None
+        if family_root is not None:
+            node["root_law_uid"] = family_root["law_uid"]
+            node["root_law_name"] = family_root["law_name"]
         elif not _clean_str(node.get("root_law_name")):
             node["root_law_name"] = node["law_name"]
 
     for node in article_nodes.values():
-        root_law_uid = _clean_str(node.get("root_law_uid"))
-        if root_law_uid and root_law_uid in law_nodes:
-            node["root_law_name"] = law_nodes[root_law_uid]["law_name"]
+        family_key = _family_key(node.get("root_law_name")) or _family_key(node.get("law_name"))
+        family_root = family_roots.get(family_key) if family_key else None
+        if family_root is not None:
+            node["root_law_uid"] = family_root["law_uid"]
+            node["root_law_name"] = family_root["law_name"]
         elif not _clean_str(node.get("root_law_name")):
             node["root_law_name"] = node["law_name"]
+
+    has_child_law_edges = _build_has_child_law_edges(law_nodes)
 
     for row in _iter_jsonl(legal_relations_path):
         if str(row.get("relation_model") or "").strip() != "law_to_law":
@@ -200,6 +316,7 @@ def build_law_graph_export_rows(
         "law_nodes": sorted(law_nodes.values(), key=lambda row: str(row.get("law_uid") or "")),
         "article_nodes": sorted(article_nodes.values(), key=lambda row: str(row.get("article_uid") or "")),
         "has_article_edges": sorted(has_article_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
+        "has_child_law_edges": has_child_law_edges,
         "refers_to_law_edges": sorted(refers_to_law_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
         "refers_to_article_edges": sorted(refers_to_article_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
     }
@@ -220,6 +337,7 @@ def write_law_graph_export(
     write_jsonl(rows["law_nodes"], output_dir / "graph_law_nodes.jsonl")
     write_jsonl(rows["article_nodes"], output_dir / "graph_article_nodes.jsonl")
     write_jsonl(rows["has_article_edges"], output_dir / "graph_edges_has_article.jsonl")
+    write_jsonl(rows["has_child_law_edges"], output_dir / "graph_edges_has_child_law.jsonl")
     write_jsonl(rows["refers_to_law_edges"], output_dir / "graph_edges_refers_to_law.jsonl")
     write_jsonl(rows["refers_to_article_edges"], output_dir / "graph_edges_refers_to_article.jsonl")
 
@@ -227,6 +345,7 @@ def write_law_graph_export(
         "law_node_count": len(rows["law_nodes"]),
         "article_node_count": len(rows["article_nodes"]),
         "has_article_edge_count": len(rows["has_article_edges"]),
+        "has_child_law_edge_count": len(rows["has_child_law_edges"]),
         "refers_to_law_edge_count": len(rows["refers_to_law_edges"]),
         "refers_to_article_edge_count": len(rows["refers_to_article_edges"]),
         "source_legal_corpus_path": str(legal_corpus_path),
