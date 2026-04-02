@@ -133,3 +133,29 @@ def test_parse_law_article_references_resolves_dongbeop_scope_refs():
     assert relative_scope["target_law_name"] == "건설산업기본법"
     assert relative_scope["target_article_keys"] == ["24"]
     assert relative_scope["resolution_status"] == "resolved"
+
+
+def test_parse_law_article_references_preserves_sub_article_metadata():
+    refs = parse_law_article_references(
+        "제12조제3항제2호에 따른다.",
+        source_law_name="근로기준법",
+        source_law_level="법",
+        source_article_key="4",
+        article_order=ARTICLE_ORDER,
+        root_law_name="근로기준법",
+        family_laws=FAMILY_LAWS,
+    )
+
+    assert len(refs) == 1
+    ref = refs[0]
+    assert ref["reference_type"] == "same_law_article"
+    assert ref["target_article_keys"] == ["12"]
+    assert ref["target_article_ref_details"] == [
+        {
+            "article_key": "12",
+            "article_no_display": "제12조",
+            "paragraph_no": "3",
+            "item_no": "2",
+            "subitem_no": None,
+        }
+    ]
