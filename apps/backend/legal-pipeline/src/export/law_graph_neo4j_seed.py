@@ -15,6 +15,7 @@ def load_graph_seed_rows(
         "article_nodes": list(_iter_jsonl(base_dir / "graph_article_nodes.jsonl")),
         "has_article_edges": list(_iter_jsonl(base_dir / "graph_edges_has_article.jsonl")),
         "has_child_law_edges": list(_iter_jsonl(base_dir / "graph_edges_has_child_law.jsonl")),
+        "delegates_to_law_edges": list(_iter_jsonl(base_dir / "graph_edges_delegates_to_law.jsonl")),
         "refers_to_law_edges": list(_iter_jsonl(base_dir / "graph_edges_refers_to_law.jsonl")),
         "refers_to_article_edges": list(_iter_jsonl(base_dir / "graph_edges_refers_to_article.jsonl")),
     }
@@ -26,6 +27,7 @@ def build_seed_manifest(rows: dict[str, list[dict[str, Any]]]) -> dict[str, int]
         "article_node_count": len(rows["article_nodes"]),
         "has_article_edge_count": len(rows["has_article_edges"]),
         "has_child_law_edge_count": len(rows["has_child_law_edges"]),
+        "delegates_to_law_edge_count": len(rows["delegates_to_law_edges"]),
         "refers_to_law_edge_count": len(rows["refers_to_law_edges"]),
         "refers_to_article_edge_count": len(rows["refers_to_article_edges"]),
     }
@@ -59,6 +61,14 @@ MERGE (source)-[r:HAS_CHILD_LAW {edge_id: row.edge_id}]->(target)
 SET r += row
 """.strip()
 
+DELEGATES_TO_LAW_QUERY = """
+UNWIND $rows AS row
+MATCH (source:Law {law_uid: row.source_law_uid})
+MATCH (target:Law {law_uid: row.target_law_uid})
+MERGE (source)-[r:DELEGATES_TO_LAW {edge_id: row.edge_id}]->(target)
+SET r += row
+""".strip()
+
 REFERS_TO_LAW_QUERY = """
 UNWIND $rows AS row
 MATCH (source:Law {law_uid: row.source_law_uid})
@@ -82,6 +92,7 @@ def iter_seed_operations(rows: dict[str, list[dict[str, Any]]]) -> list[tuple[st
         (ARTICLE_NODE_QUERY, rows["article_nodes"]),
         (HAS_ARTICLE_QUERY, rows["has_article_edges"]),
         (HAS_CHILD_LAW_QUERY, rows["has_child_law_edges"]),
+        (DELEGATES_TO_LAW_QUERY, rows["delegates_to_law_edges"]),
         (REFERS_TO_LAW_QUERY, rows["refers_to_law_edges"]),
         (REFERS_TO_ARTICLE_QUERY, rows["refers_to_article_edges"]),
     ]

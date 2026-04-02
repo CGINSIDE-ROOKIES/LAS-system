@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 from src.common.io_utils import _iter_jsonl, _write_json, write_jsonl
@@ -116,6 +117,98 @@ def _build_has_child_law_edges(law_nodes: dict[str, dict[str, Any]]) -> list[dic
     return sorted(has_child_law_edges.values(), key=lambda row: str(row.get("edge_id") or ""))
 
 
+_PRESIDENTIAL_DELEGATION_PATTERN = re.compile(r"대통령령")
+_MINISTERIAL_DELEGATION_PATTERN = re.compile(r"(?:[가-힣]+부령|부령|규칙)")
+
+
+def _build_delegates_to_law_edges(
+    *,
+    law_nodes: dict[str, dict[str, Any]],
+    article_nodes: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    family_nodes: dict[str, list[dict[str, Any]]] = {}
+    for node in law_nodes.values():
+        family_key = str(node.get("root_law_uid") or "").strip() or str(node.get("law_uid") or "").strip()
+        if not family_key:
+            continue
+        family_nodes.setdefault(family_key, []).append(node)
+
+    decree_by_family: dict[str, dict[str, Any]] = {}
+    rule_by_family: dict[str, dict[str, Any]] = {}
+    for family_key, nodes in family_nodes.items():
+        ordered = sorted(
+            nodes,
+            key=lambda row: (
+                _law_level_rank(row.get("classified_level")),
+                str(row.get("law_name") or ""),
+                str(row.get("law_uid") or ""),
+            ),
+        )
+        decree = next((row for row in ordered if _clean_str(row.get("classified_level")) == "시행령"), None)
+        rule = next((row for row in ordered if _clean_str(row.get("classified_level")) == "시행규칙"), None)
+        if decree is not None:
+            decree_by_family[family_key] = decree
+        if rule is not None:
+            rule_by_family[family_key] = rule
+
+    merged: dict[str, dict[str, Any]] = {}
+
+    for article in article_nodes.values():
+        source_law_uid = str(article.get("law_uid") or "").strip()
+        source_article_key = str(article.get("article_key") or "").strip()
+        root_law_uid = str(article.get("root_law_uid") or "").strip()
+        source_level = _clean_str(law_nodes.get(source_law_uid, {}).get("classified_level"))
+        text = str(article.get("text") or "")
+        if not source_law_uid or not source_article_key or not root_law_uid or not text:
+            continue
+
+        target_law_uid: str | None = None
+        relation_type: str | None = None
+
+        if source_level == "법" and _PRESIDENTIAL_DELEGATION_PATTERN.search(text):
+            target_law_uid = str(decree_by_family.get(root_law_uid, {}).get("law_uid") or "").strip() or None
+            relation_type = "presidential_decree"
+        elif source_level == "시행령" and _MINISTERIAL_DELEGATION_PATTERN.search(text):
+            target_law_uid = str(rule_by_family.get(root_law_uid, {}).get("law_uid") or "").strip() or None
+            relation_type = "ministerial_rule"
+        elif source_level == "법" and _MINISTERIAL_DELEGATION_PATTERN.search(text) and root_law_uid not in decree_by_family:
+            target_law_uid = str(rule_by_family.get(root_law_uid, {}).get("law_uid") or "").strip() or None
+            relation_type = "ministerial_rule"
+
+        if not target_law_uid or not relation_type or target_law_uid == source_law_uid:
+            continue
+
+        edge_key = _edge_id("DELEGATES_TO_LAW", source_law_uid, target_law_uid)
+        current = merged.get(edge_key)
+        reference_text = _clean_str(article.get("article_no_display")) or source_article_key
+        if current is None:
+            merged[edge_key] = {
+                "edge_id": edge_key,
+                "edge_type": "DELEGATES_TO_LAW",
+                "source_law_uid": source_law_uid,
+                "target_law_uid": target_law_uid,
+                "root_law_uid": root_law_uid,
+                "root_law_name": article.get("root_law_name"),
+                "relation_type": relation_type,
+                "relation_types": [relation_type, "delegation"],
+                "relation_confidence": 0.9,
+                "source_article_keys": [source_article_key],
+                "source_article_no_displays": [_clean_str(article.get("article_no_display"))] if _clean_str(article.get("article_no_display")) else [],
+                "reference_texts": [reference_text],
+            }
+            continue
+
+        current["source_article_keys"] = list(dict.fromkeys(list(current.get("source_article_keys") or []) + [source_article_key]))
+        article_no_display = _clean_str(article.get("article_no_display"))
+        if article_no_display:
+            current["source_article_no_displays"] = list(
+                dict.fromkeys(list(current.get("source_article_no_displays") or []) + [article_no_display])
+            )
+        current["reference_texts"] = list(dict.fromkeys(list(current.get("reference_texts") or []) + [reference_text]))
+
+    return sorted(merged.values(), key=lambda row: str(row.get("edge_id") or ""))
+
+
 def build_law_graph_export_rows(
     *,
     legal_corpus_path: str | Path = "data/dataset/legal_corpus.jsonl",
@@ -128,6 +221,7 @@ def build_law_graph_export_rows(
     article_nodes: dict[str, dict[str, Any]] = {}
     has_article_edges: dict[str, dict[str, Any]] = {}
     has_child_law_edges: list[dict[str, Any]] = []
+    delegates_to_law_edges: list[dict[str, Any]] = []
     refers_to_law_edges: dict[str, dict[str, Any]] = {}
     refers_to_article_edges: dict[str, dict[str, Any]] = {}
 
@@ -221,6 +315,7 @@ def build_law_graph_export_rows(
             node["root_law_name"] = node["law_name"]
 
     has_child_law_edges = _build_has_child_law_edges(law_nodes)
+    delegates_to_law_edges = _build_delegates_to_law_edges(law_nodes=law_nodes, article_nodes=article_nodes)
 
     for row in _iter_jsonl(legal_relations_path):
         if str(row.get("relation_model") or "").strip() != "law_to_law":
@@ -317,6 +412,7 @@ def build_law_graph_export_rows(
         "article_nodes": sorted(article_nodes.values(), key=lambda row: str(row.get("article_uid") or "")),
         "has_article_edges": sorted(has_article_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
         "has_child_law_edges": has_child_law_edges,
+        "delegates_to_law_edges": delegates_to_law_edges,
         "refers_to_law_edges": sorted(refers_to_law_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
         "refers_to_article_edges": sorted(refers_to_article_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
     }
@@ -338,6 +434,7 @@ def write_law_graph_export(
     write_jsonl(rows["article_nodes"], output_dir / "graph_article_nodes.jsonl")
     write_jsonl(rows["has_article_edges"], output_dir / "graph_edges_has_article.jsonl")
     write_jsonl(rows["has_child_law_edges"], output_dir / "graph_edges_has_child_law.jsonl")
+    write_jsonl(rows["delegates_to_law_edges"], output_dir / "graph_edges_delegates_to_law.jsonl")
     write_jsonl(rows["refers_to_law_edges"], output_dir / "graph_edges_refers_to_law.jsonl")
     write_jsonl(rows["refers_to_article_edges"], output_dir / "graph_edges_refers_to_article.jsonl")
 
@@ -346,6 +443,7 @@ def write_law_graph_export(
         "article_node_count": len(rows["article_nodes"]),
         "has_article_edge_count": len(rows["has_article_edges"]),
         "has_child_law_edge_count": len(rows["has_child_law_edges"]),
+        "delegates_to_law_edge_count": len(rows["delegates_to_law_edges"]),
         "refers_to_law_edge_count": len(rows["refers_to_law_edges"]),
         "refers_to_article_edge_count": len(rows["refers_to_article_edges"]),
         "source_legal_corpus_path": str(legal_corpus_path),

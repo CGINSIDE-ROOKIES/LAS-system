@@ -1,6 +1,7 @@
 from src.common.io_utils import write_jsonl
 from src.export.law_graph_neo4j_seed import (
     ARTICLE_NODE_QUERY,
+    DELEGATES_TO_LAW_QUERY,
     HAS_ARTICLE_QUERY,
     HAS_CHILD_LAW_QUERY,
     LAW_NODE_QUERY,
@@ -18,6 +19,7 @@ def test_load_graph_seed_rows_and_manifest(tmp_path):
     write_jsonl([{"article_uid": "article::001::1"}], base_dir / "graph_article_nodes.jsonl")
     write_jsonl([{"edge_id": "HAS_ARTICLE::001::article::001::1"}], base_dir / "graph_edges_has_article.jsonl")
     write_jsonl([{"edge_id": "HAS_CHILD_LAW::001::002"}], base_dir / "graph_edges_has_child_law.jsonl")
+    write_jsonl([{"edge_id": "DELEGATES_TO_LAW::001::002"}], base_dir / "graph_edges_delegates_to_law.jsonl")
     write_jsonl([{"edge_id": "REFERS_TO_LAW::001::002"}], base_dir / "graph_edges_refers_to_law.jsonl")
     write_jsonl([{"edge_id": "REFERS_TO_ARTICLE::article::001::1::article::002::2"}], base_dir / "graph_edges_refers_to_article.jsonl")
 
@@ -29,6 +31,7 @@ def test_load_graph_seed_rows_and_manifest(tmp_path):
         "article_node_count": 1,
         "has_article_edge_count": 1,
         "has_child_law_edge_count": 1,
+        "delegates_to_law_edge_count": 1,
         "refers_to_law_edge_count": 1,
         "refers_to_article_edge_count": 1,
     }
@@ -40,6 +43,7 @@ def test_iter_seed_operations_returns_expected_query_order():
         "article_nodes": [{"article_uid": "article::001::1"}],
         "has_article_edges": [{"edge_id": "HAS_ARTICLE::001::article::001::1"}],
         "has_child_law_edges": [{"edge_id": "HAS_CHILD_LAW::001::002"}],
+        "delegates_to_law_edges": [{"edge_id": "DELEGATES_TO_LAW::001::002"}],
         "refers_to_law_edges": [{"edge_id": "REFERS_TO_LAW::001::002"}],
         "refers_to_article_edges": [{"edge_id": "REFERS_TO_ARTICLE::article::001::1::article::002::2"}],
     }
@@ -50,6 +54,7 @@ def test_iter_seed_operations_returns_expected_query_order():
         ARTICLE_NODE_QUERY,
         HAS_ARTICLE_QUERY,
         HAS_CHILD_LAW_QUERY,
+        DELEGATES_TO_LAW_QUERY,
         REFERS_TO_LAW_QUERY,
         REFERS_TO_ARTICLE_QUERY,
     ]
