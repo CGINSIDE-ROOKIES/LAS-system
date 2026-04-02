@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Scale, FileSearch, FilePen, Clock, Settings } from "lucide-react";
+import { Scale, FileSearch, FilePen, Clock, Settings, Filter, X } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
@@ -14,6 +16,8 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const menuItems = [
   { title: "법령 Q&A", icon: Scale, path: "/" },
@@ -23,10 +27,29 @@ const menuItems = [
   { title: "설정", icon: Settings, path: "/settings" },
 ];
 
+const LAW_OPTIONS = [
+  "근로기준법",
+  "최저임금법",
+  "기간제 및 단시간근로자 보호 등에 관한 법률",
+  "파견근로자보호 등에 관한 법률",
+  "근로자퇴직급여 보장법",
+  "남녀고용평등과 일·가정 양립 지원에 관한 법률",
+  "산업재해보상보험법",
+  "하도급거래 공정화에 관한 법률",
+  "건설산업기본법",
+];
+
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = usePathname();
+  const [selectedLaws, setSelectedLaws] = useState<string[]>([]);
+
+  const toggleLaw = (law: string) => {
+    setSelectedLaws((prev) =>
+      prev.includes(law) ? prev.filter((l) => l !== law) : [...prev, law]
+    );
+  };
 
   return (
     <Sidebar collapsible="icon">
@@ -50,6 +73,7 @@ export function AppSidebar() {
           </div>
         )}
       </SidebarHeader>
+
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>
@@ -76,6 +100,70 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+
+      <SidebarFooter className="border-t border-sidebar-border">
+        {collapsed ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center justify-center py-3 cursor-default">
+                <div className="relative">
+                  <Filter className="h-4 w-4 text-muted-foreground" />
+                  {selectedLaws.length > 0 && (
+                    <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-primary text-[8px] font-bold text-primary-foreground">
+                      {selectedLaws.length}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {selectedLaws.length > 0 ? selectedLaws.join(", ") : "법령 필터 없음"}
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <div className="px-3 py-3 space-y-2">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <Filter className="h-3 w-3" />
+              <span>법령 필터</span>
+              {selectedLaws.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedLaws([])}
+                  className="ml-auto text-[10px] text-muted-foreground hover:text-foreground underline"
+                >
+                  전체 해제
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-1">
+              {LAW_OPTIONS.map((law) => {
+                const selected = selectedLaws.includes(law);
+                return (
+                  <button
+                    key={law}
+                    type="button"
+                    onClick={() => toggleLaw(law)}
+                    className={cn(
+                      "flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition-colors",
+                      selected
+                        ? "border-primary bg-primary/10 text-primary font-medium"
+                        : "border-border text-muted-foreground hover:border-primary hover:text-primary"
+                    )}
+                  >
+                    {law}
+                    {selected && <X className="h-2.5 w-2.5" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            {selectedLaws.length === 0 && (
+              <p className="text-[10px] text-muted-foreground/60">미선택 시 전체 법령 검색</p>
+            )}
+          </div>
+        )}
+      </SidebarFooter>
     </Sidebar>
   );
 }
