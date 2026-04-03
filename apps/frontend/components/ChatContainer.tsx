@@ -185,6 +185,8 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
                       citations: parsedCitations,
                       references: [],
                       isIrrelevant: event.law_context_status === "irrelevant",
+                      lawContextStatus: event.law_context_status,
+                      lawFilterActive: !!lawNames,
                     },
                   }
                 : m

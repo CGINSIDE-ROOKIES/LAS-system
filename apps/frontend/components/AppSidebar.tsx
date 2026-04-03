@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Scale, FileSearch, FilePen, Clock, Settings, Filter, X } from "lucide-react";
@@ -53,6 +53,12 @@ export function AppSidebar() {
       return [];
     }
   });
+
+  useEffect(() => {
+    const handler = () => setSelectedLaws([]);
+    window.addEventListener("las_law_filter_cleared", handler);
+    return () => window.removeEventListener("las_law_filter_cleared", handler);
+  }, []);
 
   const toggleLaw = (law: string) => {
     setSelectedLaws((prev) => {

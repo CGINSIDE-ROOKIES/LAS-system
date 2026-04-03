@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileText, BookOpen, ExternalLink, ThumbsUp, ThumbsDown, ChevronDown } from "lucide-react";
+import { FileText, BookOpen, ExternalLink, ThumbsUp, ThumbsDown, ChevronDown, FilterX } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,6 +13,8 @@ interface AnswerCardProps {
     citations: { article: string; content: string }[];
     references: string[];
     isIrrelevant?: boolean;
+    lawContextStatus?: string;
+    lawFilterActive?: boolean;
   };
   qaId?: string;
 }
@@ -43,8 +45,32 @@ export function AnswerCard({ data, qaId }: AnswerCardProps) {
       toast.error("피드백 제출에 실패했습니다.");
     }
   };
+  const showFilterHint = data.lawContextStatus === "missing" && data.lawFilterActive;
+
+  const handleClearFilter = () => {
+    try { localStorage.removeItem("las_law_filter"); } catch {}
+    window.dispatchEvent(new Event("las_law_filter_cleared"));
+  };
+
   return (
     <div className="space-y-3">
+      {/* 법령 필터 힌트 */}
+      {showFilterHint && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+          <FilterX className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            선택한 법령 범위에서 관련 정보를 찾지 못했습니다.{" "}
+            <button
+              type="button"
+              className="underline underline-offset-2 hover:text-amber-900"
+              onClick={handleClearFilter}
+            >
+              필터를 해제
+            </button>
+            하고 다시 질문해보세요.
+          </span>
+        </div>
+      )}
       {/* 답변 요약 */}
       <div className="rounded-lg border border-border bg-card p-4">
         <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-primary">
@@ -55,7 +81,7 @@ export function AnswerCard({ data, qaId }: AnswerCardProps) {
       </div>
 
       {/* 근거 조문 */}
-      {!data.isIrrelevant && (
+      {!data.isIrrelevant && data.citations.length > 0 && (
         <Collapsible defaultOpen>
           <div className="rounded-lg border-2 border-legal-citation-border bg-legal-citation p-4">
             <CollapsibleTrigger className="flex w-full items-center justify-between mb-1">
