@@ -43,12 +43,23 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const pathname = usePathname();
-  const [selectedLaws, setSelectedLaws] = useState<string[]>([]);
+  const LAW_FILTER_KEY = "las_law_filter";
+
+  const [selectedLaws, setSelectedLaws] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(LAW_FILTER_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const toggleLaw = (law: string) => {
-    setSelectedLaws((prev) =>
-      prev.includes(law) ? prev.filter((l) => l !== law) : [...prev, law]
-    );
+    setSelectedLaws((prev) => {
+      const next = prev.includes(law) ? prev.filter((l) => l !== law) : [...prev, law];
+      try { localStorage.setItem(LAW_FILTER_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
   };
 
   return (
@@ -128,7 +139,7 @@ export function AppSidebar() {
               {selectedLaws.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setSelectedLaws([])}
+                  onClick={() => { setSelectedLaws([]); try { localStorage.removeItem(LAW_FILTER_KEY); } catch {} }}
                   className="ml-auto text-[10px] text-muted-foreground hover:text-foreground underline"
                 >
                   전체 해제
