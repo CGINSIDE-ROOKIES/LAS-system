@@ -1,8 +1,8 @@
 x-app-env:
   - 'NEXTAUTH_URL=${SERVICE_URL_LANGFUSE}'
-  - 'DATABASE_URL=postgresql://langfuse:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-langfuse-db}'
+  - 'DATABASE_URL=postgresql://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_POSTGRES}@${POSTGRES_HOST}:5432/${POSTGRES_DB:-langfuse-db}'
   - 'SALT=${SERVICE_PASSWORD_SALT}'
-  - 'ENCRYPTION_KEY=${SERVICE_PASSWORD_64_LANGFUSE}'
+  - 'ENCRYPTION_KEY=${ENCRYPTION_KEY}'
   - 'TELEMETRY_ENABLED=${TELEMETRY_ENABLED:-false}'
   - 'LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES=${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}'
   - 'CLICKHOUSE_MIGRATION_URL=clickhouse://clickhouse:9000'
@@ -13,30 +13,30 @@ x-app-env:
   - 'LANGFUSE_USE_AZURE_BLOB=${LANGFUSE_USE_AZURE_BLOB:-false}'
   - 'LANGFUSE_S3_EVENT_UPLOAD_BUCKET=${LANGFUSE_S3_EVENT_UPLOAD_BUCKET:-langfuse}'
   - 'LANGFUSE_S3_EVENT_UPLOAD_REGION=${LANGFUSE_S3_EVENT_UPLOAD_REGION:-auto}'
-  - 'LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=${LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID}'
-  - 'LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY}'
-  - 'LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=${LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT}'
+  - 'LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=${SERVICE_USER_MINIO}'
+  - 'LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${SERVICE_PASSWORD_MINIO}'
+  - 'LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://minio:9000'
   - 'LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=${LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE:-true}'
   - 'LANGFUSE_S3_EVENT_UPLOAD_PREFIX=${LANGFUSE_S3_EVENT_UPLOAD_PREFIX:-events/}'
   - 'LANGFUSE_S3_MEDIA_UPLOAD_BUCKET=${LANGFUSE_S3_MEDIA_UPLOAD_BUCKET:-langfuse}'
   - 'LANGFUSE_S3_MEDIA_UPLOAD_REGION=${LANGFUSE_S3_MEDIA_UPLOAD_REGION:-auto}'
-  - 'LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=${LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID}'
-  - 'LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY}'
-  - 'LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=${LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT}'
+  - 'LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=${SERVICE_USER_MINIO}'
+  - 'LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${SERVICE_PASSWORD_MINIO}'
+  - 'LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=http://minio:9000'
   - 'LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE=${LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE:-true}'
   - 'LANGFUSE_S3_MEDIA_UPLOAD_PREFIX=${LANGFUSE_S3_MEDIA_UPLOAD_PREFIX:-media/}'
   - 'LANGFUSE_S3_BATCH_EXPORT_ENABLED=${LANGFUSE_S3_BATCH_EXPORT_ENABLED:-false}'
   - 'LANGFUSE_S3_BATCH_EXPORT_BUCKET=${LANGFUSE_S3_BATCH_EXPORT_BUCKET:-langfuse}'
   - 'LANGFUSE_S3_BATCH_EXPORT_PREFIX=${LANGFUSE_S3_BATCH_EXPORT_PREFIX:-exports/}'
   - 'LANGFUSE_S3_BATCH_EXPORT_REGION=${LANGFUSE_S3_BATCH_EXPORT_REGION:-auto}'
-  - 'LANGFUSE_S3_BATCH_EXPORT_ENDPOINT=${LANGFUSE_S3_BATCH_EXPORT_ENDPOINT}'
+  - 'LANGFUSE_S3_BATCH_EXPORT_ENDPOINT=http://minio:9000'
   - 'LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT=${LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT}'
-  - 'LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID=${LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID}'
-  - 'LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY=${LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY}'
+  - 'LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID=${SERVICE_USER_MINIO}'
+  - 'LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY=${SERVICE_PASSWORD_MINIO}'
   - 'LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE=${LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE:-true}'
   - 'LANGFUSE_INGESTION_QUEUE_DELAY_MS=${LANGFUSE_INGESTION_QUEUE_DELAY_MS:-1}'
   - 'LANGFUSE_INGESTION_CLICKHOUSE_WRITE_INTERVAL_MS=${LANGFUSE_INGESTION_CLICKHOUSE_WRITE_INTERVAL_MS:-1000}'
-  - REDIS_HOST=redis
+  - 'REDIS_HOST=${REDIS_HOST}'
   - REDIS_PORT=6379
   - 'REDIS_AUTH=${SERVICE_PASSWORD_REDIS}'
   - 'EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:-admin@example.com}'
@@ -61,11 +61,13 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     environment:
       0: 'NEXTAUTH_URL=${SERVICE_URL_LANGFUSE}'
-      1: 'DATABASE_URL=postgresql://langfuse:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-langfuse-db}'
+      1: 'DATABASE_URL=postgresql://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_POSTGRES}@${POSTGRES_HOST}:5432/${POSTGRES_DB:-langfuse-db}'
       2: 'SALT=${SERVICE_PASSWORD_SALT}'
-      3: 'ENCRYPTION_KEY=${SERVICE_PASSWORD_64_LANGFUSE}'
+      3: 'ENCRYPTION_KEY=${ENCRYPTION_KEY}'
       4: 'TELEMETRY_ENABLED=${TELEMETRY_ENABLED:-false}'
       5: 'LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES=${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}'
       6: 'CLICKHOUSE_MIGRATION_URL=clickhouse://clickhouse:9000'
@@ -99,7 +101,7 @@ services:
       34: 'LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE=${LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE:-true}'
       35: 'LANGFUSE_INGESTION_QUEUE_DELAY_MS=${LANGFUSE_INGESTION_QUEUE_DELAY_MS:-1}'
       36: 'LANGFUSE_INGESTION_CLICKHOUSE_WRITE_INTERVAL_MS=${LANGFUSE_INGESTION_CLICKHOUSE_WRITE_INTERVAL_MS:-1000}'
-      37: REDIS_HOST=redis
+      37: 'REDIS_HOST=${REDIS_HOST}'
       38: REDIS_PORT=6379
       39: 'REDIS_AUTH=${SERVICE_PASSWORD_REDIS}'
       40: 'EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:-admin@example.com}'
@@ -115,8 +117,6 @@ services:
       50: 'LANGFUSE_INIT_USER_NAME=${SERVICE_USER_LANGFUSE}'
       51: 'LANGFUSE_INIT_USER_PASSWORD=${SERVICE_PASSWORD_LANGFUSE}'
       SERVICE_URL_LANGFUSE_3000: '${SERVICE_URL_LANGFUSE_3000}'
-    ports:
-      - '3001:3000'
     healthcheck:
       test:
         - CMD
@@ -131,9 +131,9 @@ services:
     image: 'langfuse/langfuse-worker:3'
     environment:
       - 'NEXTAUTH_URL=${SERVICE_URL_LANGFUSE}'
-      - 'DATABASE_URL=postgresql://langfuse:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-langfuse-db}'
+      - 'DATABASE_URL=postgresql://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_POSTGRES}@${POSTGRES_HOST}:5432/${POSTGRES_DB:-langfuse-db}'
       - 'SALT=${SERVICE_PASSWORD_SALT}'
-      - 'ENCRYPTION_KEY=${SERVICE_PASSWORD_64_LANGFUSE}'
+      - 'ENCRYPTION_KEY=${ENCRYPTION_KEY}'
       - 'TELEMETRY_ENABLED=${TELEMETRY_ENABLED:-false}'
       - 'LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES=${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}'
       - 'CLICKHOUSE_MIGRATION_URL=clickhouse://clickhouse:9000'
@@ -167,7 +167,7 @@ services:
       - 'LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE=${LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE:-true}'
       - 'LANGFUSE_INGESTION_QUEUE_DELAY_MS=${LANGFUSE_INGESTION_QUEUE_DELAY_MS:-1}'
       - 'LANGFUSE_INGESTION_CLICKHOUSE_WRITE_INTERVAL_MS=${LANGFUSE_INGESTION_CLICKHOUSE_WRITE_INTERVAL_MS:-1000}'
-      - REDIS_HOST=redis
+      - 'REDIS_HOST=${REDIS_HOST}'
       - REDIS_PORT=6379
       - 'REDIS_AUTH=${SERVICE_PASSWORD_REDIS}'
       - 'EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:-admin@example.com}'
@@ -182,16 +182,6 @@ services:
       - 'LANGFUSE_INIT_USER_EMAIL=${LANGFUSE_INIT_USER_EMAIL:-admin@example.com}'
       - 'LANGFUSE_INIT_USER_NAME=${SERVICE_USER_LANGFUSE}'
       - 'LANGFUSE_INIT_USER_PASSWORD=${SERVICE_PASSWORD_LANGFUSE}'
-    healthcheck:
-      test:
-        - CMD
-        - wget
-        - '-q'
-        - '--spider'
-        - 'http://127.0.0.1:3030/api/health'
-      interval: 5s
-      timeout: 5s
-      retries: 3
     depends_on:
       postgres:
         condition: service_healthy
@@ -199,20 +189,31 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - '-q'
+        - '--spider'
+        - 'http://127.0.0.1:3030/api/health'
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
   postgres:
     image: 'postgres:17-alpine'
     environment:
       - 'POSTGRES_DB=${POSTGRES_DB:-langfuse-db}'
       - 'POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES}'
-      - 'POSTGRES_USER=langfuse'
-    ports:
-      - '5433:5432'
+      - 'POSTGRES_USER=${SERVICE_USER_POSTGRES}'
     volumes:
       - 'langfuse_postgres_data:/var/lib/postgresql/data'
     healthcheck:
       test:
         - CMD-SHELL
-        - 'psql -U $${POSTGRES_USER} -d $${POSTGRES_DB} -c "SELECT 1" > /dev/null 2>&1'
+        - 'pg_isready -h localhost -U $${POSTGRES_USER} -d $${POSTGRES_DB}'
       interval: 5s
       timeout: 5s
       retries: 10
@@ -221,11 +222,9 @@ services:
     command:
       - sh
       - '-c'
-      - 'redis-server --requirepass "$REDIS_PASSWORD"'
+      - 'redis-server --requirepass "$SERVICE_PASSWORD_REDIS"'
     environment:
       - 'REDIS_PASSWORD=${SERVICE_PASSWORD_REDIS}'
-    ports:
-      - '6380:6379'
     volumes:
       - 'langfuse_redis_data:/data'
     healthcheck:
@@ -233,11 +232,38 @@ services:
         - CMD
         - redis-cli
         - '-a'
-        - $REDIS_PASSWORD
+        - $SERVICE_PASSWORD_REDIS
         - PING
       interval: 3s
       timeout: 10s
       retries: 10
+  minio:
+    image: 'minio/minio:latest'
+    command: 'server /data --console-address ":9001"'
+    environment:
+      - 'MINIO_ROOT_USER=${SERVICE_USER_MINIO:-minio}'
+      - 'MINIO_ROOT_PASSWORD=${SERVICE_PASSWORD_MINIO:-miniosecret}'
+    volumes:
+      - 'langfuse_minio_data:/data'
+    healthcheck:
+      test:
+        - CMD
+        - mc
+        - ready
+        - local
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  minio-init:
+    image: 'minio/mc:latest'
+    restart: 'no'
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: "/bin/sh -c \" mc alias set myminio http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; mc mb myminio/langfuse --ignore-existing; exit 0; \"\n"
+    environment:
+      - 'MINIO_ROOT_USER=${SERVICE_USER_MINIO:-minio}'
+      - 'MINIO_ROOT_PASSWORD=${SERVICE_PASSWORD_MINIO:-miniosecret}'
   clickhouse:
     image: 'clickhouse/clickhouse-server:latest'
     user: '101:101'

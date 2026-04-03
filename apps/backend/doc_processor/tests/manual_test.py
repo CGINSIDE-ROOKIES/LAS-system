@@ -4,12 +4,17 @@ import sys
 from pathlib import Path
 import json
 
-from langfuse.langchain import CallbackHandler as LangfuseCallbackHandler
+from dotenv import load_dotenv
 
 THIS_DIR = Path(__file__).resolve().parent
 PACKAGE_ROOT = THIS_DIR.parent
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
+
+load_dotenv(PACKAGE_ROOT / ".env")
+
+from langfuse import get_client
+from langfuse.langchain import CallbackHandler as LangfuseCallbackHandler
 
 from processor_types import DocIR
 from agent import ParserConfig, run_parser
@@ -24,7 +29,7 @@ with open(test_dir/"results/doc_base_test.json", "w+", encoding="utf-8") as f:
 
 print("base parse done.")
 
-# langfuse_handler = LangfuseCallbackHandler()
+langfuse_handler = LangfuseCallbackHandler()
 
 doc = run_parser(
     doc,
@@ -33,10 +38,10 @@ doc = run_parser(
         log_to_console=True,
         log_llm_io=True,
     ),
-    callbacks=[], # langfuse_handler
+    callbacks=[langfuse_handler], # langfuse_handler
 )
 
-# langfuse_handler.flush()
+get_client().flush()
 
 with open(test_dir/"results/doc_llm_test.json", "w+", encoding="utf-8") as f:
     json.dump(doc.model_dump(), f, indent=4, ensure_ascii=False)

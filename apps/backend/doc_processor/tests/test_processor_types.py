@@ -214,6 +214,26 @@ class ProcessorTypesTests(unittest.TestCase):
         self.assertEqual(p_table.source_type, SourceType.TABLE_BLOCK)
         self.assertEqual(p_table.parser_signals.provisional_clause_no, "1")
 
+    def test_annotate_numbering_signals_persists_through_table_continuation(self) -> None:
+        doc_ir = DocIR.from_mapping(
+            {
+                "s1.p1.r1": "제8조 (제공시간) ① 기획업자는 아래 <표>에 따라야 한다.",
+                "s1.p2.r1": "",
+                "s1.p3.r1": "<표> 제공시간 제한",
+                "s1.p4.r1.tbl1.tr1.tc1.p1.r1": "표 내용",
+                "s1.p5.r1": "※ 위 표는 개정 내용에 따른다.",
+                "s1.p6.r1": "② 다음 항",
+            }
+        ).annotate_numbering_signals()
+
+        self.assertEqual(doc_ir.paragraphs[2].parser_signals.provisional_clause_no, "8")
+        self.assertEqual(doc_ir.paragraphs[2].parser_signals.provisional_subclause_no, "8.1")
+        self.assertEqual(doc_ir.paragraphs[3].parser_signals.provisional_clause_no, "8")
+        self.assertEqual(doc_ir.paragraphs[3].parser_signals.provisional_subclause_no, "8.1")
+        self.assertEqual(doc_ir.paragraphs[4].parser_signals.provisional_clause_no, "8")
+        self.assertEqual(doc_ir.paragraphs[4].parser_signals.provisional_subclause_no, "8.1")
+        self.assertEqual(doc_ir.paragraphs[5].parser_signals.provisional_subclause_no, "8.2")
+
     def test_split_ops_create_segments_without_modifying_runs(self) -> None:
         mapping = {
             "s1.p1.r1": "AAABBB",

@@ -116,4 +116,15 @@ def get_chat_model(
     )
 
 
-__all__ = ["get_chat_model"]
+def get_structured_method(*, profile: str = "default") -> str | None:
+    """Read structured output method from env. Returns None, 'json_mode', or 'json_schema'."""
+    _load_local_dotenv()
+    val = (_profile_env(profile, "STRUCTURED_METHOD") or "").strip().lower()
+    if val in {"json_mode", "json_schema"}:
+        return val
+    if val in {"none", "auto", ""}:
+        return None
+    return None
+
+
+__all__ = ["get_chat_model", "get_structured_method"]
