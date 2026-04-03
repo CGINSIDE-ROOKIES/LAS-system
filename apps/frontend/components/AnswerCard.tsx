@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileText, BookOpen, ExternalLink, ThumbsUp, ThumbsDown, ChevronDown, FilterX } from "lucide-react";
+import { FileText, BookOpen, ExternalLink, ThumbsUp, ThumbsDown, ChevronDown, FilterX, Scale } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -46,6 +46,7 @@ export function AnswerCard({ data, qaId }: AnswerCardProps) {
     }
   };
   const showFilterHint = data.lawContextStatus === "missing" && data.lawFilterActive;
+  const showCaseOnlyHint = data.lawContextStatus === "case_only";
 
   const handleClearFilter = () => {
     try { localStorage.removeItem("las_law_filter"); } catch {}
@@ -54,6 +55,14 @@ export function AnswerCard({ data, qaId }: AnswerCardProps) {
 
   return (
     <div className="space-y-3">
+      {/* 판례 전용 안내 */}
+      {showCaseOnlyHint && (
+        <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-800">
+          <Scale className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>법령 조문 없이 판례·해석례 기반으로 답변합니다. 조문 근거가 필요하다면 더 구체적으로 질문해보세요.</span>
+        </div>
+      )}
+
       {/* 법령 필터 힌트 */}
       {showFilterHint && (
         <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">

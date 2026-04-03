@@ -98,7 +98,7 @@ def select_rows_with_law_policy(
 
     Returns:
         (selected_rows, law_context_status, law_context_added)
-        law_context_status: "ok" | "missing" | "supplemented"
+        law_context_status: "ok" | "missing" | "supplemented" | "case_only"
     """
     selected = list(rows[: max(1, top_k)])
     if min_law_contexts <= 0:
@@ -109,6 +109,9 @@ def select_rows_with_law_policy(
         return rank_rows(selected), "ok", True
 
     if not enforce_min_law_contexts:
+        # 조문 0건이고 판례/해석례만 존재하는 경우
+        if law_count == 0 and len(selected) > 0:
+            return rank_rows(selected), "case_only", False
         return rank_rows(selected), "missing", False
 
     # top_k 바깥에서 law 문서 후보 수집
