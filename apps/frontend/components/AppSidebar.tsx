@@ -45,14 +45,14 @@ export function AppSidebar() {
   const pathname = usePathname();
   const LAW_FILTER_KEY = "las_law_filter";
 
-  const [selectedLaws, setSelectedLaws] = useState<string[]>(() => {
+  const [selectedLaws, setSelectedLaws] = useState<string[]>([]);
+
+  useEffect(() => {
     try {
       const raw = localStorage.getItem(LAW_FILTER_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
+      if (raw) setSelectedLaws(JSON.parse(raw));
+    } catch {}
+  }, []);
 
   useEffect(() => {
     const handler = () => setSelectedLaws([]);
