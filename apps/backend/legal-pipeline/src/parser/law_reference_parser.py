@@ -14,19 +14,22 @@ from typing import Any
 
 from src.common.law_meta import normalize_classified_level
 
-ARTICLE_PATTERN = re.compile(r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?")
+BASE_ARTICLE_REF_PATTERN = r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?"
+SUBARTICLE_UNIT_BLOCK_PATTERN = r"(?P<unit_block>(?:\s*제\s*\d+\s*(?:항|호|목))*)"
+ARTICLE_PATTERN = re.compile(rf"{BASE_ARTICLE_REF_PATTERN}{SUBARTICLE_UNIT_BLOCK_PATTERN}")
 ARTICLE_RANGE_PATTERN = re.compile(
     r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*(?:부터|내지)\s*제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*(?:까지)?"
 )
 ARTICLE_BLOCK_PATTERN = (
-    r"제\s*\d+\s*조(?:\s*의\s*\d+)?"
+    r"제\s*\d+\s*조(?:\s*의\s*\d+)?(?:\s*제\s*\d+\s*(?:항|호|목))*"
     r"(?:\s*(?:부터|내지)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:까지)?)?"
-    r"(?:\s*(?:,|및|와|과|또는|혹은|·)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?)*"
+    r"(?:\s*(?:,|및|와|과|또는|혹은|·)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?(?:\s*제\s*\d+\s*(?:항|호|목))*)*"
 )
 SINGLE_ARTICLE_BLOCK_PATTERN = (
-    r"제\s*\d+\s*조(?:\s*의\s*\d+)?"
+    r"제\s*\d+\s*조(?:\s*의\s*\d+)?(?:\s*제\s*\d+\s*(?:항|호|목))*"
     r"(?:\s*(?:부터|내지)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:까지)?)?"
 )
+SUBARTICLE_UNIT_PATTERN = re.compile(r"제\s*(\d+)\s*(항|호|목)")
 LAW_NAME_TOKEN_PATTERN = r"(?!및\b|또는\b|혹은\b|와\b|과\b|전조\b|동조\b|같은\b|이\b)[가-힣0-9·ㆍ()]+"
 EXPLICIT_LAW_WITH_ARTICLE_PATTERN = re.compile(
     rf"(?<![가-힣0-9])(?P<law_name>{LAW_NAME_TOKEN_PATTERN}(?:\s+{LAW_NAME_TOKEN_PATTERN}){{0,7}})\s*(?P<article_block>{ARTICLE_BLOCK_PATTERN})"
@@ -119,16 +122,39 @@ def _infer_scope_from_noisy_candidate(text: str) -> str | None:
     return None
 
 
-def _article_ref(main_no: str, branch_no: str | None) -> dict[str, str]:
+def _extract_subarticle_units(unit_block: str | None) -> dict[str, str | None]:
+    paragraph_no: str | None = None
+    item_no: str | None = None
+    subitem_no: str | None = None
+
+    for match in SUBARTICLE_UNIT_PATTERN.finditer(str(unit_block or "")):
+        number = str(int(match.group(1)))
+        unit = match.group(2)
+        if unit == "항" and paragraph_no is None:
+            paragraph_no = number
+        elif unit == "호" and item_no is None:
+            item_no = number
+        elif unit == "목" and subitem_no is None:
+            subitem_no = number
+
+    return {
+        "paragraph_no": paragraph_no,
+        "item_no": item_no,
+        "subitem_no": subitem_no,
+    }
+
+
+def _article_ref(main_no: str, branch_no: str | None, unit_block: str | None = None) -> dict[str, str | None]:
     article_key = str(int(main_no)) if not branch_no else f"{int(main_no)}-{int(branch_no)}"
     article_no_display = f"제{int(main_no)}조" if not branch_no else f"제{int(main_no)}조의{int(branch_no)}"
     return {
         "article_key": article_key,
         "article_no_display": article_no_display,
+        **_extract_subarticle_units(unit_block),
     }
 
 
-def _expand_article_range(start: tuple[str, str | None], end: tuple[str, str | None]) -> list[dict[str, str]]:
+def _expand_article_range(start: tuple[str, str | None], end: tuple[str, str | None]) -> list[dict[str, str | None]]:
     start_main, start_branch = start
     end_main, end_branch = end
     if start_branch is None and end_branch is None:
@@ -144,25 +170,38 @@ def _expand_article_range(start: tuple[str, str | None], end: tuple[str, str | N
     return [_article_ref(start_main, start_branch), _article_ref(end_main, end_branch)]
 
 
-def extract_article_refs(article_block: str) -> list[dict[str, str]]:
-    refs: list[dict[str, str]] = []
+def extract_article_refs(article_block: str) -> list[dict[str, str | None]]:
+    refs: list[dict[str, str | None]] = []
     seen: set[str] = set()
 
     for match in ARTICLE_RANGE_PATTERN.finditer(article_block):
         for article in _expand_article_range(match.group(1, 2), match.group(3, 4)):
-            if article["article_key"] in seen:
+            signature = _article_ref_signature(article)
+            if signature in seen:
                 continue
-            seen.add(article["article_key"])
+            seen.add(signature)
             refs.append(article)
 
     for match in ARTICLE_PATTERN.finditer(article_block):
-        article = _article_ref(match.group(1), match.group(2))
-        if article["article_key"] in seen:
+        article = _article_ref(match.group(1), match.group(2), match.group("unit_block"))
+        signature = _article_ref_signature(article)
+        if signature in seen:
             continue
-        seen.add(article["article_key"])
+        seen.add(signature)
         refs.append(article)
 
     return refs
+
+
+def _article_ref_signature(article_ref: dict[str, str | None]) -> str:
+    return "::".join(
+        [
+            str(article_ref.get("article_key") or "").strip(),
+            str(article_ref.get("paragraph_no") or "").strip(),
+            str(article_ref.get("item_no") or "").strip(),
+            str(article_ref.get("subitem_no") or "").strip(),
+        ]
+    )
 
 
 def _mask_span(text: str, start: int, end: int) -> str:
@@ -325,10 +364,20 @@ def _append_reference(
 ) -> None:
     article_keys = [item["article_key"] for item in article_refs]
     article_no_displays = [item["article_no_display"] for item in article_refs]
+    article_ref_details = [
+        {
+            "article_key": item["article_key"],
+            "article_no_display": item["article_no_display"],
+            "paragraph_no": item.get("paragraph_no"),
+            "item_no": item.get("item_no"),
+            "subitem_no": item.get("subitem_no"),
+        }
+        for item in article_refs
+    ]
     dedup_key = (
         reference_type,
         str(target_law_name or "").strip(),
-        "|".join(article_keys) or _normalize_space(reference_text),
+        "|".join(_article_ref_signature(item) for item in article_refs) or _normalize_space(reference_text),
     )
     if dedup_key in seen:
         return
@@ -341,6 +390,7 @@ def _append_reference(
             "related_law_names": list(dict.fromkeys([name for name in related_law_names or [] if str(name).strip()])),
             "target_article_keys": article_keys,
             "target_article_no_displays": article_no_displays,
+            "target_article_ref_details": article_ref_details,
             "resolution_status": resolution_status,
             "resolution_confidence": resolution_confidence,
         }
