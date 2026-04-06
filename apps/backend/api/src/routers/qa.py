@@ -24,7 +24,7 @@ from src.dependencies import get_query_parser, get_rag_pipeline
 from rag_pipeline.generation.pipeline import RagPipeline
 from rag_pipeline.query_parser import QueryParser
 from src.history import delete_history_item, delete_history_items, get_history, get_history_item, save_feedback, save_qa
-from rag_pipeline.retrieval.common import RetrievalError
+from rag_pipeline.retrieval.common import EmbeddingError, LLMError, LLMTimeoutError, RetrievalError
 
 router = APIRouter(tags=["qa"])
 
@@ -33,6 +33,19 @@ _IRRELEVANT_ANSWER = (
     "법률 관련 질문을 해주시면 도움을 드릴 수 있습니다."
 )
 _VALID_DOC_TYPES = {"law", "prec", "detc", "decc", "expc"}
+
+
+def _stream_error_payload(exc: Exception) -> dict[str, str]:
+    """SSE 에러 이벤트용 코드/메시지 매핑."""
+    if isinstance(exc, EmbeddingError):
+        return {"type": "error", "code": "EMBEDDING_ERROR", "error": str(exc)}
+    if isinstance(exc, LLMTimeoutError):
+        return {"type": "error", "code": "LLM_TIMEOUT", "error": str(exc)}
+    if isinstance(exc, LLMError):
+        return {"type": "error", "code": "LLM_ERROR", "error": str(exc)}
+    if isinstance(exc, RetrievalError):
+        return {"type": "error", "code": "PIPELINE_ERROR", "error": str(exc)}
+    return {"type": "error", "code": "INTERNAL_ERROR", "error": "서버 오류가 발생했습니다."}
 
 
 class AskRequest(BaseModel):
@@ -190,19 +203,12 @@ def ask(
         else (parsed.law_names or None)
     )
 
-    try:
-        result = pipeline.run(
-            request.question,
-            doc_types=request.doc_types,
-            law_names=effective_law_names,
-            intent=parsed.intent,
-        )
-    except RetrievalError as exc:
-        logger.error("ask RetrievalError: %s", exc)
-        raise HTTPException(status_code=502, detail="검색 서비스 오류가 발생했습니다.") from exc
-    except Exception:
-        logger.error("INTERNAL_ERROR in ask:\n%s", traceback.format_exc())
-        raise HTTPException(status_code=500, detail="서버 오류가 발생했습니다.")
+    result = pipeline.run(
+        request.question,
+        doc_types=request.doc_types,
+        law_names=effective_law_names,
+        intent=parsed.intent,
+    )
     if result.answer.strip():
         try:
             save_qa(
@@ -302,9 +308,10 @@ def ask_stream(
                 "qa_id": qa_id,
             }
             yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
-        except RetrievalError as exc:
-            logger.error("ask_stream RetrievalError: %s", exc)
-            yield f"data: {json.dumps({'type': 'error', 'code': 'PIPELINE_ERROR', 'error': '검색 서비스 오류가 발생했습니다.'}, ensure_ascii=False)}\n\n"
+        except (EmbeddingError, LLMTimeoutError, LLMError, RetrievalError) as exc:
+            payload = _stream_error_payload(exc)
+            logger.error("%s in ask_stream: %s", payload["code"], exc)
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
             return
         except Exception:
             logger.error("INTERNAL_ERROR in ask_stream:\n%s", traceback.format_exc())

@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import socket
 import urllib.error
 import urllib.request
 from typing import Any
@@ -40,6 +41,52 @@ class RetrievalError(Exception):
 
     서비스 레이어에서 발생시키고, CLI 진입점(main)에서만 SystemExit으로 변환한다.
     """
+
+
+class UpstreamHTTPError(RetrievalError):
+    """외부 HTTP API가 4xx/5xx를 반환했을 때 발생한다."""
+
+    def __init__(
+        self,
+        *,
+        method: str,
+        url: str,
+        status_code: int,
+        body: str,
+    ) -> None:
+        super().__init__(f"HTTP {status_code} {method} {url}\n{body}")
+        self.method = method
+        self.url = url
+        self.status_code = status_code
+        self.body = body
+
+
+class UpstreamNetworkError(RetrievalError):
+    """외부 API 네트워크 오류."""
+
+
+class UpstreamTimeoutError(UpstreamNetworkError):
+    """외부 API 타임아웃 오류."""
+
+
+class EmbeddingError(RetrievalError):
+    """임베딩 단계 오류."""
+
+
+class LLMError(RetrievalError):
+    """LLM 호출/응답 처리 오류."""
+
+
+class LLMTimeoutError(LLMError):
+    """LLM 호출 타임아웃 오류."""
+
+
+def _is_timeout_like(exc: object) -> bool:
+    """예외 객체가 타임아웃 성격인지 판별한다."""
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return True
+    text = str(exc).lower()
+    return "timed out" in text or "timeout" in text
 
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
@@ -72,9 +119,18 @@ def http_json(
             return json.loads(raw) if raw.strip() else {}
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
-        raise RetrievalError(f"HTTP {exc.code} {method} {url}\n{body}") from exc
+        raise UpstreamHTTPError(
+            method=method,
+            url=url,
+            status_code=int(exc.code),
+            body=body,
+        ) from exc
     except urllib.error.URLError as exc:
-        raise RetrievalError(f"Network error {method} {url}: {exc}") from exc
+        if _is_timeout_like(getattr(exc, "reason", None)) or _is_timeout_like(exc):
+            raise UpstreamTimeoutError(f"Timeout {method} {url}: {exc}") from exc
+        raise UpstreamNetworkError(f"Network error {method} {url}: {exc}") from exc
+    except TimeoutError as exc:
+        raise UpstreamTimeoutError(f"Timeout {method} {url}: {exc}") from exc
 
 
 # ── 임베딩 ────────────────────────────────────────────────────────────────────
@@ -94,11 +150,14 @@ def _embed_query_openai(
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
     }
-    res = http_json("POST", f"{api_base_url}/embeddings", payload, headers, timeout=30)
+    try:
+        res = http_json("POST", f"{api_base_url}/embeddings", payload, headers, timeout=30)
+    except RetrievalError as exc:
+        raise EmbeddingError(f"OpenAI 임베딩 호출 실패: {exc}") from exc
     try:
         return list(res["data"][0]["embedding"])
     except (KeyError, IndexError, TypeError) as exc:
-        raise RetrievalError(f"OpenAI 임베딩 응답 파싱 실패: {exc}\n응답: {res}") from exc
+        raise EmbeddingError(f"OpenAI 임베딩 응답 파싱 실패: {exc}\n응답: {res}") from exc
 
 
 def embed_query(
@@ -126,18 +185,18 @@ def embed_query(
         query_text = str(text).strip()
 
     if not query_text:
-        raise RetrievalError("질문 텍스트가 비어 있습니다.")
+        raise EmbeddingError("질문 텍스트가 비어 있습니다.")
 
     if provider == "openai":
         if not api_key:
-            raise RetrievalError("OpenAI 임베딩 사용 시 api_key가 필요합니다.")
+            raise EmbeddingError("OpenAI 임베딩 사용 시 api_key가 필요합니다.")
         return _embed_query_openai(query_text, model_name, api_key, api_base_url, dimensions)
 
     # sentence_transformers
     try:
         from sentence_transformers import SentenceTransformer
     except Exception as exc:
-        raise RetrievalError(
+        raise EmbeddingError(
             "sentence-transformers가 필요합니다.\n설치: uv add sentence-transformers"
         ) from exc
 
@@ -146,7 +205,7 @@ def embed_query(
         try:
             model = SentenceTransformer(model_name)
         except Exception as exc:
-            raise RetrievalError(
+            raise EmbeddingError(
                 "임베딩 모델 로드 실패: EMBEDDING_MODEL/네트워크 상태를 확인하세요.\n"
                 f"현재 EMBEDDING_MODEL={model_name}\n"
                 f"원인: {type(exc).__name__}: {exc}"
@@ -167,7 +226,7 @@ def embed_query(
                 normalize_embeddings=True,
             )
         except Exception as retry_exc:
-            raise RetrievalError(
+            raise EmbeddingError(
                 "임베딩 모델 토크나이징 실패: EMBEDDING_MODEL이 문장 임베딩용 모델인지 확인하세요.\n"
                 f"현재 EMBEDDING_MODEL={model_name}\n"
                 f"원인: {type(retry_exc).__name__}: {retry_exc}"

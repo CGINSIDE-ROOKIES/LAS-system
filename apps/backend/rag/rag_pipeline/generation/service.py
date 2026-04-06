@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Iterator
 
 from .llm_client import SUPPORTED_PROVIDERS, generate_answer, stream_answer
-from ..retrieval.common import RetrievalError
+from ..retrieval.common import LLMError
 
 DEFAULT_PROVIDER = "openai_compat"
 DEFAULT_GEMINI_MODEL = "gemini-1.5-flash"
@@ -27,7 +27,7 @@ class GenerationConfig:
 
     def __post_init__(self) -> None:
         if self.provider not in SUPPORTED_PROVIDERS:
-            raise RetrievalError(f"지원하지 않는 provider: {self.provider}")
+            raise LLMError(f"지원하지 않는 provider: {self.provider}")
 
     @classmethod
     def from_env(cls) -> GenerationConfig:

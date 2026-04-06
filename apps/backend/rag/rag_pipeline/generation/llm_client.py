@@ -8,11 +8,19 @@
 from __future__ import annotations
 
 import json
+import socket
 import urllib.error
 import urllib.request
 from typing import Any, Iterator
 
-from ..retrieval.common import RetrievalError, http_json
+from ..retrieval.common import (
+    LLMError,
+    LLMTimeoutError,
+    RetrievalError,
+    UpstreamHTTPError,
+    UpstreamTimeoutError,
+    http_json,
+)
 
 SUPPORTED_PROVIDERS = {"openai_compat", "gemini"}
 
@@ -89,49 +97,58 @@ def generate_answer(
     if not prompt_text:
         raise RetrievalError("prompt가 비어 있습니다.")
 
-    if provider == "gemini":
-        if not api_key:
-            raise RetrievalError("GEMINI_API_KEY가 필요합니다.")
-        payload = _build_gemini_payload(
-            prompt_text=prompt_text,
-            system_prompt=system_prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            response_mime_type=response_mime_type,
-        )
-        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+    try:
+        if provider == "gemini":
+            if not api_key:
+                raise LLMError("GEMINI_API_KEY가 필요합니다.")
+            payload = _build_gemini_payload(
+                prompt_text=prompt_text,
+                system_prompt=system_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                response_mime_type=response_mime_type,
+            )
+            headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+            res = http_json("POST", url, payload, headers, timeout)
+            return _extract_text_from_gemini_response(res)
+
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        messages: list[dict[str, str]] = []
+        if system_prompt and system_prompt.strip():
+            messages.append({"role": "system", "content": system_prompt.strip()})
+        messages.append({"role": "user", "content": prompt_text})
+
+        payload = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
         res = http_json("POST", url, payload, headers, timeout)
-        return _extract_text_from_gemini_response(res)
-
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    messages: list[dict[str, str]] = []
-    if system_prompt and system_prompt.strip():
-        messages.append({"role": "system", "content": system_prompt.strip()})
-    messages.append({"role": "user", "content": prompt_text})
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-    }
-    res = http_json("POST", url, payload, headers, timeout)
-    choices = res.get("choices")
-    if not isinstance(choices, list) or not choices:
-        raise RetrievalError("LLM 응답에 choices가 없습니다.")
-    first = choices[0]
-    if not isinstance(first, dict):
-        raise RetrievalError("LLM 응답 choices[0] 형식이 올바르지 않습니다.")
-    message = first.get("message")
-    if not isinstance(message, dict):
-        raise RetrievalError("LLM 응답 message 형식이 올바르지 않습니다.")
-    content = message.get("content")
-    if not isinstance(content, str) or not content.strip():
-        raise RetrievalError("LLM 응답 content가 비어 있습니다.")
-    return content.strip()
+        choices = res.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise LLMError("LLM 응답에 choices가 없습니다.")
+        first = choices[0]
+        if not isinstance(first, dict):
+            raise LLMError("LLM 응답 choices[0] 형식이 올바르지 않습니다.")
+        message = first.get("message")
+        if not isinstance(message, dict):
+            raise LLMError("LLM 응답 message 형식이 올바르지 않습니다.")
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise LLMError("LLM 응답 content가 비어 있습니다.")
+        return content.strip()
+    except LLMError:
+        raise
+    except UpstreamTimeoutError as exc:
+        raise LLMTimeoutError(f"LLM 요청 타임아웃: {exc}") from exc
+    except UpstreamHTTPError as exc:
+        raise LLMError(f"LLM HTTP 오류: {exc}") from exc
+    except RetrievalError as exc:
+        raise LLMError(f"LLM 호출 실패: {exc}") from exc
 
 
 # ── 스트리밍 ──────────────────────────────────────────────────────────────────
@@ -275,7 +292,7 @@ def stream_answer(
     try:
         if provider == "gemini":
             if not api_key:
-                raise RetrievalError("GEMINI_API_KEY가 필요합니다.")
+                raise LLMError("GEMINI_API_KEY가 필요합니다.")
             yield from _stream_gemini(
                 prompt_text=prompt_text,
                 system_prompt=system_prompt,
@@ -297,8 +314,15 @@ def stream_answer(
             max_tokens=max_tokens,
             temperature=temperature,
         )
+    except LLMError:
+        raise
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
-        raise RetrievalError(f"HTTP {exc.code} POST {url}\n{body}") from exc
+        raise LLMError(f"LLM HTTP 오류: HTTP {exc.code} POST {url}\n{body}") from exc
     except urllib.error.URLError as exc:
-        raise RetrievalError(f"Network error POST {url}: {exc}") from exc
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, (TimeoutError, socket.timeout)) or "timed out" in str(exc).lower():
+            raise LLMTimeoutError(f"LLM 스트리밍 타임아웃: {exc}") from exc
+        raise LLMError(f"LLM 네트워크 오류: POST {url}: {exc}") from exc
+    except TimeoutError as exc:
+        raise LLMTimeoutError(f"LLM 스트리밍 타임아웃: {exc}") from exc

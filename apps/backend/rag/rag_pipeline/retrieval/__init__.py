@@ -2,10 +2,16 @@
 
 from .common import (
     DEFAULT_EMBEDDING_MODEL,
+    EmbeddingError,
+    LLMError,
+    LLMTimeoutError,
     RetrievalError,
     dedup_normalized_rows,
     embed_query,
     normalize_source_id,
+    UpstreamHTTPError,
+    UpstreamNetworkError,
+    UpstreamTimeoutError,
 )
 from .context import build_llm_context_rows, build_llm_context_text
 from .fusion import fuse_rrf
@@ -16,8 +22,14 @@ from .service import RetrievalConfig
 
 __all__ = [
     "DEFAULT_EMBEDDING_MODEL",
+    "EmbeddingError",
+    "LLMError",
+    "LLMTimeoutError",
     "RetrievalConfig",
     "RetrievalError",
+    "UpstreamHTTPError",
+    "UpstreamNetworkError",
+    "UpstreamTimeoutError",
     "apply_law_boost",
     "build_llm_context_rows",
     "build_llm_context_text",
