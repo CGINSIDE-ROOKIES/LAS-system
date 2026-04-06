@@ -102,6 +102,27 @@ def test_build_retrieval_policy_marks_collection_availability_and_weights():
     assert all(item["available"] is True for item in citation_profile["collections"][:2])
 
 
+def test_build_retrieval_policy_marks_legal_relation_unavailable_when_not_embedded():
+    policy = _build_retrieval_policy(
+        [
+            {"collection_name": "law_article", "skipped": False},
+            {"collection_name": "legal_case", "skipped": False},
+        ]
+    )
+
+    law_lookup = policy["query_profiles"]["law_lookup"]["collections"]
+    citation_trace = policy["query_profiles"]["citation_trace"]["collections"]
+
+    assert law_lookup[0]["name"] == "law_article"
+    assert law_lookup[0]["available"] is True
+    assert law_lookup[1]["name"] == "legal_case"
+    assert law_lookup[1]["available"] is True
+    assert law_lookup[2]["name"] == "legal_relation"
+    assert law_lookup[2]["available"] is False
+    assert citation_trace[0]["name"] == "legal_relation"
+    assert citation_trace[0]["available"] is False
+
+
 def test_write_embedding_manifest_uses_collection_dim_and_provider(tmp_path):
     manifest_path = write_embedding_manifest(
         handoff_dir=tmp_path / "handoff",

@@ -57,7 +57,7 @@ def test_resolve_incremental_scope_maps_changed_law_to_root_family(tmp_path):
     assert resolved["deleted_law_uids"] == ["006860"]
     assert resolved["changed_root_law_names"] == ["근로기준법"]
     assert resolved["needs_related_refresh"] is True
-    assert resolved["embed_collections"] == ["law_article", "legal_case", "legal_relation"]
+    assert resolved["embed_collections"] == ["law_article", "legal_case"]
 
 
 def test_resolve_incremental_scope_falls_back_to_law_name_when_ids_are_missing(tmp_path):
