@@ -1,7 +1,6 @@
 {
   "extends": "@las/tsconfig/react-next.json",
   "compilerOptions": {
-    "baseUrl": ".",
     "strict": false,
     "noImplicitAny": false,
     "paths": {
