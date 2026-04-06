@@ -31,7 +31,7 @@ class RetrievalConfig:
     top_k: int = 5
     candidate_k: int = 30
     rrf_k: int = 60
-    timeout: int = 120
+    timeout: int = 60
     auto_law_boost: bool = True
     law_boost_score: float = 0.003
     min_law_contexts: int = 1
