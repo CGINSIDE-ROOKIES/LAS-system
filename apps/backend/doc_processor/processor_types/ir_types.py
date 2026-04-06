@@ -445,7 +445,7 @@ class DocIR(BaseModel):
     @classmethod
     def from_file(
         cls,
-        source: str | Path,
+        source: str | Path | bytes | Any,
         *,
         doc_type: Literal["auto", "hwp", "hwpx", "docx"] = "auto",
         include_tables: bool = True,
@@ -455,65 +455,19 @@ class DocIR(BaseModel):
         normalizer: Callable[[str], str] | None = None,
         doc_id: str | None = None,
     ) -> DocIR:
-        """Build and preprocess :class:`DocIR` from a file path in one call."""
-        source_path = Path(source)
+        """Build and preprocess :class:`DocIR` from one source in one call."""
+        from document_processor import DocIR as StructuralDocIR
 
-        if doc_type == "auto":
-            suffix = source_path.suffix.lower()
-            if suffix == ".hwp":
-                resolved_doc_type: Literal["hwp", "hwpx", "docx"] = "hwp"
-            elif suffix == ".hwpx":
-                resolved_doc_type = "hwpx"
-            elif suffix == ".docx":
-                resolved_doc_type = "docx"
-            else:
-                raise ValueError(
-                    "Could not infer document type from file extension. "
-                    "Pass doc_type='hwp', 'hwpx', or 'docx'."
-                )
-        else:
-            resolved_doc_type = doc_type
-
-        from core.structured_mapping_exporter import export_structured_mapping
-        from core.style_extractor import extract_styles
-
-        if resolved_doc_type == "hwp":
-            from core.hwp_converter import convert_hwp_to_hwpx_bytes
-
-            hwpx_bytes = convert_hwp_to_hwpx_bytes(source_path)
-            mapping = export_structured_mapping(
-                hwpx_bytes,
-                doc_type="hwpx",
-                skip_empty=skip_empty,
-                include_tables=include_tables,
-            )
-            style_map = extract_styles(
-                hwpx_bytes,
-                doc_type="hwpx",
-                include_tables=include_tables,
-            )
-        else:
-            mapping = export_structured_mapping(
-                source_path,
-                doc_type=resolved_doc_type,
-                skip_empty=skip_empty,
-                include_tables=include_tables,
-            )
-            style_map = extract_styles(
-                source_path,
-                doc_type=resolved_doc_type,
-                include_tables=include_tables,
-            )
-
-        doc_ir = cls.from_mapping(
-            mapping,
-            style_map=style_map,
-            source_path=source_path,
-            source_doc_type=resolved_doc_type,
+        structural_doc = StructuralDocIR.from_file(
+            source,
+            doc_type=doc_type,
+            include_tables=include_tables,
+            skip_empty=skip_empty,
             metadata=metadata,
             normalizer=normalizer,
             doc_id=doc_id,
         )
+        doc_ir = cls.model_validate(structural_doc.model_dump())
         doc_ir.annotate_numbering_signals(
             include_table_cells=include_table_cells_for_numbering
         )
@@ -533,9 +487,9 @@ class DocIR(BaseModel):
         doc_id: str | None = None,
     ) -> DocIR:
         """Build :class:`DocIR` from legacy structured mapping output."""
-        from .builder import build_doc_ir_from_mapping
+        from document_processor import DocIR as StructuralDocIR
 
-        return build_doc_ir_from_mapping(
+        structural_doc = StructuralDocIR.from_mapping(
             mapping,
             style_map=style_map,
             source_path=source_path,
@@ -544,6 +498,7 @@ class DocIR(BaseModel):
             normalizer=normalizer,
             doc_id=doc_id,
         )
+        return cls.model_validate(structural_doc.model_dump())
 
     def _iter_scan_paragraphs(
         self,
