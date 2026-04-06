@@ -103,5 +103,5 @@ def resolve_incremental_scope(
         "changed_root_law_names": sorted(changed_root_law_names),
         "needs_related_refresh": bool(changed_root_law_names),
         "needs_relation_refresh": bool(changed_root_law_names),
-        "embed_collections": ["law_article", "legal_case", "legal_relation"],
+        "embed_collections": ["law_article", "legal_case"],
     }
