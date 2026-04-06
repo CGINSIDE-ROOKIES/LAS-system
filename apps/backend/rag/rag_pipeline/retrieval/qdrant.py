@@ -42,13 +42,22 @@ def _build_qdrant_filter(
     """doc_type / law_name 필터 조건을 Qdrant payload filter 형식으로 생성한다.
 
     두 조건 모두 없으면 None을 반환 (필터 미적용).
+
+    law_names는 컬렉션 종류에 관계없이 OR 조건으로 적용한다.
+    - law_article: law_name 필드에서 매칭
+    - legal_case / legal_relation: root_law_name, related_law_name, related_law_names 에서 매칭
     """
-    must: list[dict[str, Any]] = []
+    filt: dict[str, Any] = {}
     if doc_types:
-        must.append({"key": "doc_type", "match": {"any": doc_types}})
+        filt["must"] = [{"key": "doc_type", "match": {"any": doc_types}}]
     if law_names:
-        must.append({"key": "law_name", "match": {"any": law_names}})
-    return {"must": must} if must else None
+        filt["should"] = [
+            {"key": "law_name", "match": {"any": law_names}},
+            {"key": "root_law_name", "match": {"any": law_names}},
+            {"key": "related_law_name", "match": {"any": law_names}},
+            {"key": "related_law_names", "match": {"any": law_names}},
+        ]
+    return filt if filt else None
 
 
 def search_qdrant_with_vector(

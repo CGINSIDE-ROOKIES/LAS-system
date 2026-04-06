@@ -26,7 +26,7 @@ _SYSTEM_PROMPT = """\
 
 {{"law_names": [...], "article_no": "...", "intent": "...", "is_legal": true/false}}
 
-- law_names: 아래 목록 중 질문에 해당하는 법령 정식명칭 (없으면 [])
+- law_names: 질문에 법령명이 명시된 경우만 추출. 추론하거나 유추하지 말 것. 없으면 []
 - article_no: 조문번호 (예: "제17조", 없으면 "")
 - intent: "normative" | "case_law" | "mixed" | null (법률 무관이면 null)
 - is_legal: 법률 관련 질문이면 true, 아니면 false

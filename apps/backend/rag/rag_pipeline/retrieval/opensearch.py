@@ -57,7 +57,17 @@ def _build_bm25_query(
     if doc_types:
         filters.append({"terms": {"doc_type": doc_types}})
     if law_names:
-        filters.append({"terms": {"law_name": law_names}})
+        filters.append({
+            "bool": {
+                "should": [
+                    {"terms": {"law_name": law_names}},
+                    {"terms": {"root_law_name": law_names}},
+                    {"terms": {"related_law_name": law_names}},
+                    {"terms": {"related_law_names": law_names}},
+                ],
+                "minimum_should_match": 1,
+            }
+        })
 
     query_obj: dict[str, Any] = {"bool": {"must": must}}
     if filters:

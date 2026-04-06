@@ -24,6 +24,11 @@ from ..retrieval.ranking import apply_law_boost, select_rows_with_law_policy
 from ..retrieval.service import RetrievalConfig
 from .service import GenerationConfig, GenerationService
 
+_NO_RESULT_ANSWER = (
+    "관련 법령·판례 문서를 찾지 못했습니다. "
+    "질문을 더 구체적으로 입력하시거나, 법령 필터가 설정되어 있다면 해제 후 다시 시도해보세요."
+)
+
 DEFAULT_SYSTEM_PROMPT = (
     "당신은 노동법 및 하도급법 전문 법률 Q&A 어시스턴트입니다.\n"
     "주요 대상 법령은 근로기준법, 기간제 및 단시간근로자 보호 등에 관한 법률, "
@@ -55,7 +60,7 @@ class RagResult:
 
     answer: str
     retrieved_docs: list[dict[str, Any]]  # 컨텍스트에 사용된 문서 목록
-    law_context_status: str               # "ok" | "missing" | "supplemented"
+    law_context_status: str               # "ok" | "missing" | "supplemented" | "case_only"
 
 
 # ── 프롬프트 빌더 ─────────────────────────────────────────────────────────────
@@ -76,6 +81,8 @@ def build_user_prompt_with_limit(
         )
     elif law_context_status == "supplemented":
         status_line = "참고: 법령(law) 문서를 보강한 컨텍스트로 답변합니다.\n\n"
+    elif law_context_status == "case_only":
+        status_line = "참고: 현재 검색 결과에 법령 조문이 없고 판례·해석례만 포함되어 있습니다.\n조문 근거 없이 판례 중심으로 답변하세요.\n\n"
 
     prefix = (
         f"{status_line}"
@@ -167,6 +174,9 @@ class RagPipeline:
         if intent == "case_law":
             law_names = None
             enforce = False
+            # 판례 중심 질의 — 법령 조문이 섞이지 않도록 판례류로만 제한
+            if doc_types is None:
+                doc_types = ["prec", "decc", "detc", "expc"]
         elif intent == "mixed":
             enforce = False
         else:
@@ -308,6 +318,9 @@ class RagPipeline:
         llm_rows, context_text, law_context_status, law_context_added = self._retrieve(
             question, doc_types=doc_types, law_names=law_names, intent=intent
         )
+        if not llm_rows:
+            logger.info("run: 검색 결과 0건 — LLM 호출 생략")
+            return self._build_result(_NO_RESULT_ANSWER, [], law_context_status)
         prompt = build_user_prompt_with_limit(
             retrieved_context_text=context_text,
             question=question,
@@ -336,6 +349,10 @@ class RagPipeline:
         llm_rows, context_text, law_context_status, law_context_added = self._retrieve(
             question, doc_types=doc_types, law_names=law_names, intent=intent
         )
+        if not llm_rows:
+            logger.info("stream: 검색 결과 0건 — LLM 호출 생략")
+            meta = self._build_result(_NO_RESULT_ANSWER, [], law_context_status)
+            return meta, iter([_NO_RESULT_ANSWER])
         prompt = build_user_prompt_with_limit(
             retrieved_context_text=context_text,
             question=question,
