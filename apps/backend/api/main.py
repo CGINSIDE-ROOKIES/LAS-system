@@ -79,6 +79,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from src.db import close_pool, init_pool
+from src.dependencies import warmup_dependencies
 from rag_pipeline.retrieval.common import EmbeddingError, LLMError, LLMTimeoutError, RetrievalError
 from src.routers import health, qa
 
@@ -91,6 +92,8 @@ async def lifespan(app: FastAPI):
     logger.info("애플리케이션 시작")
     # DB 풀 초기화/해제는 동기 함수이므로 이벤트 루프 블로킹을 피하려고 스레드풀에서 실행한다.
     await run_in_threadpool(init_pool)
+    # 의존성 선초기화: 첫 요청 전에 환경변수/설정 오류를 조기 발견한다.
+    await run_in_threadpool(warmup_dependencies)
     yield
     await run_in_threadpool(close_pool)
     logger.info("애플리케이션 종료")
