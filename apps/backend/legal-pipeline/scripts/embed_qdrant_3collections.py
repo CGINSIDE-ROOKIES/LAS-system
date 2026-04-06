@@ -29,7 +29,7 @@ NORMALIZE_EMBEDDINGS = EMBEDDING_SETTINGS.normalize_embeddings
 EMBEDDING_DTYPE = EMBEDDING_SETTINGS.dtype
 DEFAULT_BATCH_SIZE = 128
 CASE_DOC_TYPES = {"prec", "detc", "decc", "expc"}
-COLLECTIONS = ("law_article", "legal_case", "legal_relation")
+COLLECTIONS = ("law_article", "legal_case")
 APPENDIX_VECTOR_PLACEHOLDER = "[NO_APPENDIX_LINKED]"
 LAW_ARTICLE_VECTOR_NAMES = ("body", "appendix")
 DEVICE_MODE = EMBEDDING_SETTINGS.device_mode
@@ -684,7 +684,7 @@ def main() -> None:
                 batch_size=batch_size,
             )
         )
-        for collection_name in ("legal_case", "legal_relation"):
+        for collection_name in ("legal_case",):
             collection_manifests.append(
                 embed_simple_collection(
                     model=model,

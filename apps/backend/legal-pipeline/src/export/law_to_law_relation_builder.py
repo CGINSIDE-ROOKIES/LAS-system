@@ -1,3 +1,12 @@
+"""Build `law_to_law` rows from normalized law articles.
+
+Observed relation examples from the current dataset:
+- `cited_law`: `건설산업기본법 시행령` -> `건설산업기본법`
+- `same_law_reference`: `파견근로자 보호 등에 관한 법률 제21조의2` -> same law
+- `relative_reference`: `같은 법 제9조`, `동조`
+- `external_reference`: currently includes noisy cases like `국토교통부장관(법 제91조`
+"""
+
 from __future__ import annotations
 
 from collections import defaultdict

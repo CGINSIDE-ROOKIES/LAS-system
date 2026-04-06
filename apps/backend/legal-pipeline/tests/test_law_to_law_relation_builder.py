@@ -121,3 +121,48 @@ def test_build_law_to_law_relation_records_extracts_same_law_and_external_refs(t
     assert "external_reference" in external_row["relation_types"]
     assert external_row["article_keys"] == ["750"]
     assert external_row["resolution_status"] == "unresolved_external"
+
+
+def test_build_law_to_law_relation_records_recovers_noisy_scope_reference_as_family_law(tmp_path):
+    normalized_dir = tmp_path / "normalized" / "01_current_law" / "건설산업기본법"
+
+    _write_json(
+        normalized_dir / "건설산업기본법_시행령__parsed_law.json",
+        {
+            "law_name": "건설산업기본법 시행령",
+            "law_id": "002115",
+            "mst": "269999",
+            "ef_yd": "20250223",
+            "kind_name": "대통령령",
+            "classified_level": "시행령",
+            "articles": [
+                {
+                    "article_key": "43",
+                    "article_no": "제43조",
+                    "article_no_display": "제43조",
+                    "article_title": "하도급계약의 특례",
+                    "article_title_raw": "하도급계약의 특례",
+                    "article_text": "제43조(하도급계약의 특례) 법 제48조에 따른다.",
+                    "article_text_raw": "제43조(하도급계약의 특례) 법 제48조에 따른다.",
+                }
+            ],
+        },
+    )
+    _write_json(
+        normalized_dir / "건설산업기본법__parsed_law.json",
+        {
+            "law_name": "건설산업기본법",
+            "law_id": "000261",
+            "mst": "269998",
+            "articles": [],
+        },
+    )
+
+    rows = build_law_to_law_relation_records(tmp_path / "normalized" / "01_current_law")
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["law_name"] == "건설산업기본법"
+    assert row["article_keys"] == ["48"]
+    assert row["resolution_status"] == "resolved"
+    assert "relative_reference" in row["relation_types"]

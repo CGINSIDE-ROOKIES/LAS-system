@@ -45,18 +45,20 @@ def build_incremental_embeddings(
 ) -> dict:
     corpus_upserts, corpus_deletes, relation_upserts, relation_deletes = _load_patch_rows(dataset_patch_dir)
     delete_groups: dict[str, list[dict]] = defaultdict(list)
+    embeddable_collections = ("law_article", "legal_case")
     for row in corpus_deletes:
-        delete_groups[_infer_collection_name(row, relation_file=False)].append(row)
-    for row in relation_deletes:
-        delete_groups[_infer_collection_name(row, relation_file=True)].append(row)
+        collection_name = _infer_collection_name(row, relation_file=False)
+        if collection_name in embeddable_collections:
+            delete_groups[collection_name].append(row)
 
-    if not corpus_upserts and not relation_upserts:
+    corpus_embed_upserts = list(corpus_upserts)
+
+    if not corpus_embed_upserts:
         emb_dir.mkdir(parents=True, exist_ok=True)
         handoff_dir.mkdir(parents=True, exist_ok=True)
         collection_manifests = [
             {"collection_name": "law_article", "count": 0, "skipped": True, "reason": "no patch rows"},
             {"collection_name": "legal_case", "count": 0, "skipped": True, "reason": "no patch rows"},
-            {"collection_name": "legal_relation", "count": 0, "skipped": True, "reason": "no patch rows"},
         ]
         write_embedding_manifest(
             handoff_dir=handoff_dir,
@@ -85,7 +87,7 @@ def build_incremental_embeddings(
             "emb_dir": str(emb_dir),
             "handoff_dir": str(handoff_dir),
             "corpus_upsert_count": 0,
-            "relation_upsert_count": 0,
+            "relation_upsert_count": len(relation_upserts),
             "corpus_delete_count": len(corpus_deletes),
             "relation_delete_count": len(relation_deletes),
             "collections": collection_manifests,
@@ -95,14 +97,14 @@ def build_incremental_embeddings(
 
     with tempfile.TemporaryDirectory(prefix="incremental-dataset-") as tmp_dir:
         tmp_dataset_dir = Path(tmp_dir)
-        _write_jsonl(tmp_dataset_dir / "legal_corpus.jsonl", corpus_upserts)
-        _write_jsonl(tmp_dataset_dir / "legal_relations.jsonl", relation_upserts)
+        _write_jsonl(tmp_dataset_dir / "legal_corpus.jsonl", corpus_embed_upserts)
+        _write_jsonl(tmp_dataset_dir / "legal_relations.jsonl", [])
 
         model = create_embedding_backend(load_embedding_settings())
         collection_manifests: list[dict] = []
 
         try:
-            if any(str(row.get("doc_type") or "").strip() == "law" for row in corpus_upserts):
+            if any(str(row.get("doc_type") or "").strip() == "law" for row in corpus_embed_upserts):
                 collection_manifests.append(
                     embed_law_article(
                         model=model,
@@ -116,7 +118,7 @@ def build_incremental_embeddings(
                 collection_manifests.append(
                     {"collection_name": "law_article", "count": 0, "skipped": True, "reason": "no patch rows"}
                 )
-            for collection_name in ("legal_case", "legal_relation"):
+            for collection_name in ("legal_case",):
                 collection_manifests.append(
                     embed_simple_collection(
                         model=model,

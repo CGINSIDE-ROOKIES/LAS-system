@@ -1,6 +1,6 @@
 # legal-pipeline README / 진행 현황 정리
 
-국가법령정보 OPEN API 기반 3개 축의 데이터 생성
+국가법령정보 OPEN API 기반 dataset 생성 + 검색 적재 산출물 생성
 
 - `law_article`: 현행 법령 조문 본문 + 부칙 + 별표 연계 정보
 - `legal_case`: 판례/헌재결정례/법령해석례/행정심판례 본문
@@ -23,7 +23,8 @@
 - `02_related_legal_docs`: 관련 ~례 후보 수집 + canonical case detail hydrate
 - `03_expanded_related_docs`: 법령↔사례 relation 생성
 - `dataset`: 최종 JSONL 생성
-- `emb/handoff`: 3-collection 임베딩 및 적재용 handoff 생성
+- `emb/handoff`: 현재 `law_article`, `legal_case` 임베딩 및 적재용 handoff 생성
+- `legal_relation`: dataset/OpenSearch 레이어에는 유지, 임베딩 제외 정책은 별도 반영
 ---
 
 ## 2. 실행
@@ -83,6 +84,13 @@ uv run apps/backend/legal-pipeline/scripts/run_current_law_collection.py --max-r
 - `apps/backend/legal-pipeline/data/dataset/legal_corpus.jsonl`
 - `apps/backend/legal-pipeline/data/dataset/legal_relations.jsonl`
 
+현재 정책:
+
+- dataset는 계속 `law_article`, `legal_case`, `legal_relation` 3종을 생성
+- Qdrant용 새 임베딩 생성은 현재 `law_article`, `legal_case`만 대상
+- `legal_relation`은 현재 OpenSearch only 정책으로 유지
+- 기존 `legal_relation` 적재분 삭제/정리와 query-side 검색 동기화는 후속 작업으로 미룸
+
 기본 임베딩 backend는 `sentence-transformers`다. OpenAI로 전환하려면 예시처럼 설정한다.
 
 ```bash
@@ -93,7 +101,14 @@ export OPENAI_API_KEY="<YOUR_OPENAI_API_KEY>"
 export OPENAI_EMBEDDING_DIMENSIONS="1024"
 ```
 
-### 3-2. 3-collection 임베딩 실행
+### 3-2. Qdrant 임베딩 실행
+
+현재 full embedding 대상:
+
+- `law_article`
+- `legal_case`
+
+`legal_relation`은 dataset/OpenSearch 산출물에는 남고, 현재는 OpenSearch only로 유지한다. Qdrant 새 임베딩 생성 대상에서는 제외한다.
 
 ```bash
 uv run apps/backend/legal-pipeline/scripts/embed_qdrant_3collections.py
@@ -115,13 +130,19 @@ uv run apps/backend/legal-pipeline/scripts/embed_qdrant_3collections.py \
   - `law_article.body.npy`
   - `law_article.appendix.npy`
   - `legal_case.npy`
-  - `legal_relation.npy`
   - 각 collection별 `*.meta.jsonl`, `*.manifest.json`
 - `data/handoff/qdrant_3collections/source/`
   - source JSONL
 - `data/handoff/qdrant_3collections/import/`
   - Qdrant 적재용 import JSONL
 - `data/handoff/qdrant_3collections/qdrant_embedding_manifest.json`
+
+참고:
+
+- 기존 실행에서 만들어진 `legal_relation` 관련 `.npy`/handoff 파일이 디스크에 남아 있을 수 있다.
+- 현재 스크립트는 새로 생성할 때 `legal_relation` 임베딩을 만들지 않는다.
+- `legal_relation`은 현재 OpenSearch 적재 대상으로 유지한다.
+- 기존 DB/Qdrant 정리와 query-side 검색 동기화는 후속 작업이다.
 
 ### 3-4. OpenSearch 인덱스 생성 / 전체 적재
 
@@ -264,7 +285,6 @@ data/
 │       ├── law_article.body.npy
 │       ├── law_article.appendix.npy
 │       ├── legal_case.npy
-│       ├── legal_relation.npy
 │       ├── *.meta.jsonl
 │       └── *.manifest.json
 ├── handoff/
@@ -272,11 +292,9 @@ data/
 │   │   ├── source/
 │   │   │   ├── law_article.jsonl
 │   │   │   ├── legal_case.jsonl
-│   │   │   └── legal_relation.jsonl
 │   │   ├── import/
 │   │   │   ├── law_article_for_import.jsonl
 │   │   │   ├── legal_case_for_import.jsonl
-│   │   │   └── legal_relation_for_import.jsonl
 │   │   └── qdrant_embedding_manifest.json
 │   ├── opensearch_bulk/
 │   │   ├── law_article.bulk.ndjson

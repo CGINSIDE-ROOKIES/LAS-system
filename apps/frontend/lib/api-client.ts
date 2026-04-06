@@ -115,6 +115,7 @@ export type SseDoneEvent = {
   type: "done";
   retrieved_docs: RetrievedDoc[];
   law_context_status: string;
+  qa_id: string | null;
 };
 export type SseStatusEvent = { type: "status"; code: string; message: string };
 export type SseErrorEvent = { type: "error"; code: string; error: string };
@@ -124,6 +125,18 @@ async function throwApiError(res: Response): Promise<never> {
   const body = await res.json().catch(() => ({ code: "INTERNAL_ERROR", error: res.statusText }));
   console.error(`[LAS:API] ${res.status} ${res.url} — ${body.code}: ${body.error}`);
   throw new ApiError(body.code ?? "INTERNAL_ERROR", body.error ?? res.statusText, res.status);
+}
+
+export async function submitFeedback(
+  qaId: string,
+  body: { thumbs_up: boolean; comment?: string }
+): Promise<void> {
+  const res = await fetch(`${getApiBaseUrl()}/api/v1/qa/${qaId}/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) await throwApiError(res);
 }
 
 export async function ask(request: AskRequest): Promise<AskResponse> {
