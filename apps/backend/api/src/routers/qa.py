@@ -39,7 +39,7 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     session_id: str | None = None
     doc_types: list[str] | None = None
-    law_names: list[str] | None = None
+    law_filter: list[str] | None = None
 
     @field_validator("question")
     @classmethod
@@ -183,10 +183,10 @@ def ask(
             law_context_status="irrelevant",
         )
 
-    # 사용자가 명시한 law_names 우선, 없으면 파서 결과 사용
+    # UI 법령 필터 우선, 없으면 파서 결과 사용
     effective_law_names = (
-        request.law_names
-        if request.law_names is not None
+        request.law_filter
+        if request.law_filter is not None
         else (parsed.law_names or None)
     )
 
@@ -244,9 +244,10 @@ def ask_stream(
             yield f"data: {json.dumps({'type': 'done', 'retrieved_docs': [], 'law_context_status': 'irrelevant'}, ensure_ascii=False)}\n\n"
         return StreamingResponse(_irrelevant(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
 
+    # UI 법령 필터 우선, 없으면 파서 결과 사용
     effective_law_names = (
-        request.law_names
-        if request.law_names is not None
+        request.law_filter
+        if request.law_filter is not None
         else (parsed.law_names or None)
     )
 

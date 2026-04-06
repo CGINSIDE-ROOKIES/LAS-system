@@ -47,19 +47,17 @@ def _build_qdrant_filter(
     - law_article: law_name 필드에서 매칭
     - legal_case / legal_relation: root_law_name, related_law_name, related_law_names 에서 매칭
     """
-    must: list[dict[str, Any]] = []
+    filt: dict[str, Any] = {}
     if doc_types:
-        must.append({"key": "doc_type", "match": {"any": doc_types}})
+        filt["must"] = [{"key": "doc_type", "match": {"any": doc_types}}]
     if law_names:
-        must.append({
-            "should": [
-                {"key": "law_name", "match": {"any": law_names}},
-                {"key": "root_law_name", "match": {"any": law_names}},
-                {"key": "related_law_name", "match": {"any": law_names}},
-                {"key": "related_law_names", "match": {"any": law_names}},
-            ]
-        })
-    return {"must": must} if must else None
+        filt["should"] = [
+            {"key": "law_name", "match": {"any": law_names}},
+            {"key": "root_law_name", "match": {"any": law_names}},
+            {"key": "related_law_name", "match": {"any": law_names}},
+            {"key": "related_law_names", "match": {"any": law_names}},
+        ]
+    return filt if filt else None
 
 
 def search_qdrant_with_vector(
