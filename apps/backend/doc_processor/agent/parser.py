@@ -18,11 +18,23 @@ try:
     from ..processor_types import DocIR, ParagraphIR, ParagraphReviewResult, SourceType
     from ..prompts import load_prompt
     from .rules import apply_rule_labels
+    from .utils import (
+        build_neighbor_context,
+        clear_inherited_context,
+        iter_inherited_context_blocks,
+        should_review_context_block,
+    )
 except ImportError:  # pragma: no cover - top-level import mode in local tests
     from llm import get_chat_model, get_structured_method
     from processor_types import DocIR, ParagraphIR, ParagraphReviewResult, SourceType
     from prompts import load_prompt
     from agent.rules import apply_rule_labels
+    from agent.utils import (
+        build_neighbor_context,
+        clear_inherited_context,
+        iter_inherited_context_blocks,
+        should_review_context_block,
+    )
 
 
 def _state_get(state: Any, key: str, default: Any = None) -> Any:
@@ -73,6 +85,12 @@ def _json_for_log(value: Any) -> str:
     if isinstance(value, BaseModel):
         value = value.model_dump()
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+
+
+def _serialize_payload(value: Any) -> str:
+    if isinstance(value, BaseModel):
+        value = value.model_dump()
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
 
 
 def _configure_run_logger(
@@ -145,54 +163,6 @@ def _find_occurrence(text: str, needle: str, occurrence: int) -> int | None:
         start = idx + 1
 
 
-def _token_count(model: Any, text: str) -> int:
-    if not text:
-        return 0
-    counter = getattr(model, "get_num_tokens", None)
-    if callable(counter):
-        try:
-            return max(0, int(counter(text)))
-        except Exception:
-            pass
-    # Deterministic fallback estimate.
-    return max(1, int(round(len(text) * 0.8)))
-
-
-def _clip_to_budget(
-    text: str,
-    *,
-    budget: int,
-    model: Any,
-    keep_tail: bool,
-) -> tuple[str, bool]:
-    if budget <= 0:
-        return "", bool(text)
-    if _token_count(model, text) <= budget:
-        return text, False
-
-    lo = 0
-    hi = len(text)
-    best = ""
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        candidate = text[-mid:] if keep_tail else text[:mid]
-        if _token_count(model, candidate) <= budget:
-            best = candidate
-            lo = mid + 1
-        else:
-            hi = mid - 1
-    return best, True
-
-
-def _nearest_non_empty_idx(paragraphs: list[ParagraphIR], start_idx: int, step: int) -> int | None:
-    idx = start_idx + step
-    while 0 <= idx < len(paragraphs):
-        if (paragraphs[idx].text or "").strip():
-            return idx
-        idx += step
-    return None
-
-
 class ParserConfig(BaseModel):
     llm_profile: str = "default"
     prompt_profile: str = "default"
@@ -203,6 +173,7 @@ class ParserConfig(BaseModel):
     include_table_blocks: bool = True
     enable_rule_prelabel: bool = True
     enable_context_boundary_trim: bool = True
+    enable_llm_warmup: bool = True
     context_neighbor_token_budget: int = 320
     structured_method: Literal["json_mode", "json_schema"] | None = "json_mode"
     log_dir: str | None = None
@@ -215,6 +186,16 @@ class ContextBoundaryReviewResult(BaseModel):
     unit_id: str
     belongs_to_active_context: bool
     reason: str
+
+
+_WORKER_PAYLOAD_PREAMBLE = (
+    "Classify exactly one target paragraph. "
+    "Treat only the JSON payload in the next message as the target input."
+)
+_BOUNDARY_PAYLOAD_PREAMBLE = (
+    "Decide whether the target paragraph still belongs to the active inherited clause/subclause context. "
+    "Treat only the JSON payload in the next message as the target input."
+)
 
 
 class ParserGraphState(BaseModel):
@@ -310,27 +291,94 @@ def _splitter(state: ParserGraphState):
     return sends
 
 
+def _warmup_llm(state: ParserGraphState):
+    cfg = _state_parser_config(state)
+    if not cfg.enable_llm_warmup:
+        return {}
+
+    doc_ir = _state_doc_ir(state)
+    llm_model = _state_get(state, "llm_model")
+    prompt_text = _state_get(state, "prompt_text")
+    resolved = _state_get(state, "rule_resolved_indices") or set()
+    if llm_model is None or prompt_text is None:
+        return {}
+
+    has_unresolved_work = any(
+        idx not in resolved
+        and (cfg.include_table_blocks or paragraph.source_type != SourceType.TABLE_BLOCK)
+        and (not cfg.skip_empty or (paragraph.text or "").strip())
+        for idx, paragraph in enumerate(doc_ir.paragraphs)
+    )
+    if not has_unresolved_work:
+        _log(state, "llm warmup skipped (no unresolved paragraphs)")
+        return {}
+
+    warmup_payload = {
+        "position": "only",
+        "signals": {
+            "clause_no": None,
+            "subclause_no": None,
+            "active_clause_no": None,
+            "active_subclause_no": None,
+            "centered": None,
+            "font_size": None,
+            "bold_ratio": None,
+        },
+        "unit_id": "_warmup",
+        "prev": None,
+        "next": None,
+        "text": "워밍업용 더미 문단입니다.",
+    }
+    if cfg.structured_method is None:
+        structured_llm = llm_model.with_structured_output(ParagraphReviewResult)
+    else:
+        structured_llm = llm_model.with_structured_output(
+            ParagraphReviewResult,
+            method=cfg.structured_method,
+        )
+    messages = [
+        ("system", prompt_text),
+        ("user", _WORKER_PAYLOAD_PREAMBLE),
+        ("user", _serialize_payload(warmup_payload)),
+    ]
+    try:
+        raw = structured_llm.invoke(messages)
+        if cfg.log_llm_io:
+            _log(state, f"llm warmup raw output\n{_json_for_log(raw)}")
+        _log(state, "llm warmup complete")
+    except Exception as exc:
+        _log(state, f"llm warmup failed: {exc}", level="warning")
+    return {}
+
+
 def _compact_signals(paragraph: ParagraphIR) -> dict[str, Any]:
     """Flatten parser_signals to only the fields meaningful for LLM classification."""
     signals = paragraph.parser_signals
     if signals is None:
-        return {}
-    out: dict[str, Any] = {}
-    if signals.regex_clause is not None:
-        out["clause_no"] = signals.regex_clause.value
-    if signals.regex_subclause is not None:
-        out["subclause_no"] = signals.regex_subclause.value
-    if signals.regex_clause is None and signals.provisional_clause_no is not None:
-        out["active_clause_no"] = signals.provisional_clause_no
-    if signals.regex_subclause is None and signals.provisional_subclause_no is not None:
-        out["active_subclause_no"] = signals.provisional_subclause_no
-    if signals.centered:
-        out["centered"] = True
-    if signals.font_size is not None:
-        out["font_size"] = signals.font_size
-    if signals.bold is not None:
-        out["bold_ratio"] = round(signals.bold, 2)
-    return out
+        return {
+            "clause_no": None,
+            "subclause_no": None,
+            "active_clause_no": None,
+            "active_subclause_no": None,
+            "centered": None,
+            "font_size": None,
+            "bold_ratio": None,
+        }
+    return {
+        "clause_no": signals.regex_clause.value if signals.regex_clause is not None else None,
+        "subclause_no": (
+            signals.regex_subclause.value if signals.regex_subclause is not None else None
+        ),
+        "active_clause_no": (
+            signals.provisional_clause_no if signals.regex_clause is None else None
+        ),
+        "active_subclause_no": (
+            signals.provisional_subclause_no if signals.regex_subclause is None else None
+        ),
+        "centered": True if signals.centered else None,
+        "font_size": signals.font_size,
+        "bold_ratio": round(signals.bold, 2) if signals.bold is not None else None,
+    }
 
 
 def _build_worker_payload(
@@ -342,59 +390,21 @@ def _build_worker_payload(
 ) -> dict[str, Any]:
     paragraphs = doc_ir.paragraphs
     target = paragraphs[paragraph_idx]
-
-    left_idx = _nearest_non_empty_idx(paragraphs, paragraph_idx, -1)
-    right_idx = _nearest_non_empty_idx(paragraphs, paragraph_idx, +1)
-
-    budget = max(0, parser_config.context_neighbor_token_budget)
-    if left_idx is not None and right_idx is not None:
-        left_budget = budget // 2
-        right_budget = budget - left_budget
-    elif left_idx is not None:
-        left_budget = budget
-        right_budget = 0
-    else:
-        left_budget = 0
-        right_budget = budget
-
-    # Determine position and build context strings.
-    if left_idx is None:
-        prev_text = None
-        position = "start"
-    else:
-        prev_text, _ = _clip_to_budget(
-            paragraphs[left_idx].text,
-            budget=left_budget,
-            model=model,
-            keep_tail=True,
-        )
-
-    if right_idx is None:
-        next_text = None
-        position = "end" if left_idx is not None else "only"
-    else:
-        next_text, _ = _clip_to_budget(
-            paragraphs[right_idx].text,
-            budget=right_budget,
-            model=model,
-            keep_tail=False,
-        )
-
-    if left_idx is not None and right_idx is not None:
-        position = "middle"
+    position, prev_text, next_text = build_neighbor_context(
+        paragraphs,
+        paragraph_idx=paragraph_idx,
+        budget=max(0, parser_config.context_neighbor_token_budget),
+        model=model,
+    )
 
     payload: dict[str, Any] = {
-        "unit_id": target.unit_id,
-        "text": target.text,
         "position": position,
+        "signals": _compact_signals(target),
+        "unit_id": target.unit_id,
+        "prev": prev_text,
+        "next": next_text,
+        "text": target.text,
     }
-    signals = _compact_signals(target)
-    if signals:
-        payload["signals"] = signals
-    if prev_text is not None:
-        payload["prev"] = prev_text
-    if next_text is not None:
-        payload["next"] = next_text
     return payload
 
 
@@ -461,40 +471,12 @@ def _build_boundary_payload(
     paragraphs = doc_ir.paragraphs
     target = paragraphs[paragraph_idx]
     signals = target.parser_signals
-
-    left_idx = _nearest_non_empty_idx(paragraphs, paragraph_idx, -1)
-    right_idx = _nearest_non_empty_idx(paragraphs, paragraph_idx, +1)
-
-    budget = max(0, parser_config.context_neighbor_token_budget)
-    if left_idx is not None and right_idx is not None:
-        left_budget = budget // 2
-        right_budget = budget - left_budget
-    elif left_idx is not None:
-        left_budget = budget
-        right_budget = 0
-    else:
-        left_budget = 0
-        right_budget = budget
-
-    if left_idx is None:
-        prev_text = None
-    else:
-        prev_text, _ = _clip_to_budget(
-            paragraphs[left_idx].text,
-            budget=left_budget,
-            model=model,
-            keep_tail=True,
-        )
-
-    if right_idx is None:
-        next_text = None
-    else:
-        next_text, _ = _clip_to_budget(
-            paragraphs[right_idx].text,
-            budget=right_budget,
-            model=model,
-            keep_tail=False,
-        )
+    _, prev_text, next_text = build_neighbor_context(
+        paragraphs,
+        paragraph_idx=paragraph_idx,
+        budget=max(0, parser_config.context_neighbor_token_budget),
+        model=model,
+    )
 
     if block_start_idx == block_end_idx:
         position_in_block = "only"
@@ -506,78 +488,16 @@ def _build_boundary_payload(
         position_in_block = "middle"
 
     payload: dict[str, Any] = {
-        "unit_id": target.unit_id,
-        "text": target.text,
         "position_in_block": position_in_block,
         "active_clause_no": signals.provisional_clause_no,
         "active_subclause_no": signals.provisional_subclause_no,
         "paragraph_label": target.final_label,
+        "unit_id": target.unit_id,
+        "prev": prev_text,
+        "next": next_text,
+        "text": target.text,
     }
-    if prev_text is not None:
-        payload["prev"] = prev_text
-    if next_text is not None:
-        payload["next"] = next_text
     return payload
-
-
-def _iter_inherited_context_blocks(doc_ir: DocIR) -> list[tuple[int, int]]:
-    blocks: list[tuple[int, int]] = []
-    start_idx: int | None = None
-    active_context: tuple[str | None, str | None] | None = None
-
-    for idx, paragraph in enumerate(doc_ir.paragraphs):
-        signals = paragraph.parser_signals
-        has_direct_number = signals.regex_clause is not None or signals.regex_subclause is not None
-        context = (signals.provisional_clause_no, signals.provisional_subclause_no)
-        has_inherited_context = signals.provisional_clause_no is not None and not has_direct_number
-
-        if not has_inherited_context:
-            if start_idx is not None:
-                blocks.append((start_idx, idx - 1))
-                start_idx = None
-                active_context = None
-            continue
-
-        if start_idx is None:
-            start_idx = idx
-            active_context = context
-            continue
-
-        if context != active_context:
-            blocks.append((start_idx, idx - 1))
-            start_idx = idx
-            active_context = context
-
-    if start_idx is not None:
-        blocks.append((start_idx, len(doc_ir.paragraphs) - 1))
-
-    return blocks
-
-
-def _should_review_context_block(doc_ir: DocIR, start_idx: int, end_idx: int) -> bool:
-    last_non_empty_idx: int | None = None
-    for idx in range(end_idx, start_idx - 1, -1):
-        if (doc_ir.paragraphs[idx].text or "").strip():
-            last_non_empty_idx = idx
-            break
-
-    if last_non_empty_idx is None:
-        return False
-
-    if end_idx == len(doc_ir.paragraphs) - 1:
-        return True
-
-    last_label = doc_ir.paragraphs[last_non_empty_idx].final_label
-    return last_label not in {"body", "table_block", "table_cell"}
-
-
-def _clear_inherited_context(doc_ir: DocIR, start_idx: int, end_idx: int) -> None:
-    for idx in range(start_idx, end_idx + 1):
-        signals = doc_ir.paragraphs[idx].parser_signals
-        if signals.regex_clause is None:
-            signals.provisional_clause_no = None
-        if signals.regex_subclause is None:
-            signals.provisional_subclause_no = None
 
 
 def _trim_inherited_context_with_llm(
@@ -607,8 +527,8 @@ def _trim_inherited_context_with_llm(
     updated_doc = doc_ir.model_copy(deep=True)
     trimmed_ranges: list[str] = []
 
-    for start_idx, end_idx in _iter_inherited_context_blocks(updated_doc):
-        if not _should_review_context_block(updated_doc, start_idx, end_idx):
+    for start_idx, end_idx in iter_inherited_context_blocks(updated_doc):
+        if not should_review_context_block(updated_doc, start_idx, end_idx):
             continue
 
         clear_from: int | None = None
@@ -627,7 +547,8 @@ def _trim_inherited_context_with_llm(
             )
             messages = [
                 ("system", prompt_text),
-                ("user", json.dumps(payload, ensure_ascii=False)),
+                ("user", _BOUNDARY_PAYLOAD_PREAMBLE),
+                ("user", _serialize_payload(payload)),
             ]
             if parser_config.log_llm_io:
                 _log(
@@ -680,7 +601,7 @@ def _trim_inherited_context_with_llm(
             clear_from = idx
 
         if clear_from is not None:
-            _clear_inherited_context(updated_doc, clear_from, end_idx)
+            clear_inherited_context(updated_doc, clear_from, end_idx)
             trimmed_ranges.append(
                 f"{updated_doc.paragraphs[clear_from].unit_id}..{updated_doc.paragraphs[end_idx].unit_id}"
             )
@@ -716,7 +637,8 @@ def _paragraph_worker(state: ParserGraphState):
     )
     messages = [
         ("system", prompt_text),
-        ("user", json.dumps(payload, ensure_ascii=False)),
+        ("user", _WORKER_PAYLOAD_PREAMBLE),
+        ("user", _serialize_payload(payload)),
     ]
     if cfg.log_llm_io:
         _log(
@@ -817,12 +739,14 @@ def _reducer(state: ParserGraphState):
 _builder = StateGraph(ParserGraphState)
 _builder.add_node("prepare_runtime", _prepare_runtime)
 _builder.add_node("pre_label", _pre_label)
+_builder.add_node("warmup_llm", _warmup_llm)
 _builder.add_node("paragraph_worker", _paragraph_worker)
 _builder.add_node("reducer", _reducer)
 
 _builder.add_edge(START, "prepare_runtime")
 _builder.add_edge("prepare_runtime", "pre_label")
-_builder.add_conditional_edges("pre_label", _splitter, ["paragraph_worker", END])
+_builder.add_edge("pre_label", "warmup_llm")
+_builder.add_conditional_edges("warmup_llm", _splitter, ["paragraph_worker", END])
 _builder.add_edge("paragraph_worker", "reducer")
 _builder.add_edge("reducer", END)
 

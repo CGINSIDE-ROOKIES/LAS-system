@@ -20,8 +20,7 @@ from processor_types import DocIR
 from agent import ParserConfig, run_parser
 
 test_dir = Path("/home/maxjo/Work/LAS-system/apps/backend/doc_processor/tests")
-doc = DocIR.from_file(test_dir / "doc_samples/표준계약서모음(hwp-hwpx)" /
-        "02. 청소년 대중문화예술인 표준 부속합의서.hwpx"
+doc = DocIR.from_file("/home/maxjo/Work/LAS-system/apps/backend/doc_processor/tests/doc_samples/251029 2025년 3회 추경 사업설명서(평화협력국)_최종.hwpx"
 )
 
 with open(test_dir/"results/doc_base_test.json", "w+", encoding="utf-8") as f:

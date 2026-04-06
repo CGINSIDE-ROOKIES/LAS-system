@@ -28,6 +28,7 @@ class StubStructuredLLM:
         self.payloads: dict[str, dict] = {}
         self.boundary_payloads: dict[str, dict] = {}
         self.boundary_order: list[str] = []
+        self.warmup_calls = 0
 
     def with_structured_output(self, _schema, method=None):
         self.method = method
@@ -41,6 +42,16 @@ class StubStructuredLLM:
     def invoke(self, messages):
         payload = json.loads(messages[-1][1])
         unit_id = payload["unit_id"]
+        if unit_id == "_warmup":
+            self.warmup_calls += 1
+            return {
+                "unit_id": unit_id,
+                "status": "ok",
+                "label": "body",
+                "candidate_labels": ["body"],
+                "reason": "warmup",
+                "ops": [],
+            }
         if "position_in_block" in payload:
             self.boundary_payloads[unit_id] = payload
             self.boundary_order.append(unit_id)
@@ -101,6 +112,24 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(out.paragraphs[0].final_label, "clause")
         # s1.p2 resolved by LLM
         self.assertEqual(out.paragraphs[1].final_label, "body")
+
+    def test_llm_warmup_runs_before_worker_fanout(self) -> None:
+        doc_ir = DocIR.from_mapping(
+            {
+                "s1.p1.r1": "제1조 (목적)",
+                "s1.p2.r1": "본문 문장",
+            }
+        )
+        llm = StubStructuredLLM()
+
+        run_parser(
+            doc_ir,
+            llm_model=llm,
+            prompt_text="test prompt",
+        )
+
+        self.assertEqual(llm.warmup_calls, 1)
+        self.assertIn("s1.p2", llm.payloads)
 
     def test_rule_prelabel_clause_subclause(self) -> None:
         """Clause and subclause are resolved by rules, not LLM."""
@@ -205,8 +234,8 @@ class ParserTests(unittest.TestCase):
         p2_payload = llm.payloads["s1.p2"]
         # New format: flat strings with position
         self.assertEqual(p2_payload["position"], "start")  # p1 is whitespace-only → no prev
-        self.assertNotIn("prev", p2_payload)
-        self.assertIn("next", p2_payload)  # p4 is right context
+        self.assertIsNone(p2_payload["prev"])
+        self.assertIsNotNone(p2_payload["next"])  # p4 is right context
 
     def test_payload_includes_active_numbering_context(self) -> None:
         doc_ir = DocIR.from_mapping(
