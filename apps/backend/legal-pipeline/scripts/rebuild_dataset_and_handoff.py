@@ -17,7 +17,10 @@ from src.export.dataset_validation import validate_appendix_merge_outputs
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Rebuild dataset and optional Qdrant handoff from existing raw/normalized files"
+        description=(
+            "Rebuild dataset and optional Qdrant handoff from existing raw/normalized files "
+            "(current embedding targets: law_article, legal_case)"
+        )
     )
     parser.add_argument("--base-dir", default="data")
     parser.add_argument("--skip-embed", action="store_true")
