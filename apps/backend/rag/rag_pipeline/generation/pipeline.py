@@ -148,6 +148,7 @@ class RagPipeline:
                     opensearch_api_key=os.getenv("OPENSEARCH_API_KEY") or None,
                     opensearch_username=os.getenv("OPENSEARCH_USERNAME") or None,
                     opensearch_password=os.getenv("OPENSEARCH_PASSWORD") or None,
+                    opensearch_search_text_field=os.getenv("OPENSEARCH_SEARCH_TEXT_FIELD", "search_text"),
                     embedding_model=os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
                     embedding_provider=os.getenv("EMBEDDING_PROVIDER", "sentence_transformers"),
                     embedding_api_key=os.getenv("OPENAI_API_KEY") or None,
@@ -232,6 +233,7 @@ class RagPipeline:
                 law_names=law_names,
                 dedup=True,
                 fetch_multiplier=5,
+                search_text_field=rcfg.opensearch_search_text_field,
             )
 
         qdrant_futures = [

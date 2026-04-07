@@ -21,6 +21,7 @@ class RetrievalConfig:
     opensearch_api_key: str | None = None
     opensearch_username: str | None = None
     opensearch_password: str | None = None
+    opensearch_search_text_field: str = "search_text"
     embedding_model: str = DEFAULT_EMBEDDING_MODEL
     embedding_provider: str = "sentence_transformers"
     embedding_api_key: str | None = None
@@ -37,4 +38,3 @@ class RetrievalConfig:
     min_law_contexts: int = 1
     max_content_chars: int = 1200
     max_total_chars: int = 6000
-
