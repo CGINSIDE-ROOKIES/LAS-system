@@ -17,7 +17,17 @@ from .context import build_llm_context_rows, build_llm_context_text
 from .fusion import fuse_rrf
 from .opensearch import search_bm25
 from .qdrant import search_qdrant
-from .ranking import apply_law_boost, is_normative_query, rank_rows, select_llm_rows, select_rows_with_law_policy
+from .ranking import (
+    LAW_CONTEXT_CASE_ONLY,
+    LAW_CONTEXT_MISSING,
+    LAW_CONTEXT_OK,
+    LAW_CONTEXT_SUPPLEMENTED,
+    apply_law_boost,
+    is_normative_query,
+    rank_rows,
+    select_llm_rows,
+    select_rows_with_law_policy,
+)
 from .service import RetrievalConfig
 
 __all__ = [
@@ -27,6 +37,10 @@ __all__ = [
     "LLMTimeoutError",
     "RetrievalConfig",
     "RetrievalError",
+    "LAW_CONTEXT_OK",
+    "LAW_CONTEXT_MISSING",
+    "LAW_CONTEXT_SUPPLEMENTED",
+    "LAW_CONTEXT_CASE_ONLY",
     "UpstreamHTTPError",
     "UpstreamNetworkError",
     "UpstreamTimeoutError",

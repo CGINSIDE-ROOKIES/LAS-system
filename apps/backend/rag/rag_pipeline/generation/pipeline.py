@@ -20,7 +20,13 @@ from ..retrieval.context import build_llm_context_rows, build_llm_context_text, 
 from ..retrieval.fusion import fuse_rrf, fuse_rrf_multi
 from ..retrieval.opensearch import search_bm25
 from ..retrieval.qdrant import search_qdrant_with_vector
-from ..retrieval.ranking import apply_law_boost, select_rows_with_law_policy
+from ..retrieval.ranking import (
+    LAW_CONTEXT_CASE_ONLY,
+    LAW_CONTEXT_MISSING,
+    LAW_CONTEXT_SUPPLEMENTED,
+    apply_law_boost,
+    select_rows_with_law_policy,
+)
 from ..retrieval.service import RetrievalConfig
 from .service import GenerationConfig, GenerationService
 
@@ -60,7 +66,7 @@ class RagResult:
 
     answer: str
     retrieved_docs: list[dict[str, Any]]  # 컨텍스트에 사용된 문서 목록
-    law_context_status: str               # "ok" | "missing" | "supplemented" | "case_only"
+    law_context_status: str               # ranking.LAW_CONTEXT_* 상수 중 하나
 
 
 # ── 프롬프트 빌더 ─────────────────────────────────────────────────────────────
@@ -74,14 +80,14 @@ def build_user_prompt_with_limit(
 ) -> str:
     """system_prompt를 제외한 user 메시지 본문(컨텍스트 + 질문)을 조립한다."""
     status_line = ""
-    if law_context_status == "missing":
+    if law_context_status == LAW_CONTEXT_MISSING:
         status_line = (
             "중요: 현재 검색 결과에서 법령(law) 근거가 충분하지 않습니다.\n"
             "확정적 결론 대신 근거 부족을 명시하고, 확인 가능한 범위만 답변하세요.\n\n"
         )
-    elif law_context_status == "supplemented":
+    elif law_context_status == LAW_CONTEXT_SUPPLEMENTED:
         status_line = "참고: 법령(law) 문서를 보강한 컨텍스트로 답변합니다.\n\n"
-    elif law_context_status == "case_only":
+    elif law_context_status == LAW_CONTEXT_CASE_ONLY:
         status_line = "참고: 현재 검색 결과에 법령 조문이 없고 판례·해석례만 포함되어 있습니다.\n조문 근거 없이 판례 중심으로 답변하세요.\n\n"
 
     prefix = (
@@ -252,7 +258,12 @@ class RagPipeline:
                 logger.warning("BM25 검색 실패로 스킵: %s", exc)
                 bm25_rows = []
 
-        qdrant_rows = fuse_rrf_multi(collection_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
+        qdrant_rows = fuse_rrf_multi(
+            collection_rows,
+            rrf_k=rcfg.rrf_k,
+            top_k=candidate_k,
+            backend_names=rcfg.qdrant_collections,
+        )
 
         # candidate_k 전체를 융합해야 law 보강 시 top_k 바깥 문서를 참조할 수 있음
         rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
