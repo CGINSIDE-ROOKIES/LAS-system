@@ -118,6 +118,7 @@ class AskResponse(BaseModel):
     answer: str
     retrieved_docs: list[RetrievedDoc]
     law_context_status: str
+    qa_id: str | None = None
 
 
 @router.get("/history")
@@ -131,15 +132,18 @@ def history(
     conn: psycopg2.extensions.connection = Depends(get_db),
 ):
     """Q&A 히스토리 목록을 반환합니다."""
-    return get_history(
-        conn,
-        q=q,
-        session_id=session_id,
-        date_from=date_from,
-        date_to=date_to,
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        return get_history(
+            conn,
+            q=q,
+            session_id=session_id,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 class BulkDeleteRequest(BaseModel):
@@ -228,9 +232,10 @@ def ask(
         law_names=effective_law_names,
         intent=parsed.intent,
     )
+    qa_id: str | None = None
     if result.answer.strip():
         try:
-            save_qa(
+            qa_id = save_qa(
                 conn,
                 question=request.question,
                 answer=result.answer,
@@ -245,6 +250,7 @@ def ask(
         answer=result.answer,
         retrieved_docs=[RetrievedDoc(**doc) for doc in result.retrieved_docs],
         law_context_status=result.law_context_status,
+        qa_id=qa_id,
     )
 
 
