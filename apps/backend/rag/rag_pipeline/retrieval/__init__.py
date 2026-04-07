@@ -13,7 +13,12 @@ from .common import (
     UpstreamNetworkError,
     UpstreamTimeoutError,
 )
-from .context import build_llm_context_rows, build_llm_context_text
+from .context import (
+    build_llm_context_rows,
+    build_llm_context_text,
+    clean_content,
+    truncate_on_semantic_boundary,
+)
 from .fusion import fuse_rrf
 from .opensearch import search_bm25
 from .qdrant import search_qdrant
@@ -47,6 +52,7 @@ __all__ = [
     "apply_law_boost",
     "build_llm_context_rows",
     "build_llm_context_text",
+    "clean_content",
     "dedup_normalized_rows",
     "embed_query",
     "fuse_rrf",
@@ -57,4 +63,5 @@ __all__ = [
     "search_bm25",
     "search_qdrant",
     "select_llm_rows",
+    "truncate_on_semantic_boundary",
 ]
