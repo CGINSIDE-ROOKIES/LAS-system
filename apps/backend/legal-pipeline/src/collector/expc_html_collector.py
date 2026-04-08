@@ -48,7 +48,9 @@ def hydrate_expc_related_prec_ids(
     total = 0
     fetched = 0
     skipped = 0
+    reused = 0
     errors: list[str] = []
+    cached_prec_ids_by_expc_seq: dict[str, list[str]] = {}
 
     for jsonl_path in sorted(base.rglob("canonical_cases.jsonl")):
         canonical_dir = jsonl_path.parent / "canonical" / "expc"
@@ -87,7 +89,15 @@ def hydrate_expc_related_prec_ids(
                 continue
 
             try:
-                prec_ids = fetch_expc_related_prec_ids(expc_seq, timeout=timeout)
+                if expc_seq in cached_prec_ids_by_expc_seq:
+                    prec_ids = cached_prec_ids_by_expc_seq[expc_seq]
+                    reused += 1
+                else:
+                    prec_ids = fetch_expc_related_prec_ids(expc_seq, timeout=timeout)
+                    cached_prec_ids_by_expc_seq[expc_seq] = prec_ids
+                    fetched += 1
+                    if rate_limit_sec > 0:
+                        time.sleep(rate_limit_sec)
                 sidecar.write_text(
                     json.dumps(
                         {"expc_seq": expc_seq, "related_prec_ids": prec_ids},
@@ -95,17 +105,16 @@ def hydrate_expc_related_prec_ids(
                     ),
                     encoding="utf-8",
                 )
-                fetched += 1
             except Exception as exc:
                 errors.append(f"{canonical_case_id}: {exc}")
 
             total += 1
-            if rate_limit_sec > 0:
-                time.sleep(rate_limit_sec)
 
     return {
         "total_expc": total,
         "fetched": fetched,
+        "reused_cached_fetch": reused,
+        "unique_expc_seq_fetched": len(cached_prec_ids_by_expc_seq),
         "skipped_existing": skipped,
         "error_count": len(errors),
         "errors": errors[:20],
