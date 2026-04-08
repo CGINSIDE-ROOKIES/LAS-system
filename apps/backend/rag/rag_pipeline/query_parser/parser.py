@@ -37,8 +37,8 @@ _SYSTEM_PROMPT = """\
 
 _VALID_INTENTS = frozenset({"normative", "case_law", "mixed"})
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
-_JSON_BARE_RE = re.compile(r"\{.*?\}", re.DOTALL)
 _ARTICLE_PREFIX_RE = re.compile(r"^\d")
+_ARTICLE_NO_RE = re.compile(r"^\s*제?\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*$")
 
 
 @dataclass
@@ -111,9 +111,19 @@ def _extract_json(text: str) -> dict:
     m = _JSON_BLOCK_RE.search(text)
     if m:
         return json.loads(m.group(1))
-    m = _JSON_BARE_RE.search(text)
-    if m:
-        return json.loads(m.group(0))
+
+    # 코드펜스가 없으면 문자열 내 첫 JSON object를 안전하게 스캔한다.
+    # 정규식 r"\{.*?\}"는 중첩 객체가 있거나 본문에 중괄호가 섞이면 오검출되기 쉬워 JSONDecoder.raw_decode로 순차 파싱한다.
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(text[i:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
     raise ValueError(f"JSON을 찾을 수 없습니다: {text!r}")
 
 
@@ -137,8 +147,18 @@ def _normalize_article_no(raw: object) -> str:
     if not isinstance(raw, str):
         return ""
     raw = raw.strip()
-    if raw and _ARTICLE_PREFIX_RE.match(raw):
-        raw = f"제{raw}"
+    if not raw:
+        return ""
+
+    m = _ARTICLE_NO_RE.match(raw)
+    if m:
+        article_no = m.group(1)
+        sub_no = m.group(2)
+        return f"제{article_no}조의{sub_no}" if sub_no else f"제{article_no}조"
+
+    if _ARTICLE_PREFIX_RE.match(raw):
+        # 최소 정규화 fallback: 숫자로 시작하면 제 접두어를 붙인다.
+        return f"제{raw}"
     return raw
 
 
@@ -160,6 +180,8 @@ class QueryParser:
     def __init__(self, config: QueryParserConfig) -> None:
         self._cfg = config
         self._system_prompt = _build_system_prompt()
+        # API 키가 없으면 매 요청마다 외부 호출이 실패하므로, 1회 경고 후 즉시 fallback한다.
+        self._api_key_missing_warned = False
 
     @classmethod
     def from_env(cls) -> QueryParser:
@@ -173,7 +195,25 @@ class QueryParser:
         strict_mode=True: 파싱 실패 시 예외 raise.
         """
         cfg = self._cfg
+        raw_text = ""
+
+        if not cfg.api_key:
+            if cfg.strict_mode:
+                raise ValueError("GEMINI_API_KEY가 비어 있습니다.")
+            if not self._api_key_missing_warned:
+                logger.warning("query_parser fallback: GEMINI_API_KEY 미설정으로 파서를 건너뜁니다.")
+                self._api_key_missing_warned = True
+            return QueryParseResult(
+                law_names=[],
+                article_no="",
+                intent=None,
+                is_legal=True,
+                parser_fallback=True,
+            )
+
         try:
+            # QueryParser는 현재 동기 LLM 클라이언트(generate_answer)를 사용한다.
+            # API 라우터도 sync endpoint로 동작해 일관성을 유지한다.
             raw_text = generate_answer(
                 _build_prompt(query),
                 provider="gemini",
@@ -196,8 +236,8 @@ class QueryParser:
             if cfg.strict_mode:
                 raise
             logger.warning(
-                "query_parser fallback: parser_fallback=true query=%r error=%s",
-                query[:80], exc,
+                "query_parser fallback: parser_fallback=true query=%r error=%s raw_text=%r",
+                query[:80], exc, raw_text[:240],
             )
             return QueryParseResult(
                 law_names=[],

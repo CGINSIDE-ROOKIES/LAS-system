@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
+import socket
+import threading
 import urllib.error
 import urllib.request
 from typing import Any
@@ -20,9 +21,11 @@ from typing import Any
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-large"
 DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1"
+# snippet 길이 상수는 qdrant/opensearch 정규화 모듈에서 공통으로 사용한다.
 SNIPPET_MAX_LEN = 180
 
 _MODEL_CACHE: dict[str, Any] = {}
+_MODEL_CACHE_LOCK = threading.RLock()
 
 
 def is_embedding_model_cached(model_name: str, provider: str = "sentence_transformers") -> bool:
@@ -32,7 +35,8 @@ def is_embedding_model_cached(model_name: str, provider: str = "sentence_transfo
     """
     if provider == "openai":
         return True
-    return model_name in _MODEL_CACHE
+    with _MODEL_CACHE_LOCK:
+        return model_name in _MODEL_CACHE
 
 
 class RetrievalError(Exception):
@@ -40,6 +44,70 @@ class RetrievalError(Exception):
 
     서비스 레이어에서 발생시키고, CLI 진입점(main)에서만 SystemExit으로 변환한다.
     """
+
+
+class UpstreamHTTPError(RetrievalError):
+    """외부 HTTP API가 4xx/5xx를 반환했을 때 발생한다."""
+
+    def __init__(
+        self,
+        *,
+        method: str,
+        url: str,
+        status_code: int,
+        body: str,
+    ) -> None:
+        body_preview = _safe_http_body_preview(body)
+        super().__init__(f"HTTP {status_code} {method} {url}\n{body_preview}")
+        self.method = method
+        self.url = url
+        self.status_code = status_code
+        self.body = body_preview
+
+
+class UpstreamNetworkError(RetrievalError):
+    """외부 API 네트워크 오류."""
+
+
+class UpstreamTimeoutError(UpstreamNetworkError):
+    """외부 API 타임아웃 오류."""
+
+
+class EmbeddingError(RetrievalError):
+    """임베딩 단계 오류."""
+
+
+class LLMError(RetrievalError):
+    """LLM 호출/응답 처리 오류."""
+
+
+class LLMTimeoutError(LLMError):
+    """LLM 호출 타임아웃 오류."""
+
+
+def _is_timeout_like(exc: object) -> bool:
+    """예외 객체가 타임아웃 성격인지 판별한다."""
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return True
+    text = str(exc).lower()
+    return "timed out" in text or "timeout" in text
+
+
+def _safe_http_body_preview(body: str, max_chars: int = 1200) -> str:
+    """HTTP 오류 본문을 로그/에러 메시지용으로 축약한다."""
+    normalized = re.sub(r"\s+", " ", body).strip()
+    if len(normalized) <= max_chars:
+        return normalized
+    return f"{normalized[:max_chars]}... [truncated]"
+
+
+def _sha1_hex(data: bytes) -> str:
+    """중복 판별용 SHA-1 해시(FIPS 환경 호환)."""
+    try:
+        h = hashlib.sha1(data, usedforsecurity=False)  # type: ignore[call-arg]
+    except TypeError:
+        h = hashlib.sha1(data)
+    return h.hexdigest()
 
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
@@ -54,6 +122,7 @@ def http_json(
     """JSON payload를 전송하고 응답 JSON을 반환하는 범용 HTTP 클라이언트.
 
     외부 라이브러리(requests 등) 없이 표준 라이브러리만 사용한다.
+    현재 retrieval 레이어는 동기 아키텍처이므로 이 함수도 동기 블로킹 I/O로 동작한다.
 
     Raises:
         RetrievalError: HTTP 오류(4xx/5xx) 또는 네트워크 오류 발생 시.
@@ -72,9 +141,18 @@ def http_json(
             return json.loads(raw) if raw.strip() else {}
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
-        raise RetrievalError(f"HTTP {exc.code} {method} {url}\n{body}") from exc
+        raise UpstreamHTTPError(
+            method=method,
+            url=url,
+            status_code=int(exc.code),
+            body=body,
+        ) from exc
     except urllib.error.URLError as exc:
-        raise RetrievalError(f"Network error {method} {url}: {exc}") from exc
+        if _is_timeout_like(getattr(exc, "reason", None)) or _is_timeout_like(exc):
+            raise UpstreamTimeoutError(f"Timeout {method} {url}: {exc}") from exc
+        raise UpstreamNetworkError(f"Network error {method} {url}: {exc}") from exc
+    except TimeoutError as exc:
+        raise UpstreamTimeoutError(f"Timeout {method} {url}: {exc}") from exc
 
 
 # ── 임베딩 ────────────────────────────────────────────────────────────────────
@@ -94,11 +172,14 @@ def _embed_query_openai(
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
     }
-    res = http_json("POST", f"{api_base_url}/embeddings", payload, headers, timeout=30)
+    try:
+        res = http_json("POST", f"{api_base_url}/embeddings", payload, headers, timeout=30)
+    except RetrievalError as exc:
+        raise EmbeddingError(f"OpenAI 임베딩 호출 실패: {exc}") from exc
     try:
         return list(res["data"][0]["embedding"])
     except (KeyError, IndexError, TypeError) as exc:
-        raise RetrievalError(f"OpenAI 임베딩 응답 파싱 실패: {exc}\n응답: {res}") from exc
+        raise EmbeddingError(f"OpenAI 임베딩 응답 파싱 실패: {exc}\n응답: {res}") from exc
 
 
 def embed_query(
@@ -118,60 +199,67 @@ def embed_query(
     Raises:
         RetrievalError: 패키지 미설치, 빈 텍스트, API 오류 시.
     """
-    if isinstance(text, str):
-        query_text = text.strip()
-    elif isinstance(text, (list, tuple)):
-        query_text = " ".join(str(x) for x in text if x is not None).strip()
-    else:
-        query_text = str(text).strip()
+    if not isinstance(text, str):
+        raise EmbeddingError(f"질문 텍스트는 문자열이어야 합니다. 현재 타입: {type(text).__name__}")
+    query_text = text.strip()
 
     if not query_text:
-        raise RetrievalError("질문 텍스트가 비어 있습니다.")
+        raise EmbeddingError("질문 텍스트가 비어 있습니다.")
 
     if provider == "openai":
         if not api_key:
-            raise RetrievalError("OpenAI 임베딩 사용 시 api_key가 필요합니다.")
+            raise EmbeddingError("OpenAI 임베딩 사용 시 api_key가 필요합니다.")
         return _embed_query_openai(query_text, model_name, api_key, api_base_url, dimensions)
 
     # sentence_transformers
     try:
         from sentence_transformers import SentenceTransformer
     except Exception as exc:
-        raise RetrievalError(
+        raise EmbeddingError(
             "sentence-transformers가 필요합니다.\n설치: uv add sentence-transformers"
         ) from exc
 
-    model = _MODEL_CACHE.get(model_name)
+    with _MODEL_CACHE_LOCK:
+        model = _MODEL_CACHE.get(model_name)
     if model is None:
         try:
             model = SentenceTransformer(model_name)
         except Exception as exc:
-            raise RetrievalError(
+            raise EmbeddingError(
                 "임베딩 모델 로드 실패: EMBEDDING_MODEL/네트워크 상태를 확인하세요.\n"
                 f"현재 EMBEDDING_MODEL={model_name}\n"
                 f"원인: {type(exc).__name__}: {exc}"
             ) from exc
-        _MODEL_CACHE[model_name] = model
+        with _MODEL_CACHE_LOCK:
+            _MODEL_CACHE[model_name] = model
 
-    query_text = str(query_text)
     try:
         vec = model.encode([query_text], normalize_embeddings=True)
-    except TypeError:
+    except TypeError as first_exc:
         # 간헐적 tokenizer 타입 오류 대응: 모델 재로딩 후 1회 재시도
-        _MODEL_CACHE.pop(model_name, None)
+        with _MODEL_CACHE_LOCK:
+            _MODEL_CACHE.pop(model_name, None)
         try:
             model = SentenceTransformer(model_name)
-            _MODEL_CACHE[model_name] = model
+            with _MODEL_CACHE_LOCK:
+                _MODEL_CACHE[model_name] = model
             vec = model.encode(
                 [query_text.replace("\x00", " ").strip()],
                 normalize_embeddings=True,
             )
         except Exception as retry_exc:
-            raise RetrievalError(
+            raise EmbeddingError(
                 "임베딩 모델 토크나이징 실패: EMBEDDING_MODEL이 문장 임베딩용 모델인지 확인하세요.\n"
                 f"현재 EMBEDDING_MODEL={model_name}\n"
+                f"1차 오류: {type(first_exc).__name__}: {first_exc}\n"
                 f"원인: {type(retry_exc).__name__}: {retry_exc}"
             ) from retry_exc
+    except Exception as exc:
+        raise EmbeddingError(
+            "임베딩 생성 실패: model.encode 호출 중 예외가 발생했습니다.\n"
+            f"현재 EMBEDDING_MODEL={model_name}\n"
+            f"원인: {type(exc).__name__}: {exc}"
+        ) from exc
 
     if hasattr(vec, "tolist"):
         arr = vec.tolist()
@@ -195,7 +283,7 @@ def normalize_source_id(source_id: str) -> str:
 def _fallback_text_key(text: str) -> str:
     """source_id가 없을 때 텍스트 앞 800자의 SHA-1 해시를 중복 판별 키로 사용한다."""
     text_norm = re.sub(r"\s+", " ", text).strip().lower()
-    digest = hashlib.sha1(text_norm[:800].encode("utf-8")).hexdigest()
+    digest = _sha1_hex(text_norm[:800].encode("utf-8"))
     return f"text::{digest}"
 
 
