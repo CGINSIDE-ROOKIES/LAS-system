@@ -1133,6 +1133,7 @@ def build_relation_records(
     expanded_base_dir: str | Path = "data/expanded/03_expanded_related_docs",
     normalized_base_dir: str | Path | None = None,
     include_law_to_law_relations: bool = True,
+    include_case_to_case_relations: bool = True,
 ) -> list[dict[str, Any]]:
     from src.export.legal_relation_builder import build_legal_relation_records
     from src.export.law_to_law_relation_builder import build_law_to_law_relation_records
@@ -1149,6 +1150,13 @@ def build_relation_records(
 
     if include_law_to_law_relations and normalized_base_dir is not None:
         records.extend(build_law_to_law_relation_records(normalized_base_dir=normalized_base_dir))
+
+    if include_case_to_case_relations:
+        from src.export.legal_case_relation_builder import build_case_to_case_relation_records
+        records.extend(build_case_to_case_relation_records(
+            raw_related_base_dir=raw_related_base_dir,
+            skip_source_targets={"decc"},
+        ))
 
     records.sort(key=lambda row: str(row.get("id") or ""))
     return records
@@ -1260,9 +1268,16 @@ def build_and_write_datasets(
         ),
     }
 
+    case_to_case_count = sum(1 for r in relation_records if r.get("relation_model") == "case_to_case")
+    law_to_law_count = sum(1 for r in relation_records if r.get("relation_model") == "law_to_law")
+    law_to_case_count = sum(1 for r in relation_records if r.get("relation_model") == "law_to_case")
+
     manifest = {
         "legal_corpus_count": len(legal_corpus_records),
         "legal_relations_count": len(relation_records),
+        "law_to_case_count": law_to_case_count,
+        "law_to_law_count": law_to_law_count,
+        "case_to_case_count": case_to_case_count,
         "law_record_count": len(law_records),
         "related_doc_record_count": len(related_records),
         "case_reference_audit_manifest": case_reference_audit_manifest,

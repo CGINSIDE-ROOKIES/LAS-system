@@ -280,9 +280,16 @@ def parse_case_payload(
     )
     structured_article_refs = extract_structured_article_refs(target, payload)
 
+    body_type = "text"
+    if len(body_text) < 100:
+        raw_html = str(payload.get("text") or payload.get("html") or "")
+        if "<img" in raw_html.lower():
+            body_type = "image_only"
+
     return {
         **meta,
         "body_text": body_text,
+        "body_type": body_type,
         "body_sections": body_sections,
         "structured_case_refs": structured_case_refs,
         "structured_article_refs": structured_article_refs,
