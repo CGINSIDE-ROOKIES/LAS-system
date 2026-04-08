@@ -77,7 +77,7 @@ export async function deleteHistoryItems(ids: string[]): Promise<{ deleted: numb
 export interface AskRequest {
   question: string;
   doc_types?: string[];
-  law_names?: string[];
+  law_filter?: string[];
 }
 
 export interface RetrievedDoc {

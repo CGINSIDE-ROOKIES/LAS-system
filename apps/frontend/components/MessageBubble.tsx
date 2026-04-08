@@ -13,6 +13,8 @@ export interface ChatMessage {
     citations: { article: string; content: string }[];
     references: string[];
     isIrrelevant?: boolean;
+    lawContextStatus?: string;
+    lawFilterActive?: boolean;
   };
 }
 
