@@ -1,7 +1,9 @@
 # AI Legal Support System (LAS) Monorepo
 
-AI 기반 법무지원 시스템 프로젝트입니다.
-주요 법령에 대한 질의응답(Q&A), 계약서 법률 검토, 계약서 초안 작성 기능을 제공하는 PoC(Proof of Concept) 시스템을 목표로 합니다.
+AI 기반 법무지원 시스템 프로젝트입니다.  
+주요 법령 및 관련 문서를 기반으로 **질의응답(Q&A)**, **계약서 법률 검토**, **계약서 초안 작성** 기능을 제공합니다.
+
+<br>
 
 ## Overview
 
@@ -10,6 +12,27 @@ AI 기반 법무지원 시스템 프로젝트입니다.
 
 또한 계약서 업로드를 통해 법률 검토를 수행하고,
 빈 양식과 입력 정보를 바탕으로 계약서 초안을 자동 작성하는 기능을 포함합니다.
+
+<br>
+
+## Key Features
+
+- 법령 및 관련 문서 기반 질의응답 (Q&A)
+- 하이브리드 검색 (Vector + Keyword + RRF)
+- 답변 근거 조문/출처 제공
+- Q&A 이력 저장 및 조회
+- 계약서 업로드 및 법률 검토
+- 계약서 초안 자동 작성
+
+<br>
+
+## System Structure
+```
+User → Frontend → Backend(API) → RAG Pipeline
+├─ Vector Search (Qdrant)
+├─ Keyword Search (OpenSearch)
+└─ LLM Generation
+```
 
 ## Monorepo Structure
 
@@ -21,14 +44,7 @@ AI 기반 법무지원 시스템 프로젝트입니다.
 - `packages/eslint-config`: 프론트 공유 ESLint 설정
 - `packages/tsconfig`: 프론트 공유 TypeScript 설정
 
-## Key Features
-
-- 법령 및 관련 문서 기반 질의응답
-- 하이브리드 검색(Vector + Keyword)
-- 답변 근거 조문/출처 제공
-- Q&A 이력 저장 및 조회
-- 계약서 업로드 및 법률 검토
-- 계약서 초안 자동 작성
+<br>
 
 ## Scope
 
@@ -44,24 +60,18 @@ AI 기반 법무지원 시스템 프로젝트입니다.
 - 하도급계약서
 - HWP / HWPX / DOC / DOCX / PDF 문서
 
+<br>
+
 ## Tech Stack
 
-### Backend
-- FastAPI
+| Category        | Technology                          |
+|----------------|------------------------------------|
+| Backend        | FastAPI                            |
+| Frontend       | Next.js                            |
+| Search / Data  | Qdrant, OpenSearch, PostgreSQL, Neo4j |
+| LLM            | OpenAI API, Google Gemini API, KT midm API (예정) |
 
-### Frontend
-- Next.js
-
-### Search / Data
-- Qdrant
-- OpenSearch
-- PostgreSQL
-- Neo4j
-
-### LLM
-- OpenAI API
-- Google Gemini API
-- KT midm API (도입 예정)
+<br>
 
 ## Docs
 
@@ -70,6 +80,8 @@ AI 기반 법무지원 시스템 프로젝트입니다.
 - API 서버 실행/엔드포인트: `apps/backend/api/README.md`
 - RAG 파이프라인 CLI/인덱싱: `apps/backend/rag/README.md`
 - 법령 데이터 파이프라인: `apps/backend/legal-pipeline/README.md`
+
+<br>
 
 ## Quick Start
 
