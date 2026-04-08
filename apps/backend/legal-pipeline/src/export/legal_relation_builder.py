@@ -298,6 +298,7 @@ def build_root_relation_payloads(
         if article_refs and "related_law" in relation_rules:
             relation_types.append("related_law")
 
+        body_verified = bool(law_name in matched_law_names or article_refs or has_structured_article_ref)
         relation_types = list(dict.fromkeys(relation_types))
         source_law_uid = str(hits[0].get("source_law_uid") or build_law_uid(None, None, law_name))
         preview_anchor = law_name if law_name in matched_law_names else (referenced_case_numbers[0] if referenced_case_numbers else None)
@@ -348,7 +349,8 @@ def build_root_relation_payloads(
             "article_keys": article_keys,
             "article_no_displays": article_no_displays,
             "article_reference_sources": article_reference_sources,
-            "relation_confidence": _confidence(article_refs, matched_law_names, law_name, has_structured_article_ref),
+            "body_verified": body_verified,
+            "relation_confidence": _confidence(article_refs, matched_law_names, law_name, has_structured_article_ref) if body_verified else 0.45,
             "evidence_preview": evidence_preview,
             "display_text": _display_text(evidence_preview or body_text),
             "source_hit_count": len(hits),
@@ -430,6 +432,49 @@ def _merge_relation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 
+_LAW_LEVEL_RANK = {"법": 0, "시행령": 1, "시행규칙": 2}
+
+
+def _classify_law_level(law_name: str | None) -> str:
+    name = str(law_name or "")
+    if "시행규칙" in name:
+        return "시행규칙"
+    if "시행령" in name:
+        return "시행령"
+    return "법"
+
+
+def _dedup_family_search_hits(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """search_hit만 가진 레코드 중 법령 패밀리 중복을 제거한다.
+
+    같은 (canonical_case_id, root_law_uid) 내에서 cited_law/related_law가 있는
+    법령은 유지하고, search_hit만 있는 법령 중 최상위(법>시행령>시행규칙)만 남긴다.
+    """
+    keep: list[dict[str, Any]] = []
+    search_hit_only: dict[tuple[str, str], list[dict[str, Any]]] = {}
+
+    for row in rows:
+        types = row.get("relation_types") or []
+        has_strong = any(t in types for t in ("cited_law", "related_law"))
+        if has_strong or row.get("relation_model") != "law_to_case":
+            keep.append(row)
+            continue
+        case_id = str(row.get("canonical_case_id") or row.get("canonical_id") or "").strip()
+        root_uid = str(row.get("root_law_uid") or "").strip()
+        key = (case_id, root_uid)
+        search_hit_only.setdefault(key, []).append(row)
+
+    for group_rows in search_hit_only.values():
+        if len(group_rows) <= 1:
+            keep.extend(group_rows)
+            continue
+        group_rows.sort(key=lambda r: _LAW_LEVEL_RANK.get(_classify_law_level(r.get("source_law_name")), 99))
+        keep.append(group_rows[0])
+
+    keep.sort(key=lambda r: str(r.get("id") or ""))
+    return keep
+
+
 def build_legal_relation_records(
     expanded_base_dir: str | Path = "data/expanded/03_expanded_related_docs",
     raw_related_base_dir: str | Path | None = None,
@@ -457,7 +502,7 @@ def build_legal_relation_records(
                     )
                 )
 
-            return _merge_relation_rows(built_rows)
+            return _dedup_family_search_hits(_merge_relation_rows(built_rows))
 
     expanded_dir = Path(expanded_base_dir)
     if raw_related_base_dir is not None and expanded_dir == Path("data/expanded/03_expanded_related_docs"):
