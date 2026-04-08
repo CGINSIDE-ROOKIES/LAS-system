@@ -270,6 +270,8 @@ def build_root_relation_payloads(
         payload = _load_detail_payload(canonical_row or {})
         parsed = parse_case_payload(target, payload or {}, fallback=canonical_row or hits[0])
         body_text = str(parsed.get("body_text") or "").strip()
+        if str(parsed.get("body_type") or "").strip() == "image_only":
+            body_text = ""
 
         family_law_names = sorted(
             {

@@ -5,6 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from src.common.io_utils import _safe_filename
 from src.export.legal_case_dataset_builder import (
     _iter_canonical_case_rows,
     _load_detail_payload,
@@ -105,7 +106,7 @@ def _load_expc_related_prec_ids(row: dict[str, Any], base_dir: Path) -> list[str
     ).strip()
     if not canonical_case_id:
         return []
-    root_dir = row.get("root_law_name", "").replace(" ", "_")
+    root_dir = _safe_filename(str(row.get("root_law_name") or ""))
     safe_id = canonical_case_id.replace("::", "__").replace("/", "_")
     sidecar = base_dir / root_dir / "canonical" / "expc" / f"{safe_id}__related_prec_ids.json"
     if not sidecar.exists():
@@ -220,8 +221,6 @@ def build_case_to_case_relation_records(
         parsed = parse_case_payload(source_target, payload or {}, fallback=row)
         source_doc_number = parsed.get("doc_number") or row.get("doc_number")
         body_text = str(parsed.get("body_text") or "").strip()
-        if not body_text:
-            continue
 
         referenced_case_rows = _merge_referenced_case_numbers(
             parsed, body_text if use_body_regex_fallback else "", source_doc_number
@@ -336,8 +335,6 @@ def build_case_reference_audit_records(
         parsed = parse_case_payload(source_target, payload or {}, fallback=row)
         source_doc_number = parsed.get("doc_number") or row.get("doc_number")
         body_text = str(parsed.get("body_text") or "").strip()
-        if not body_text:
-            continue
 
         referenced_case_rows = _merge_referenced_case_numbers(parsed, body_text, source_doc_number)
         for ref_row in referenced_case_rows:

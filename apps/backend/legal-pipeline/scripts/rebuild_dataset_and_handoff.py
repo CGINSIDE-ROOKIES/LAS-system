@@ -11,6 +11,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.common.io_utils import _write_json
+from src.collector.expc_html_collector import hydrate_expc_related_prec_ids
 from src.export.dataset_builder import build_and_write_datasets
 from src.export.dataset_validation import validate_appendix_merge_outputs
 
@@ -24,6 +25,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--base-dir", default="data")
     parser.add_argument("--skip-embed", action="store_true")
+    parser.add_argument("--hydrate-expc-html", action="store_true")
+    parser.add_argument("--overwrite-expc-html", action="store_true")
     parser.add_argument("--upload-dry-run", action="store_true")
     parser.add_argument("--batch-size", type=int, default=None)
     return parser.parse_args()
@@ -38,6 +41,13 @@ def _run_subprocess(cmd: list[str], *, env: dict[str, str] | None = None) -> Non
 def main() -> None:
     args = parse_args()
     base_dir = Path(args.base_dir)
+    expc_html_summary = None
+
+    if args.hydrate_expc_html:
+        expc_html_summary = hydrate_expc_related_prec_ids(
+            raw_related_base_dir=base_dir / "raw" / "02_related_legal_docs",
+            overwrite=args.overwrite_expc_html,
+        )
 
     dataset_manifest = build_and_write_datasets(
         normalized_base_dir=base_dir / "normalized" / "01_current_law",
@@ -94,6 +104,7 @@ def main() -> None:
 
     summary = {
         "base_dir": str(base_dir),
+        "expc_html_summary": expc_html_summary,
         "dataset_manifest": dataset_manifest,
         "appendix_validation_summary": appendix_validation_summary,
         "embedding_summary": embedding_summary,
