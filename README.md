@@ -1,4 +1,4 @@
-# AI Legal Support System (LAS) Monorepo
+# Legal AI Support System (LAS)
 
 AI 기반 법무지원 시스템 프로젝트입니다.  
 주요 법령 및 관련 문서를 기반으로 **질의응답(Q&A)**, **계약서 법률 검토**, **계약서 초안 작성** 기능을 제공합니다.
