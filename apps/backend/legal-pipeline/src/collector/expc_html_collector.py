@@ -37,6 +37,31 @@ def _sidecar_path(canonical_dir: Path, canonical_case_id: str) -> Path:
     return canonical_dir / f"{safe_id}__related_prec_ids.json"
 
 
+def _iter_unique_expc_targets(base: Path) -> list[dict[str, Any]]:
+    unique_rows: dict[str, dict[str, Any]] = {}
+
+    for jsonl_path in sorted(base.rglob("canonical_cases.jsonl")):
+        canonical_dir = jsonl_path.parent / "canonical" / "expc"
+
+        for row in _iter_jsonl(jsonl_path):
+            if str(row.get("target") or "").strip() != "expc":
+                continue
+
+            canonical_case_id = str(
+                row.get("canonical_case_id") or row.get("canonical_id") or row.get("id") or ""
+            ).strip()
+            if not canonical_case_id or canonical_case_id in unique_rows:
+                continue
+
+            unique_rows[canonical_case_id] = {
+                "row": row,
+                "canonical_dir": canonical_dir,
+                "canonical_case_id": canonical_case_id,
+            }
+
+    return [unique_rows[key] for key in sorted(unique_rows)]
+
+
 def hydrate_expc_related_prec_ids(
     raw_related_base_dir: str | Path = "data/raw/02_related_legal_docs",
     overwrite: bool = False,
@@ -51,67 +76,61 @@ def hydrate_expc_related_prec_ids(
     reused = 0
     errors: list[str] = []
     cached_prec_ids_by_expc_seq: dict[str, list[str]] = {}
+    unique_targets = _iter_unique_expc_targets(base)
 
-    for jsonl_path in sorted(base.rglob("canonical_cases.jsonl")):
-        canonical_dir = jsonl_path.parent / "canonical" / "expc"
+    for item in unique_targets:
+        row = dict(item.get("row") or {})
+        canonical_dir = Path(item["canonical_dir"])
         canonical_dir.mkdir(parents=True, exist_ok=True)
+        canonical_case_id = str(item["canonical_case_id"]).strip()
 
-        for row in _iter_jsonl(jsonl_path):
-            if str(row.get("target") or "").strip() != "expc":
-                continue
-
-            canonical_case_id = str(
-                row.get("canonical_case_id") or row.get("canonical_id") or row.get("id") or ""
-            ).strip()
-            if not canonical_case_id:
-                continue
-
-            sidecar = _sidecar_path(canonical_dir, canonical_case_id)
-            if sidecar.exists() and not overwrite:
-                skipped += 1
-                total += 1
-                continue
-
-            detail_path = row.get("detail_payload_path")
-            expc_seq = None
-            if detail_path:
-                full_path = base.parent.parent.parent / detail_path if not Path(detail_path).is_absolute() else Path(detail_path)
-                if full_path.exists():
-                    payload = _read_json(full_path)
-                    svc = payload.get("ExpcService", {})
-                    expc_seq = str(svc.get("법령해석례일련번호") or "").strip()
-
-            if not expc_seq:
-                expc_seq = str(row.get("doc_id") or "").strip()
-
-            if not expc_seq:
-                total += 1
-                continue
-
-            try:
-                if expc_seq in cached_prec_ids_by_expc_seq:
-                    prec_ids = cached_prec_ids_by_expc_seq[expc_seq]
-                    reused += 1
-                else:
-                    prec_ids = fetch_expc_related_prec_ids(expc_seq, timeout=timeout)
-                    cached_prec_ids_by_expc_seq[expc_seq] = prec_ids
-                    fetched += 1
-                    if rate_limit_sec > 0:
-                        time.sleep(rate_limit_sec)
-                sidecar.write_text(
-                    json.dumps(
-                        {"expc_seq": expc_seq, "related_prec_ids": prec_ids},
-                        ensure_ascii=False,
-                    ),
-                    encoding="utf-8",
-                )
-            except Exception as exc:
-                errors.append(f"{canonical_case_id}: {exc}")
-
+        sidecar = _sidecar_path(canonical_dir, canonical_case_id)
+        if sidecar.exists() and not overwrite:
+            skipped += 1
             total += 1
+            continue
+
+        detail_path = row.get("detail_payload_path")
+        expc_seq = None
+        if detail_path:
+            full_path = base.parent.parent.parent / detail_path if not Path(detail_path).is_absolute() else Path(detail_path)
+            if full_path.exists():
+                payload = _read_json(full_path)
+                svc = payload.get("ExpcService", {})
+                expc_seq = str(svc.get("법령해석례일련번호") or "").strip()
+
+        if not expc_seq:
+            expc_seq = str(row.get("doc_id") or "").strip()
+
+        if not expc_seq:
+            total += 1
+            continue
+
+        try:
+            if expc_seq in cached_prec_ids_by_expc_seq:
+                prec_ids = cached_prec_ids_by_expc_seq[expc_seq]
+                reused += 1
+            else:
+                prec_ids = fetch_expc_related_prec_ids(expc_seq, timeout=timeout)
+                cached_prec_ids_by_expc_seq[expc_seq] = prec_ids
+                fetched += 1
+                if rate_limit_sec > 0:
+                    time.sleep(rate_limit_sec)
+            sidecar.write_text(
+                json.dumps(
+                    {"expc_seq": expc_seq, "related_prec_ids": prec_ids},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            errors.append(f"{canonical_case_id}: {exc}")
+
+        total += 1
 
     return {
         "total_expc": total,
+        "unique_expc_targets": len(unique_targets),
         "fetched": fetched,
         "reused_cached_fetch": reused,
         "unique_expc_seq_fetched": len(cached_prec_ids_by_expc_seq),
