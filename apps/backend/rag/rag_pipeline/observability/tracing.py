@@ -67,6 +67,13 @@ def end_span(span: Any, **kwargs: Any) -> None:
         logger.debug("span 종료 실패 (무시): %s", exc)
 
 
+def get_trace_id(span: Any) -> str | None:
+    """span에서 Langfuse trace_id를 반환한다. 없으면 None."""
+    if span is None:
+        return None
+    return getattr(span, "trace_id", None)
+
+
 def update_trace(trace: Any, **kwargs: Any) -> None:
     """trace 메타데이터를 업데이트하고 span을 종료한다. None이면 no-op."""
     if trace is None:

@@ -29,6 +29,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 from rag_pipeline.generation.pipeline import RagPipeline  # noqa: E402
+from rag_pipeline.observability.langfuse_client import score_trace  # noqa: E402
+from rag_pipeline.observability.tracing import get_trace_id, start_trace  # noqa: E402
 from rag_pipeline.query_parser import QueryParser  # noqa: E402
 
 
@@ -75,13 +77,18 @@ def collect_pipeline_results(
             if law_names:
                 print(f"  → parser: law_names={law_names}")
 
+        trace = start_trace("eval_run", input={"question": query, "intent": row.get("intent", "")})
+        trace_id = get_trace_id(trace)
         try:
-            result = pipeline.run(query, law_names=law_names, intent=pipeline_intent)
+            result = pipeline.run(query, law_names=law_names, intent=pipeline_intent, trace=trace)
+            retrieved_law_names = {doc.get("law_name", "") for doc in result.retrieved_docs}
+            gold_law = row.get("gold_law", "")
+            law_hit = int(bool(gold_law and gold_law in retrieved_law_names))
             results.append({
                 "query": query,
                 "intent": row.get("intent", ""),
                 "expected_doc_type": row.get("expected_doc_type", ""),
-                "gold_law": row.get("gold_law", ""),
+                "gold_law": gold_law,
                 "gold_article": row.get("gold_article", ""),
                 "answer": result.answer,
                 "contexts": [
@@ -95,6 +102,8 @@ def collect_pipeline_results(
                 "law_context_status": result.law_context_status,
                 "parser_law_names": parser_law_names,
                 "parser_intent": parser_intent,
+                "law_hit": law_hit,
+                "trace_id": trace_id,
             })
         except Exception as exc:
             print(f"  ERROR: {exc}")
@@ -110,6 +119,8 @@ def collect_pipeline_results(
                 "law_context_status": "error",
                 "parser_law_names": parser_law_names,
                 "parser_intent": parser_intent,
+                "law_hit": None,
+                "trace_id": trace_id,
             })
     return results
 
@@ -124,6 +135,7 @@ def run_ragas(results: list[dict], *, batch_size: int = 5, batch_sleep: float = 
     from ragas.llms import llm_factory
     from ragas.metrics.collections import AnswerRelevancy
     from ragas.metrics.collections import ContextPrecisionWithoutReference
+    from ragas.metrics.collections import Faithfulness
 
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
@@ -132,7 +144,7 @@ def run_ragas(results: list[dict], *, batch_size: int = 5, batch_sleep: float = 
     ragas_model = (
         os.getenv("RAGAS_GEMINI_MODEL", "").strip()
         or os.getenv("GEMINI_MODEL", "").strip()
-        or "gemini-flash-latest"
+        or "gemini-2.5-flash-lite"
     )
     cache = DiskCacheBackend(cache_dir=str(Path(__file__).parent.parent / "data/staging/.ragas_cache"))
     # Gemini의 OpenAI 호환 엔드포인트 사용
@@ -145,6 +157,7 @@ def run_ragas(results: list[dict], *, batch_size: int = 5, batch_sleep: float = 
 
     relevancy_m = AnswerRelevancy(llm=ragas_llm, embeddings=ragas_emb)
     precision_m = ContextPrecisionWithoutReference(llm=ragas_llm)
+    faithfulness_m = Faithfulness(llm=ragas_llm)
 
     valid = [r for r in results if r["contexts"]]
     skipped = len(results) - len(valid)
@@ -199,8 +212,57 @@ def run_ragas(results: list[dict], *, batch_size: int = 5, batch_sleep: float = 
     for row in results:
         row.setdefault("answer_relevancy", None)
         row.setdefault("context_precision", None)
+        row.setdefault("law_hit", None)
+
+    # faithfulness: answer_relevancy < 0.6인 저점수 쿼리만 선택적 실행
+    low_quality = [r for r in valid if (r.get("answer_relevancy") or 1.0) < 0.6]
+    if low_quality:
+        print(f"  faithfulness 평가: {len(low_quality)}건 (answer_relevancy < 0.6)", flush=True)
+        try:
+            if valid:
+                print(f"  Rate limit 대기 {batch_sleep:.0f}s...", flush=True)
+                time.sleep(batch_sleep)
+            faith_scores = faithfulness_m.batch_score(to_inputs(low_quality))
+            for j, row in enumerate(low_quality):
+                row["faithfulness"] = round(float(faith_scores[j].value), 4)
+        except NotFoundError as exc:
+            raise RuntimeError(
+                "RAGAS 평가 모델을 찾지 못했습니다. "
+                f"현재 모델: {ragas_model}. "
+                "RAGAS_GEMINI_MODEL 또는 GEMINI_MODEL을 사용 가능한 모델로 바꿔주세요."
+            ) from exc
+    else:
+        print("  faithfulness 평가 대상 없음 (모든 answer_relevancy ≥ 0.6)")
+
+    for row in results:
+        row.setdefault("faithfulness", None)
 
     return results
+
+
+# ── Langfuse score push ───────────────────────────────────────────────────────
+
+def push_langfuse_scores(results: list[dict]) -> None:
+    """ragas 점수와 law_hit을 Langfuse trace에 기록한다."""
+    pushed = 0
+    for row in results:
+        trace_id = row.get("trace_id")
+        if not trace_id:
+            continue
+        low_rel = (row.get("answer_relevancy") or 1.0) < 0.5
+        if row.get("answer_relevancy") is not None:
+            comment = row["query"][:100] if low_rel else None
+            score_trace(trace_id, "answer_relevancy", row["answer_relevancy"], comment=comment)
+        if row.get("context_precision") is not None:
+            score_trace(trace_id, "context_precision", row["context_precision"])
+        if row.get("faithfulness") is not None:
+            low_faith = row["faithfulness"] < 0.5
+            comment = row["query"][:100] if low_faith else None
+            score_trace(trace_id, "faithfulness", row["faithfulness"], comment=comment)
+        if row.get("law_hit") is not None:
+            score_trace(trace_id, "law_hit", float(row["law_hit"]))
+        pushed += 1
+    print(f"  Langfuse score push 완료: {pushed}건")
 
 
 # ── 결과 저장 ─────────────────────────────────────────────────────────────────
@@ -208,8 +270,8 @@ def run_ragas(results: list[dict], *, batch_size: int = 5, batch_sleep: float = 
 FIELDNAMES = [
     "query", "intent", "expected_doc_type", "gold_law", "gold_article",
     "law_context_status",
-    "answer_relevancy", "context_precision",
-    "retrieved_doc_types", "parser_law_names", "parser_intent", "answer",
+    "answer_relevancy", "context_precision", "faithfulness", "law_hit",
+    "retrieved_doc_types", "parser_law_names", "parser_intent", "answer", "trace_id",
 ]
 
 
@@ -249,6 +311,15 @@ def print_summary(results: list[dict]) -> None:
     for metric in ("answer_relevancy", "context_precision"):
         print(f"  {metric:<26} {_avg(scored, metric):.3f}  (n={len(scored)})")
 
+    faith_rows = [r for r in results if r.get("faithfulness") is not None]
+    if faith_rows:
+        print(f"  {'faithfulness':<26} {_avg(faith_rows, 'faithfulness'):.3f}  (n={len(faith_rows)}, 저점수 대상)")
+
+    law_hit_rows = [r for r in results if r.get("law_hit") is not None and r.get("gold_law")]
+    if law_hit_rows:
+        hit_rate = sum(r["law_hit"] for r in law_hit_rows) / len(law_hit_rows)
+        print(f"  {'law_hit':<26} {hit_rate:.3f}  (n={len(law_hit_rows)})")
+
     # intent별
     intents = sorted({r["intent"] for r in scored})
     if len(intents) > 1:
@@ -285,7 +356,7 @@ def print_summary(results: list[dict]) -> None:
 def main() -> None:
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("--limit", type=int, default=0, help="평가할 쿼리 수 제한 (0=전체)")
-    arg_parser.add_argument("--use-parser", action="store_true", help="Query Parser 적용 후 평가")
+    arg_parser.add_argument("--no-parser", action="store_true", help="Query Parser 미적용 (baseline 측정용)")
     args = arg_parser.parse_args()
 
     eval_csv = Path(__file__).parent.parent / "data/staging/eval_set.csv"
@@ -297,11 +368,11 @@ def main() -> None:
     if args.limit:
         queries = queries[: args.limit]
 
-    mode = "parser 적용" if args.use_parser else "baseline"
+    mode = "baseline" if args.no_parser else "parser 적용"
     print(f"평가 쿼리: {len(queries)}개  [{mode}]")
 
     pipeline = RagPipeline.from_env()
-    query_parser = QueryParser.from_env() if args.use_parser else None
+    query_parser = None if args.no_parser else QueryParser.from_env()
     print("파이프라인 초기화 완료\n")
 
     print("=== Step 1. 파이프라인 실행 ===")
@@ -309,6 +380,9 @@ def main() -> None:
 
     print("\n=== Step 2. RAGAS 평가 ===")
     results = run_ragas(results)
+
+    print("\n=== Step 3. Langfuse score push ===")
+    push_langfuse_scores(results)
 
     out_path = save_results(results, out_dir)
     print(f"\n결과 저장: {out_path}")
