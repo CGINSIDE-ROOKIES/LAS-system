@@ -82,6 +82,30 @@ def _build_gemini_payload(
     return payload
 
 
+def _extract_usage_from_openai(data: dict[str, Any]) -> dict[str, int] | None:
+    """OpenAI 호환 응답에서 token usage를 추출한다. 없으면 None."""
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    return {
+        "input": int(usage.get("prompt_tokens", 0)),
+        "output": int(usage.get("completion_tokens", 0)),
+        "total": int(usage.get("total_tokens", 0)),
+    }
+
+
+def _extract_usage_from_gemini(data: dict[str, Any]) -> dict[str, int] | None:
+    """Gemini 응답에서 token usage를 추출한다. 없으면 None."""
+    meta = data.get("usageMetadata")
+    if not isinstance(meta, dict):
+        return None
+    return {
+        "input": int(meta.get("promptTokenCount", 0)),
+        "output": int(meta.get("candidatesTokenCount", 0)),
+        "total": int(meta.get("totalTokenCount", 0)),
+    }
+
+
 def _extract_openai_response_text(data: dict[str, Any]) -> str:
     """OpenAI 호환(non-stream) 응답에서 텍스트를 추출한다."""
     choices = data.get("choices")
@@ -169,8 +193,8 @@ def generate_answer(
     temperature: float,
     system_prompt: str | None = None,
     response_mime_type: str | None = None,
-) -> str:
-    """주어진 프롬프트를 LLM에 전달하고 답변 텍스트를 반환한다."""
+) -> tuple[str, dict[str, int] | None]:
+    """주어진 프롬프트를 LLM에 전달하고 (답변 텍스트, token usage)를 반환한다."""
     prompt_text = prompt.strip()
     if not prompt_text:
         raise LLMError("prompt가 비어 있습니다.")
@@ -188,7 +212,7 @@ def generate_answer(
             )
             headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
             res = http_json("POST", url, payload, headers, timeout)
-            return _extract_text_from_gemini_response(res)
+            return _extract_text_from_gemini_response(res), _extract_usage_from_gemini(res)
 
         headers = {"Content-Type": "application/json"}
         if api_key:
@@ -206,7 +230,7 @@ def generate_answer(
             "temperature": temperature,
         }
         res = http_json("POST", url, payload, headers, timeout)
-        return _extract_openai_response_text(res)
+        return _extract_openai_response_text(res), _extract_usage_from_openai(res)
     except LLMError:
         raise
     except UpstreamTimeoutError as exc:

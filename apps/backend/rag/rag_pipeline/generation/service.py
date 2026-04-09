@@ -103,6 +103,7 @@ class GenerationResult:
     provider: str = ""
     model: str = ""
     latency_ms: int | None = None
+    usage: dict[str, int] | None = None  # {"input": N, "output": N, "total": N}
 
 
 class GenerationService:
@@ -124,7 +125,7 @@ class GenerationService:
         cfg = self._cfg
         t0 = time.perf_counter()
         try:
-            answer = generate_answer(
+            answer, usage = generate_answer(
                 prompt,
                 provider=cfg.provider,
                 url=cfg.url,
@@ -144,6 +145,7 @@ class GenerationService:
             provider=cfg.provider,
             model=cfg.model,
             latency_ms=int((time.perf_counter() - t0) * 1000),
+            usage=usage,
         )
 
     def stream(

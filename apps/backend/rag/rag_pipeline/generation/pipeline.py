@@ -15,7 +15,7 @@ from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
-from ..observability.tracing import start_trace, update_trace
+from ..observability.tracing import end_span, start_generation_span, start_span, start_trace, update_trace
 from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, embed_query, is_embedding_model_cached
 from ..retrieval.context import build_llm_context_rows, build_llm_context_text, truncate_on_semantic_boundary
 from ..retrieval.fusion import fuse_rrf, fuse_rrf_multi
@@ -173,6 +173,7 @@ class RagPipeline:
         doc_types: list[str] | None,
         law_names: list[str] | None,
         intent: str | None = None,
+        trace: Any | None = None,
     ) -> tuple[list[dict[str, Any]], str, str, bool]:
         """검색 → 융합 → 순위 조정 → 컨텍스트 빌드.
 
@@ -201,18 +202,34 @@ class RagPipeline:
             enforce = self._cfg.enforce_min_law_contexts
 
         t0 = time.perf_counter()
-
-        # 임베딩을 한 번만 계산한 뒤 Qdrant(복수 컬렉션) + OpenSearch를 병렬 실행한다.
-        vector = embed_query(
-            question,
-            rcfg.embedding_model,
-            provider=rcfg.embedding_provider,
-            api_key=rcfg.embedding_api_key,
-            api_base_url=rcfg.embedding_api_base_url,
-            dimensions=rcfg.embedding_dimensions,
+        retrieval_span = start_span(
+            trace, "retrieval",
+            input={"question": question, "doc_types": doc_types, "law_names": law_names, "intent": intent},
         )
-        logger.info("임베딩 완료: %.2fs", time.perf_counter() - t0)
 
+        # ── embed ──────────────────────────────────────────────────────────────
+        embed_span = start_span(
+            retrieval_span, "embed",
+            input={"model": rcfg.embedding_model, "provider": rcfg.embedding_provider},
+        )
+        try:
+            vector = embed_query(
+                question,
+                rcfg.embedding_model,
+                provider=rcfg.embedding_provider,
+                api_key=rcfg.embedding_api_key,
+                api_base_url=rcfg.embedding_api_base_url,
+                dimensions=rcfg.embedding_dimensions,
+            )
+        except Exception:
+            end_span(embed_span, level="ERROR")
+            end_span(retrieval_span, level="ERROR")
+            raise
+        t_embed = time.perf_counter() - t0
+        logger.info("임베딩 완료: %.2fs", t_embed)
+        end_span(embed_span, output={"dim": len(vector)}, level="DEFAULT")
+
+        # ── qdrant + opensearch 병렬 실행 ──────────────────────────────────────
         def _qdrant_task(collection: str) -> list[dict[str, Any]]:
             return search_qdrant_with_vector(
                 vector, candidate_k,
@@ -249,23 +266,45 @@ class RagPipeline:
         ]
         bm25_future = self._executor.submit(_bm25_task) if rcfg.opensearch_url else None
 
+        qdrant_span = start_span(
+            retrieval_span, "qdrant",
+            input={"collections": rcfg.qdrant_collections, "candidate_k": candidate_k},
+        )
+        t_qdrant = time.perf_counter()
         collection_rows = [f.result() for f in qdrant_futures]
+        end_span(
+            qdrant_span,
+            output={"hits": [len(r) for r in collection_rows]},
+            level="DEFAULT",
+        )
 
+        opensearch_span = start_span(
+            retrieval_span, "opensearch",
+            input={"index": rcfg.opensearch_index, "candidate_k": candidate_k},
+        )
         bm25_rows: list[dict[str, Any]] = []
         if bm25_future is not None:
             try:
                 bm25_rows = bm25_future.result()
+                end_span(opensearch_span, output={"hits": len(bm25_rows)}, level="DEFAULT")
             except RetrievalError as exc:
                 logger.warning("BM25 검색 실패로 스킵: %s", exc)
-                bm25_rows = []
+                end_span(opensearch_span, output={"error": str(exc)}, level="WARNING")
+        else:
+            end_span(opensearch_span, output={"skipped": True}, level="DEFAULT")
+        logger.info("검색 완료: %.2fs", time.perf_counter() - t_qdrant)
 
+        # ── fusion ─────────────────────────────────────────────────────────────
+        fusion_span = start_span(
+            retrieval_span, "fusion",
+            input={"rrf_k": rcfg.rrf_k, "candidate_k": candidate_k, "auto_law_boost": rcfg.auto_law_boost},
+        )
         qdrant_rows = fuse_rrf_multi(
             collection_rows,
             rrf_k=rcfg.rrf_k,
             top_k=candidate_k,
             backend_names=rcfg.qdrant_collections,
         )
-
         # candidate_k 전체를 융합해야 law 보강 시 top_k 바깥 문서를 참조할 수 있음
         rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
         rrf_rows = apply_law_boost(
@@ -274,12 +313,23 @@ class RagPipeline:
             enabled=rcfg.auto_law_boost,
             law_boost_score=rcfg.law_boost_score,
         )
+        end_span(fusion_span, output={"fused_docs": len(rrf_rows)}, level="DEFAULT")
 
+        # ── ranking ────────────────────────────────────────────────────────────
+        ranking_span = start_span(
+            retrieval_span, "ranking",
+            input={"top_k": rcfg.top_k, "min_law_contexts": rcfg.min_law_contexts},
+        )
         llm_rows, law_context_status, law_context_added = select_rows_with_law_policy(
             rrf_rows,
             top_k=rcfg.top_k,
             min_law_contexts=rcfg.min_law_contexts,
             enforce_min_law_contexts=enforce,
+        )
+        end_span(
+            ranking_span,
+            output={"selected_docs": len(llm_rows), "law_context_status": law_context_status},
+            level="DEFAULT",
         )
 
         contexts = build_llm_context_rows(
@@ -291,6 +341,11 @@ class RagPipeline:
         logger.info(
             "retrieval 완료: %.2fs | docs=%d | law_context_status=%s",
             time.perf_counter() - t0, len(llm_rows), law_context_status,
+        )
+        end_span(
+            retrieval_span,
+            output={"docs": len(llm_rows), "law_context_status": law_context_status},
+            level="DEFAULT",
         )
         return llm_rows, context_text, law_context_status, law_context_added
 
@@ -355,7 +410,7 @@ class RagPipeline:
             )
         try:
             llm_rows, context_text, law_context_status = self._prepare_generation(
-                question, doc_types=doc_types, law_names=law_names, intent=intent
+                question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace,
             )
             if not llm_rows:
                 logger.info("run: 검색 결과 0건 — LLM 호출 생략")
@@ -363,9 +418,26 @@ class RagPipeline:
                 update_trace(trace, output={"answer": _NO_RESULT_ANSWER}, level="DEFAULT")
                 return result
             prompt = self._build_prompt(question, context_text, law_context_status)
+            cfg = self._generation._cfg
+            gen_span = start_generation_span(
+                trace, "generation",
+                model=cfg.model,
+                model_parameters={"temperature": cfg.temperature, "max_tokens": cfg.max_tokens},
+                input=prompt,
+            )
             t_gen = time.perf_counter()
-            gen_result = self._generation.generate(prompt, system_prompt=system_prompt)
+            try:
+                gen_result = self._generation.generate(prompt, system_prompt=system_prompt)
+            except Exception:
+                end_span(gen_span, level="ERROR")
+                raise
             logger.info("generation 완료: %.2fs", time.perf_counter() - t_gen)
+            end_span(
+                gen_span,
+                output=gen_result.answer,
+                usage=gen_result.usage,
+                level="DEFAULT",
+            )
             result = self._build_result(gen_result.answer, llm_rows, law_context_status)
             update_trace(
                 trace,
@@ -404,7 +476,7 @@ class RagPipeline:
             )
         try:
             llm_rows, context_text, law_context_status = self._prepare_generation(
-                question, doc_types=doc_types, law_names=law_names, intent=intent
+                question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace,
             )
             if not llm_rows:
                 logger.info("stream: 검색 결과 0건 — LLM 호출 생략")
@@ -434,8 +506,9 @@ class RagPipeline:
         doc_types: list[str] | None,
         law_names: list[str] | None,
         intent: str | None,
+        trace: Any | None = None,
     ) -> tuple[list[dict[str, Any]], str, str]:
         llm_rows, context_text, law_context_status, _ = self._retrieve(
-            question, doc_types=doc_types, law_names=law_names, intent=intent
+            question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace,
         )
         return llm_rows, context_text, law_context_status
