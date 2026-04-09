@@ -10,6 +10,34 @@ from src.common.io_utils import _iter_jsonl, _read_json
 from src.parser.legal_case_parser import parse_case_payload
 
 
+CHUNKING_CONFIG: dict[str, dict[str, int]] = {
+    "prec": {"max_chars": 1400, "overlap": 180},
+    "detc": {"max_chars": 1600, "overlap": 200},
+    "expc": {"max_chars": 1100, "overlap": 120},
+    "decc": {"max_chars": 1400, "overlap": 180},
+}
+
+# header: 짧고 핵심적인 요약/참조 필드 → 첫 청크에 preamble과 함께 유지
+# body:   장문 본문 필드 → overlap 청킹 적용
+FIELD_GROUPS: dict[str, dict[str, list[str]]] = {
+    "prec": {
+        "header": ["판시사항", "판결요지", "참조조문", "참조판례"],
+        "body":   ["판례내용"],
+    },
+    "detc": {
+        "header": ["판시사항", "결정요지", "심판대상조문", "참조조문", "참조판례"],
+        "body":   ["전문"],
+    },
+    "expc": {
+        "header": ["질의요지", "회답"],
+        "body":   ["이유"],
+    },
+    "decc": {
+        "header": ["청구취지", "주문", "재결요지"],
+        "body":   ["이유"],
+    },
+}
+
 
 def _normalize_space(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
@@ -244,22 +272,53 @@ def _build_case_blocks(parsed: dict[str, Any], row: dict[str, Any]) -> list[str]
     if str(parsed.get("body_type") or "").strip() == "image_only":
         preamble_lines.append("[이미지 형식 재결문]")
 
-    blocks = ["\n".join(line for line in preamble_lines if line).strip()]
+    preamble = "\n".join(line for line in preamble_lines if line).strip()
 
     body_sections = parsed.get("body_sections") or []
-    if isinstance(body_sections, list) and body_sections:
+    if not (isinstance(body_sections, list) and body_sections):
+        full_text = _build_case_text(parsed, row)
+        return [full_text] if full_text else []
+
+    field_group = FIELD_GROUPS.get(target)
+    if not field_group:
+        # 알 수 없는 target: 기존 방식 (preamble + 개별 섹션 블록)
+        blocks = [preamble] if preamble else []
         for section in body_sections:
             if not isinstance(section, dict):
                 continue
             label = str(section.get("label") or "").strip()
             text = _normalize_structure(str(section.get("text") or ""))
-            if not text:
-                continue
-            blocks.append(f"{label}\n{text}" if label else text)
+            if text:
+                blocks.append(f"{label}\n{text}" if label else text)
         return [block for block in blocks if block]
 
-    full_text = _build_case_text(parsed, row)
-    return [full_text] if full_text else []
+    header_labels = set(field_group["header"])
+    body_labels = set(field_group["body"])
+
+    # preamble을 header_parts의 첫 요소로 포함하여 첫 청크에 보장
+    header_parts: list[str] = [preamble] if preamble else []
+    body_blocks: list[str] = []
+    extra_blocks: list[str] = []
+
+    for section in body_sections:
+        if not isinstance(section, dict):
+            continue
+        label = str(section.get("label") or "").strip()
+        text = _normalize_structure(str(section.get("text") or ""))
+        if not text:
+            continue
+        formatted = f"{label}\n{text}" if label else text
+        if label in header_labels:
+            header_parts.append(formatted)
+        elif label in body_labels:
+            body_blocks.append(formatted)
+        else:
+            extra_blocks.append(formatted)
+
+    first_block = "\n\n".join(header_parts) if header_parts else ""
+    # extra(미분류)는 body(장문 본문) 앞에 배치 — 서론/보조 메타일 가능성이 높음
+    blocks = ([first_block] if first_block else []) + extra_blocks + body_blocks
+    return [block for block in blocks if block]
 
 
 
@@ -284,7 +343,15 @@ def build_legal_case_records(
         parsed = parse_case_payload(target, payload or {}, fallback=row)
         blocks = _build_case_blocks(parsed, row)
         full_text = "\n\n".join(blocks).strip()
-        chunks = _chunk_blocks(blocks, max_chars=max_chars, overlap=overlap)
+        cfg = CHUNKING_CONFIG.get(target, {"max_chars": max_chars, "overlap": overlap})
+        if target in FIELD_GROUPS and len(blocks) > 1:
+            # 첫 블록(preamble+header)과 본문 블록을 독립 청킹하여 합산 방지
+            # 첫 블록 초과 시 overlap=0으로 분할 (헤더 중복 방지)
+            first_chunks = _chunk_blocks(blocks[:1], max_chars=cfg["max_chars"], overlap=0)
+            body_chunks = _chunk_blocks(blocks[1:], max_chars=cfg["max_chars"], overlap=cfg["overlap"])
+            chunks = first_chunks + body_chunks
+        else:
+            chunks = _chunk_blocks(blocks, max_chars=cfg["max_chars"], overlap=cfg["overlap"])
         if not chunks and full_text:
             chunks = [full_text]
         if not chunks:
