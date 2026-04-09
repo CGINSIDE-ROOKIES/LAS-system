@@ -260,28 +260,29 @@ class RagPipeline:
                 search_text_field=rcfg.opensearch_search_text_field,
             )
 
+        # span을 submit 전에 생성해야 실제 실행 시작 시각이 반영된다.
+        qdrant_span = start_span(
+            retrieval_span, "qdrant",
+            input={"collections": rcfg.qdrant_collections, "candidate_k": candidate_k},
+        )
+        opensearch_span = start_span(
+            retrieval_span, "opensearch",
+            input={"index": rcfg.opensearch_index, "candidate_k": candidate_k},
+        )
         qdrant_futures = [
             self._executor.submit(_qdrant_task, col)
             for col in rcfg.qdrant_collections
         ]
         bm25_future = self._executor.submit(_bm25_task) if rcfg.opensearch_url else None
 
-        qdrant_span = start_span(
-            retrieval_span, "qdrant",
-            input={"collections": rcfg.qdrant_collections, "candidate_k": candidate_k},
-        )
-        t_qdrant = time.perf_counter()
-        collection_rows = [f.result() for f in qdrant_futures]
-        end_span(
-            qdrant_span,
-            output={"hits": [len(r) for r in collection_rows]},
-            level="DEFAULT",
-        )
+        try:
+            collection_rows = [f.result() for f in qdrant_futures]
+        except Exception as exc:
+            end_span(qdrant_span, output={"error": str(exc)}, level="ERROR")
+            end_span(retrieval_span, level="ERROR")
+            raise
+        end_span(qdrant_span, output={"hits": [len(r) for r in collection_rows]}, level="DEFAULT")
 
-        opensearch_span = start_span(
-            retrieval_span, "opensearch",
-            input={"index": rcfg.opensearch_index, "candidate_k": candidate_k},
-        )
         bm25_rows: list[dict[str, Any]] = []
         if bm25_future is not None:
             try:
@@ -292,27 +293,32 @@ class RagPipeline:
                 end_span(opensearch_span, output={"error": str(exc)}, level="WARNING")
         else:
             end_span(opensearch_span, output={"skipped": True}, level="DEFAULT")
-        logger.info("검색 완료: %.2fs", time.perf_counter() - t_qdrant)
+        logger.info("검색 완료: %.2fs", time.perf_counter() - t0)
 
         # ── fusion ─────────────────────────────────────────────────────────────
         fusion_span = start_span(
             retrieval_span, "fusion",
             input={"rrf_k": rcfg.rrf_k, "candidate_k": candidate_k, "auto_law_boost": rcfg.auto_law_boost},
         )
-        qdrant_rows = fuse_rrf_multi(
-            collection_rows,
-            rrf_k=rcfg.rrf_k,
-            top_k=candidate_k,
-            backend_names=rcfg.qdrant_collections,
-        )
-        # candidate_k 전체를 융합해야 law 보강 시 top_k 바깥 문서를 참조할 수 있음
-        rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
-        rrf_rows = apply_law_boost(
-            rrf_rows,
-            question=question,
-            enabled=rcfg.auto_law_boost,
-            law_boost_score=rcfg.law_boost_score,
-        )
+        try:
+            qdrant_rows = fuse_rrf_multi(
+                collection_rows,
+                rrf_k=rcfg.rrf_k,
+                top_k=candidate_k,
+                backend_names=rcfg.qdrant_collections,
+            )
+            # candidate_k 전체를 융합해야 law 보강 시 top_k 바깥 문서를 참조할 수 있음
+            rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
+            rrf_rows = apply_law_boost(
+                rrf_rows,
+                question=question,
+                enabled=rcfg.auto_law_boost,
+                law_boost_score=rcfg.law_boost_score,
+            )
+        except Exception as exc:
+            end_span(fusion_span, output={"error": str(exc)}, level="ERROR")
+            end_span(retrieval_span, level="ERROR")
+            raise
         end_span(fusion_span, output={"fused_docs": len(rrf_rows)}, level="DEFAULT")
 
         # ── ranking ────────────────────────────────────────────────────────────
@@ -320,12 +326,17 @@ class RagPipeline:
             retrieval_span, "ranking",
             input={"top_k": rcfg.top_k, "min_law_contexts": rcfg.min_law_contexts},
         )
-        llm_rows, law_context_status, law_context_added = select_rows_with_law_policy(
-            rrf_rows,
-            top_k=rcfg.top_k,
-            min_law_contexts=rcfg.min_law_contexts,
-            enforce_min_law_contexts=enforce,
-        )
+        try:
+            llm_rows, law_context_status, law_context_added = select_rows_with_law_policy(
+                rrf_rows,
+                top_k=rcfg.top_k,
+                min_law_contexts=rcfg.min_law_contexts,
+                enforce_min_law_contexts=enforce,
+            )
+        except Exception as exc:
+            end_span(ranking_span, output={"error": str(exc)}, level="ERROR")
+            end_span(retrieval_span, level="ERROR")
+            raise
         end_span(
             ranking_span,
             output={"selected_docs": len(llm_rows), "law_context_status": law_context_status},
@@ -484,10 +495,44 @@ class RagPipeline:
                 update_trace(trace, output={"answer": _NO_RESULT_ANSWER}, level="DEFAULT")
                 return meta, iter([_NO_RESULT_ANSWER])
             prompt = self._build_prompt(question, context_text, law_context_status)
+            cfg = self._generation._cfg
+            gen_span = start_generation_span(
+                trace, "generation",
+                model=cfg.model,
+                model_parameters={"temperature": cfg.temperature, "max_tokens": cfg.max_tokens},
+                input=prompt,
+            )
+            usage_out: dict[str, int] = {}
+            raw_chunks = self._generation.stream(prompt, system_prompt=system_prompt, usage_out=usage_out)
             meta = self._build_result("", llm_rows, law_context_status)
-            # 스트리밍 출력 기록은 5단계(streaming 응답 종료 시 최종 결과 기록)에서 처리한다.
-            return meta, self._generation.stream(prompt, system_prompt=system_prompt)
+            return meta, self._traced_stream(raw_chunks, gen_span, trace, law_context_status, usage_out)
         except Exception:
+            update_trace(trace, level="ERROR")
+            raise
+
+    def _traced_stream(
+        self,
+        chunks: Iterator[str],
+        gen_span: Any,
+        trace: Any,
+        law_context_status: str,
+        usage_out: dict[str, int],
+    ) -> Iterator[str]:
+        """chunk를 yield하면서 스트림 종료 시 generation span과 trace를 닫는 래퍼."""
+        answer_parts: list[str] = []
+        try:
+            for chunk in chunks:
+                answer_parts.append(chunk)
+                yield chunk
+            answer = "".join(answer_parts)
+            end_span(gen_span, output=answer, usage=usage_out or None, level="DEFAULT")
+            update_trace(
+                trace,
+                output={"answer": answer, "law_context_status": law_context_status},
+                level="DEFAULT",
+            )
+        except Exception:
+            end_span(gen_span, level="ERROR")
             update_trace(trace, level="ERROR")
             raise
 

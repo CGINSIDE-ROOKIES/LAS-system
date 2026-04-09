@@ -251,6 +251,7 @@ def _stream_openai_compat(
     timeout: int,
     max_tokens: int,
     temperature: float,
+    usage_out: dict[str, int] | None = None,
 ) -> Iterator[str]:
     messages: list[dict[str, str]] = []
     if system_prompt and system_prompt.strip():
@@ -263,6 +264,7 @@ def _stream_openai_compat(
         "max_tokens": max_tokens,
         "temperature": temperature,
         "stream": True,
+        "stream_options": {"include_usage": True},
     }
     req = urllib.request.Request(
         url=url,
@@ -275,6 +277,10 @@ def _stream_openai_compat(
 
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         for data in _iter_sse_json_events(resp):
+            if usage_out is not None:
+                raw_usage = data.get("usage")
+                if isinstance(raw_usage, dict):
+                    usage_out.update(_extract_usage_from_openai(data) or {})
             delta_content = _extract_openai_delta_text(data)
             if delta_content:
                 yield delta_content
@@ -289,6 +295,7 @@ def _stream_gemini(
     timeout: int,
     max_tokens: int,
     temperature: float,
+    usage_out: dict[str, int] | None = None,
 ) -> Iterator[str]:
     if not api_key:
         raise LLMError("GEMINI_API_KEY가 필요합니다.")
@@ -310,6 +317,10 @@ def _stream_gemini(
 
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         for data in _iter_sse_json_events(resp):
+            if usage_out is not None:
+                extracted = _extract_usage_from_gemini(data)
+                if extracted:
+                    usage_out.update(extracted)
             candidates = data.get("candidates")
             if not isinstance(candidates, list) or not candidates:
                 continue
@@ -340,6 +351,7 @@ def stream_answer(
     max_tokens: int,
     temperature: float,
     system_prompt: str | None = None,
+    usage_out: dict[str, int] | None = None,
 ) -> Iterator[str]:
     """주어진 프롬프트를 스트리밍으로 생성해 토큰(문자열 조각)을 순차 반환한다."""
     prompt_text = prompt.strip()
@@ -357,6 +369,7 @@ def stream_answer(
                     timeout=timeout,
                     max_tokens=max_tokens,
                     temperature=temperature,
+                    usage_out=usage_out,
                 )
                 return
 
@@ -369,6 +382,7 @@ def stream_answer(
                 timeout=timeout,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                usage_out=usage_out,
             )
         except LLMError:
             raise
