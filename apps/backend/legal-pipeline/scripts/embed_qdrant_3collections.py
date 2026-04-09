@@ -630,7 +630,9 @@ def write_embedding_manifest(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Embed Qdrant 3-collection handoff files.")
+    parser = argparse.ArgumentParser(
+        description="Embed Qdrant handoff files for law_article and legal_case."
+    )
     parser.add_argument(
         "--dataset-dir",
         type=Path,

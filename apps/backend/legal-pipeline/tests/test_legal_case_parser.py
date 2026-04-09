@@ -35,6 +35,9 @@ def test_parse_case_payload_from_prec_json_fixture():
             "law_name": "근로기준법",
             "article_key": "43-2",
             "article_no_display": "제43조의2",
+            "paragraph_no": None,
+            "item_no": None,
+            "subitem_no": None,
             "source": "structured_field",
             "field_name": "참조조문",
         }
@@ -96,7 +99,7 @@ def test_article_and_law_reference_extraction():
 
     assert matched_laws == ["근로기준법"]
     assert article_refs["근로기준법"] == [
-        {"article_key": "43-2", "article_no_display": "제43조의2"}
+        {"article_key": "43-2", "article_no_display": "제43조의2", "paragraph_no": None, "item_no": None, "subitem_no": None}
     ]
 
 

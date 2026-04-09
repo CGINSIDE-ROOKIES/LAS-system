@@ -220,6 +220,8 @@ def _build_case_text(parsed: dict[str, Any], row: dict[str, Any]) -> str:
         lines.append(f"관련 법령 검색 hit: {', '.join(source_law_names)}")
 
     body_text = str(parsed.get("body_text") or "").strip()
+    if str(parsed.get("body_type") or "").strip() == "image_only":
+        lines.append("[이미지 형식 재결문]")
     if body_text:
         lines.append(body_text)
 
@@ -239,6 +241,8 @@ def _build_case_blocks(parsed: dict[str, Any], row: dict[str, Any]) -> list[str]
         preamble_lines.append(f"결정/선고일: {parsed['decision_date']}")
     if source_law_names:
         preamble_lines.append(f"관련 법령 검색 hit: {', '.join(source_law_names)}")
+    if str(parsed.get("body_type") or "").strip() == "image_only":
+        preamble_lines.append("[이미지 형식 재결문]")
 
     blocks = ["\n".join(line for line in preamble_lines if line).strip()]
 

@@ -411,5 +411,67 @@ def build_law_to_law_relation_records(
         row["display_text"] = str(row.get("display_text") or _truncate_text(text))
         rows.append(row)
 
+    rows = _dedup_bidirectional(rows)
     rows.sort(key=lambda item: str(item.get("id") or ""))
     return rows
+
+
+_LAW_LEVEL_RANK = {"법": 0, "시행령": 1, "시행규칙": 2}
+
+
+def _law_level(name: str | None) -> int:
+    n = str(name or "")
+    if "시행규칙" in n:
+        return 2
+    if "시행령" in n:
+        return 1
+    return 0
+
+
+def _dedup_bidirectional(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """다른 법령 간 양방향 중복(A→B, B→A)에서 상위→하위 방향만 유지한다.
+
+    동일 법령 내(same_law_reference) 관계는 대상에서 제외한다.
+    """
+    keep: list[dict[str, Any]] = []
+    cross_law: list[dict[str, Any]] = []
+
+    for row in rows:
+        types = row.get("relation_types") or []
+        src = str(row.get("source_law_name") or "").strip()
+        tgt = str(row.get("law_name") or "").strip()
+        if src == tgt or "same_law_reference" in types:
+            keep.append(row)
+        else:
+            cross_law.append(row)
+
+    seen_pairs: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in cross_law:
+        src_uid = str(row.get("source_law_uid") or "").strip()
+        tgt_uid = str(row.get("law_uid") or "").strip()
+        if not src_uid or not tgt_uid:
+            keep.append(row)
+            continue
+
+        pair = tuple(sorted([src_uid, tgt_uid]))
+        existing = seen_pairs.get(pair)
+        if existing is None:
+            seen_pairs[pair] = row
+            continue
+
+        # 상위법→하위법 방향 유지
+        ex_src_level = _law_level(existing.get("source_law_name"))
+        ex_tgt_level = _law_level(existing.get("law_name"))
+        new_src_level = _law_level(row.get("source_law_name"))
+        new_tgt_level = _law_level(row.get("law_name"))
+
+        # 기존이 상위→하위면 유지, 새 것이 상위→하위면 교체
+        if new_src_level < new_tgt_level and not (ex_src_level < ex_tgt_level):
+            seen_pairs[pair] = row
+        elif ex_src_level < ex_tgt_level:
+            pass  # 기존 유지
+        elif str(row.get("source_law_name") or "") < str(existing.get("source_law_name") or ""):
+            seen_pairs[pair] = row
+
+    keep.extend(seen_pairs.values())
+    return keep
