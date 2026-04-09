@@ -215,7 +215,7 @@ def run_ragas(results: list[dict], *, batch_size: int = 5, batch_sleep: float = 
         row.setdefault("law_hit", None)
 
     # faithfulness: answer_relevancy < 0.6인 저점수 쿼리만 선택적 실행
-    low_quality = [r for r in valid if (r.get("answer_relevancy") or 1.0) < 0.6]
+    low_quality = [r for r in valid if r.get("answer_relevancy") is not None and r["answer_relevancy"] < 0.6]
     if low_quality:
         print(f"  faithfulness 평가: {len(low_quality)}건 (answer_relevancy < 0.6)", flush=True)
         try:
@@ -249,7 +249,7 @@ def push_langfuse_scores(results: list[dict]) -> None:
         trace_id = row.get("trace_id")
         if not trace_id:
             continue
-        low_rel = (row.get("answer_relevancy") or 1.0) < 0.5
+        low_rel = row.get("answer_relevancy") is not None and row["answer_relevancy"] < 0.5
         if row.get("answer_relevancy") is not None:
             comment = row["query"][:100] if low_rel else None
             score_trace(trace_id, "answer_relevancy", row["answer_relevancy"], comment=comment)
