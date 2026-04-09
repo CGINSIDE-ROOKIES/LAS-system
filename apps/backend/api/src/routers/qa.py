@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 from src.db import get_db
 from src.dependencies import get_query_parser, get_rag_pipeline
 from rag_pipeline.generation.pipeline import RagPipeline
+from rag_pipeline.observability.tracing import end_span, start_span, start_trace, update_trace
 from rag_pipeline.query_parser import QueryParser
 from src.history import delete_history_item, delete_history_items, get_history, get_history_item, save_feedback, save_qa
 from rag_pipeline.retrieval.common import EmbeddingError, LLMError, LLMTimeoutError, RetrievalError
@@ -50,6 +51,7 @@ def _stream_error_payload(exc: Exception) -> dict[str, str]:
 def _resolve_query_filters(
     request: "AskRequest",
     parser: QueryParser,
+    trace: object | None = None,
 ) -> tuple[object, list[str] | None]:
     """질문 파싱 결과와 최종 법령 필터를 계산한다.
 
@@ -57,10 +59,26 @@ def _resolve_query_filters(
       1) UI에서 전달한 request.law_filter
       2) QueryParser가 추출한 parsed.law_names
     """
-    parsed = parser.parse(request.question)
+    span = start_span(trace, "query_parse", input={"question": request.question})
+    try:
+        parsed = parser.parse(request.question)
+    except Exception:
+        end_span(span, level="ERROR")
+        raise
     logger.info(
         "query_parser: law_names=%r article_no=%r intent=%r is_legal=%r parser_fallback=%r",
         parsed.law_names, parsed.article_no, parsed.intent, parsed.is_legal, parsed.parser_fallback,
+    )
+    end_span(
+        span,
+        output={
+            "law_names": parsed.law_names,
+            "article_no": parsed.article_no,
+            "intent": parsed.intent,
+            "is_legal": parsed.is_legal,
+            "parser_fallback": parsed.parser_fallback,
+        },
+        level="DEFAULT",
     )
     effective_law_names = (
         request.law_filter
@@ -220,10 +238,15 @@ def ask(
     t0 = time.perf_counter()
     logger.info("ask 요청: %s", request.question[:80])
 
-    parsed, effective_law_names = _resolve_query_filters(request, parser)
+    trace = start_trace(
+        "qa_request",
+        input={"question": request.question, "law_filter": request.law_filter, "doc_types": request.doc_types},
+    )
+    parsed, effective_law_names = _resolve_query_filters(request, parser, trace=trace)
 
     if not parsed.is_legal:
         logger.info("ask 조기 반환: 법률 무관 질문")
+        update_trace(trace, output={"answer": _IRRELEVANT_ANSWER}, level="DEFAULT")
         return _irrelevant_ask_response()
 
     result = pipeline.run(
@@ -231,6 +254,7 @@ def ask(
         doc_types=request.doc_types,
         law_names=effective_law_names,
         intent=parsed.intent,
+        trace=trace,
     )
     qa_id: str | None = None
     if result.answer.strip():
@@ -262,10 +286,15 @@ def ask_stream(
     conn: psycopg2.extensions.connection = Depends(get_db),
 ) -> StreamingResponse:
     """질문을 받아 RAG 파이프라인을 실행하고 답변을 SSE로 스트리밍합니다."""
-    parsed, effective_law_names = _resolve_query_filters(request, parser)
+    trace = start_trace(
+        "qa_request",
+        input={"question": request.question, "law_filter": request.law_filter, "doc_types": request.doc_types},
+    )
+    parsed, effective_law_names = _resolve_query_filters(request, parser, trace=trace)
 
     if not parsed.is_legal:
         logger.info("ask_stream 조기 반환: 법률 무관 질문")
+        update_trace(trace, output={"answer": _IRRELEVANT_ANSWER}, level="DEFAULT")
 
         def _irrelevant():
             yield f"data: {json.dumps({'type': 'chunk', 'content': _IRRELEVANT_ANSWER}, ensure_ascii=False)}\n\n"
@@ -296,6 +325,7 @@ def ask_stream(
                 doc_types=request.doc_types,
                 law_names=effective_law_names,
                 intent=parsed.intent,
+                trace=trace,
             )
             first_chunk = True
             for chunk in chunks:

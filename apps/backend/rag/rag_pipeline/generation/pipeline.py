@@ -15,6 +15,7 @@ from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
+from ..observability.tracing import start_trace, update_trace
 from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, embed_query, is_embedding_model_cached
 from ..retrieval.context import build_llm_context_rows, build_llm_context_text, truncate_on_semantic_boundary
 from ..retrieval.fusion import fuse_rrf, fuse_rrf_multi
@@ -339,19 +340,42 @@ class RagPipeline:
         doc_types: list[str] | None = None,
         law_names: list[str] | None = None,
         intent: str | None = None,
+        trace: Any | None = None,
     ) -> RagResult:
         """검색 + 생성 파이프라인을 실행하고 최종 결과를 반환한다."""
-        llm_rows, context_text, law_context_status = self._prepare_generation(
-            question, doc_types=doc_types, law_names=law_names, intent=intent
-        )
-        if not llm_rows:
-            logger.info("run: 검색 결과 0건 — LLM 호출 생략")
-            return self._build_result(_NO_RESULT_ANSWER, [], law_context_status)
-        prompt = self._build_prompt(question, context_text, law_context_status)
-        t_gen = time.perf_counter()
-        result = self._generation.generate(prompt, system_prompt=system_prompt)
-        logger.info("generation 완료: %.2fs", time.perf_counter() - t_gen)
-        return self._build_result(result.answer, llm_rows, law_context_status)
+        if trace is None:
+            trace = start_trace(
+                "qa_request",
+                input={
+                    "question": question,
+                    "doc_types": doc_types,
+                    "law_names": law_names,
+                    "intent": intent,
+                },
+            )
+        try:
+            llm_rows, context_text, law_context_status = self._prepare_generation(
+                question, doc_types=doc_types, law_names=law_names, intent=intent
+            )
+            if not llm_rows:
+                logger.info("run: 검색 결과 0건 — LLM 호출 생략")
+                result = self._build_result(_NO_RESULT_ANSWER, [], law_context_status)
+                update_trace(trace, output={"answer": _NO_RESULT_ANSWER}, level="DEFAULT")
+                return result
+            prompt = self._build_prompt(question, context_text, law_context_status)
+            t_gen = time.perf_counter()
+            gen_result = self._generation.generate(prompt, system_prompt=system_prompt)
+            logger.info("generation 완료: %.2fs", time.perf_counter() - t_gen)
+            result = self._build_result(gen_result.answer, llm_rows, law_context_status)
+            update_trace(
+                trace,
+                output={"answer": gen_result.answer, "law_context_status": law_context_status},
+                level="DEFAULT",
+            )
+            return result
+        except Exception:
+            update_trace(trace, level="ERROR")
+            raise
 
     def stream(
         self,
@@ -361,22 +385,39 @@ class RagPipeline:
         doc_types: list[str] | None = None,
         law_names: list[str] | None = None,
         intent: str | None = None,
+        trace: Any | None = None,
     ) -> tuple[RagResult, Iterator[str]]:
         """검색 후 생성을 스트리밍으로 반환한다.
 
         Returns:
             (meta, chunks): meta는 sources 등 메타데이터, chunks는 토큰 조각 이터레이터.
         """
-        llm_rows, context_text, law_context_status = self._prepare_generation(
-            question, doc_types=doc_types, law_names=law_names, intent=intent
-        )
-        if not llm_rows:
-            logger.info("stream: 검색 결과 0건 — LLM 호출 생략")
-            meta = self._build_result(_NO_RESULT_ANSWER, [], law_context_status)
-            return meta, iter([_NO_RESULT_ANSWER])
-        prompt = self._build_prompt(question, context_text, law_context_status)
-        meta = self._build_result("", llm_rows, law_context_status)
-        return meta, self._generation.stream(prompt, system_prompt=system_prompt)
+        if trace is None:
+            trace = start_trace(
+                "qa_request",
+                input={
+                    "question": question,
+                    "doc_types": doc_types,
+                    "law_names": law_names,
+                    "intent": intent,
+                },
+            )
+        try:
+            llm_rows, context_text, law_context_status = self._prepare_generation(
+                question, doc_types=doc_types, law_names=law_names, intent=intent
+            )
+            if not llm_rows:
+                logger.info("stream: 검색 결과 0건 — LLM 호출 생략")
+                meta = self._build_result(_NO_RESULT_ANSWER, [], law_context_status)
+                update_trace(trace, output={"answer": _NO_RESULT_ANSWER}, level="DEFAULT")
+                return meta, iter([_NO_RESULT_ANSWER])
+            prompt = self._build_prompt(question, context_text, law_context_status)
+            meta = self._build_result("", llm_rows, law_context_status)
+            # 스트리밍 출력 기록은 5단계(streaming 응답 종료 시 최종 결과 기록)에서 처리한다.
+            return meta, self._generation.stream(prompt, system_prompt=system_prompt)
+        except Exception:
+            update_trace(trace, level="ERROR")
+            raise
 
     def _build_prompt(self, question: str, context_text: str, law_context_status: str) -> str:
         return build_user_prompt_with_limit(
