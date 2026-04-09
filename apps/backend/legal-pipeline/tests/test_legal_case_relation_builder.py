@@ -17,6 +17,7 @@ def test_build_case_to_case_relation_records_resolves_referenced_doc_number(tmp_
             "사건명": "임금",
             "사건번호": "2019다12345",
             "선고일자": "2019.05.30",
+            "참조판례": "대법원 2018. 4. 20. 선고 2018다12345 판결",
             "판례내용": "이 사건은 2018다12345 판결의 법리와 근로기준법 제43조의2를 함께 참조하였다.",
         },
     )
@@ -80,7 +81,7 @@ def test_build_case_to_case_relation_records_resolves_referenced_doc_number(tmp_
     assert record["source_canonical_case_id"] == "case::prec::123456"
     assert record["target_canonical_case_id"] == "case::prec::777777"
     assert record["referenced_case_number"] == "2018다12345"
-    assert record["reference_sources"] == ["body_regex"]
+    assert "structured_field" in record["reference_sources"]
     assert record["resolution_status"] == "resolved"
 
 
