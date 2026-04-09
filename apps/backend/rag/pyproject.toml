@@ -7,7 +7,7 @@ requires-python = "==3.12.*"
 dependencies = [
     "python-dotenv>=1.0.0",
     "sentence-transformers>=5.2.3",
-    "langfuse>=2.0.0",
+    "langfuse>=3.0.0,<4.0.0",
 ]
 
 [project.optional-dependencies]

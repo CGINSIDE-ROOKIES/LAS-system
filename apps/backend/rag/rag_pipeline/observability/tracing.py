@@ -20,7 +20,7 @@ def start_trace(name: str, **kwargs: Any) -> Any | None:
     if client is None:
         return None
     try:
-        return client.trace(name=name, **kwargs)
+        return client.start_span(name=name, **kwargs)
     except Exception as exc:
         logger.debug("trace 생성 실패 (무시): %s", exc)
         return None
@@ -31,7 +31,7 @@ def start_span(parent: Any, name: str, **kwargs: Any) -> Any | None:
     if parent is None:
         return None
     try:
-        return parent.span(name=name, **kwargs)
+        return parent.start_span(name=name, **kwargs)
     except Exception as exc:
         logger.debug("span 생성 실패 (무시): %s", exc)
         return None
@@ -42,27 +42,37 @@ def start_generation_span(parent: Any, name: str, **kwargs: Any) -> Any | None:
     if parent is None:
         return None
     try:
-        return parent.generation(name=name, **kwargs)
+        return parent.start_generation(name=name, **kwargs)
     except Exception as exc:
         logger.debug("generation span 생성 실패 (무시): %s", exc)
         return None
 
 
 def end_span(span: Any, **kwargs: Any) -> None:
-    """span을 종료한다. None이면 no-op."""
+    """span을 업데이트하고 종료한다. None이면 no-op.
+
+    span.end()는 end_time만 받으므로, 나머지 kwargs는 span.update()로 먼저 전달한다.
+    usage → usage_details 변환도 여기서 처리한다.
+    """
     if span is None:
         return
     try:
-        span.end(**kwargs)
+        end_time = kwargs.pop("end_time", None)
+        if "usage" in kwargs:
+            kwargs["usage_details"] = kwargs.pop("usage")
+        if kwargs:
+            span.update(**kwargs)
+        span.end() if end_time is None else span.end(end_time=end_time)
     except Exception as exc:
         logger.debug("span 종료 실패 (무시): %s", exc)
 
 
 def update_trace(trace: Any, **kwargs: Any) -> None:
-    """trace 메타데이터를 업데이트한다. None이면 no-op."""
+    """trace 메타데이터를 업데이트하고 span을 종료한다. None이면 no-op."""
     if trace is None:
         return
     try:
         trace.update(**kwargs)
+        trace.end()
     except Exception as exc:
         logger.debug("trace 업데이트 실패 (무시): %s", exc)
