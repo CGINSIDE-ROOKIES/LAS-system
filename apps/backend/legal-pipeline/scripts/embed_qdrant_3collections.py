@@ -597,6 +597,57 @@ def embed_simple_collection(
     return manifest
 
 
+def export_legal_relation_handoff(
+    dataset_dir: Path,
+    handoff_dir: Path,
+) -> dict:
+    """legal_relation의 source/import JSONL을 임베딩 없이 생성한다.
+
+    임베딩 대상에서 제외된 legal_relation은 OpenSearch 전용이다.
+    dataset 재빌드 시 항상 import JSONL을 최신화하기 위해 사용한다.
+    """
+    collection_name = "legal_relation"
+    rows = _iter_simple_rows(dataset_dir, collection_name)
+    canonical_id_counter: Counter[str] = Counter(_canonical_id_from_row(r) for r in rows)
+    duplicate_canonical_ids: set[str] = {cid for cid, n in canonical_id_counter.items() if n > 1}
+    relation_model_counter: Counter[str] = Counter(
+        str(r.get("relation_model") or "unknown") for r in rows
+    )
+
+    metas: list[dict] = []
+    texts: list[str] = []
+    source_rows: list[dict] = []
+
+    for row in rows:
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        point_id = _build_point_id(row, duplicate_canonical_ids)
+        meta = _build_meta(collection_name, row, point_id, text)
+        metas.append(meta)
+        texts.append(text)
+        source_rows.append(dict(row))
+
+    # 임베딩 없이 import row 구성 (_vector 제외)
+    import_rows: list[dict] = []
+    for meta, text in zip(metas, texts):
+        row = dict(meta)
+        row["text"] = text
+        row["_score"] = None
+        import_rows.append(row)
+
+    source_path = _write_variant_source(handoff_dir, collection_name, source_rows)
+    import_path = _write_variant_import(handoff_dir, collection_name, import_rows)
+
+    return {
+        "collection_name": collection_name,
+        "count": len(metas),
+        "relation_model_counts": dict(relation_model_counter),
+        "source_jsonl_path": str(source_path),
+        "import_jsonl_path": str(import_path),
+    }
+
+
 def write_embedding_manifest(
     handoff_dir: Path,
     dataset_dir: Path,
