@@ -39,11 +39,14 @@ def test_build_legal_case_records_dedupes_canonical_case_across_roots(tmp_path):
             ],
         )
 
-    records = build_legal_case_records(raw_related_base_dir=raw_dir, max_chars=500, overlap=50)
+    records = build_legal_case_records(raw_related_base_dir=raw_dir)
 
-    assert len(records) == 1
-    assert records[0]["canonical_case_id"] == "case::prec::123456"
+    # canonical_case_id가 하나만 존재하는지 (중복 제거 검증)
+    unique_case_ids = {r["canonical_case_id"] for r in records}
+    assert unique_case_ids == {"case::prec::123456"}
+    # 관련 법령이 두 법령 모두 포함되어야 함 (병합 검증)
     assert records[0]["related_law_names"] == ["근로기준법", "최저임금법"]
+    # chunk_index가 0부터 시작해야 함
     assert records[0]["id"] == "case_chunk::case::prec::123456::0"
 
 
@@ -79,10 +82,10 @@ def test_build_legal_case_records_preserves_section_headers_in_chunks(tmp_path):
         ],
     )
 
-    records = build_legal_case_records(raw_related_base_dir=raw_dir, max_chars=220, overlap=30)
+    records = build_legal_case_records(raw_related_base_dir=raw_dir)
 
-    assert len(records) >= 3
-    joined = "\n".join(record["text"] for record in records)
-    assert "질의요지" in joined
-    assert "회답" in joined
-    assert "이유" in joined
+    # 새 필드 보존형 청킹: header(질의요지+회답)는 첫 청크, body(이유)는 별도 청크
+    assert len(records) >= 2
+    assert "질의요지" in records[0]["text"]
+    assert "회답" in records[0]["text"]
+    assert any("이유" in r["text"] for r in records)
