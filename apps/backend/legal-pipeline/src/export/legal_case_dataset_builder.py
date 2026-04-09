@@ -315,9 +315,23 @@ def _build_case_blocks(parsed: dict[str, Any], row: dict[str, Any]) -> list[str]
         else:
             extra_blocks.append(formatted)
 
-    first_block = "\n\n".join(header_parts) if header_parts else ""
-    # extra(미분류)는 body(장문 본문) 앞에 배치 — 서론/보조 메타일 가능성이 높음
-    blocks = ([first_block] if first_block else []) + extra_blocks + body_blocks
+    # header 실질 내용 유무 판단 (preamble만 있으면 "없음"으로 간주)
+    has_real_header = len(header_parts) > (1 if preamble else 0)
+
+    if has_real_header:
+        # 정상: preamble + header sections → 첫 블록 (기존 동작 유지)
+        first_block = "\n\n".join(header_parts)
+        blocks = [first_block] + extra_blocks + body_blocks
+    else:
+        # header 없음: preamble 단독 짧은 첫 청크 방지
+        # preamble을 첫 content 블록(extra → body 순서) 앞에 합침
+        all_content = extra_blocks + body_blocks
+        if all_content and preamble:
+            all_content[0] = f"{preamble}\n\n{all_content[0]}"
+        elif preamble:
+            all_content = [preamble]
+        blocks = all_content
+
     return [block for block in blocks if block]
 
 
@@ -344,7 +358,15 @@ def build_legal_case_records(
         blocks = _build_case_blocks(parsed, row)
         full_text = "\n\n".join(blocks).strip()
         cfg = CHUNKING_CONFIG.get(target, {"max_chars": max_chars, "overlap": overlap})
-        if target in FIELD_GROUPS and len(blocks) > 1:
+        # header/body 독립 청킹 조건: 실제 header 섹션이 존재하는 경우만 적용
+        # len(blocks) > 1 만으로는 부족 — header 없는 다중 블록을 잘못 처리할 수 있음
+        field_group = FIELD_GROUPS.get(target)
+        has_real_header = field_group is not None and any(
+            str(s.get("label") or "").strip() in field_group["header"]
+            for s in (parsed.get("body_sections") or [])
+            if isinstance(s, dict) and str(s.get("text") or "").strip()
+        )
+        if has_real_header and len(blocks) > 1:
             # 첫 블록(preamble+header)과 본문 블록을 독립 청킹하여 합산 방지
             # 첫 블록 초과 시 overlap=0으로 분할 (헤더 중복 방지)
             first_chunks = _chunk_blocks(blocks[:1], max_chars=cfg["max_chars"], overlap=0)

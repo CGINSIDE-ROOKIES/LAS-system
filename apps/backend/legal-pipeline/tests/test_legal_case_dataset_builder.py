@@ -220,6 +220,45 @@ def test_build_case_blocks_first_block_splits_when_too_long(tmp_path):
     assert chunk_indices == list(range(len(records)))
 
 
+def test_build_case_blocks_detc_no_header_preamble_merged():
+    """detc에서 header 섹션 없이 전문만 있으면 preamble이 전문 블록 앞에 합쳐짐."""
+    sections = [{"label": "전문", "text": "전문 내용 " * 50}]
+    parsed = _make_parsed("detc", sections)
+    row = _make_row("detc")
+
+    blocks = _build_case_blocks(parsed, row)
+
+    assert len(blocks) == 1
+    assert "테스트 제목" in blocks[0]  # preamble 포함
+    assert "전문 내용" in blocks[0]    # 전문 포함
+
+
+def test_build_case_blocks_prec_no_header_preamble_merged():
+    """prec에서 header 섹션 없이 판례내용만 있으면 preamble이 판례내용 블록 앞에 합쳐짐."""
+    sections = [{"label": "판례내용", "text": "판례내용 본문 " * 50}]
+    parsed = _make_parsed("prec", sections)
+    row = _make_row("prec")
+
+    blocks = _build_case_blocks(parsed, row)
+
+    assert len(blocks) == 1
+    assert "테스트 제목" in blocks[0]
+    assert "판례내용 본문" in blocks[0]
+
+
+def test_build_case_blocks_no_header_extra_block_merged_with_preamble():
+    """header도 body도 아닌 extra 섹션만 있을 때 preamble이 extra 앞에 합쳐짐."""
+    sections = [{"label": "미분류섹션", "text": "미분류 내용"}]
+    parsed = _make_parsed("prec", sections)
+    row = _make_row("prec")
+
+    blocks = _build_case_blocks(parsed, row)
+
+    assert len(blocks) == 1
+    assert "테스트 제목" in blocks[0]  # preamble
+    assert "미분류 내용" in blocks[0]  # extra
+
+
 def test_build_case_blocks_no_sections_fallback():
     """body_sections가 없으면 full_text fallback."""
     parsed = {
