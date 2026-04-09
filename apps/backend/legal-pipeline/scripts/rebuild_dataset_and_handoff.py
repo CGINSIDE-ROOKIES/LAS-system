@@ -14,6 +14,7 @@ from src.common.io_utils import _write_json
 from src.collector.expc_html_collector import hydrate_expc_related_prec_ids
 from src.export.dataset_builder import build_and_write_datasets
 from src.export.dataset_validation import validate_appendix_merge_outputs
+from scripts.embed_qdrant_3collections import export_legal_relation_handoff
 
 
 def parse_args() -> argparse.Namespace:
@@ -75,6 +76,12 @@ def main() -> None:
         dataset_manifest=dataset_manifest,
     )
 
+    # legal_relation은 OpenSearch 전용 — 임베딩 여부와 무관하게 항상 import JSONL 최신화
+    legal_relation_handoff_summary = export_legal_relation_handoff(
+        dataset_dir=base_dir / "dataset",
+        handoff_dir=base_dir / "handoff" / "qdrant_3collections",
+    )
+
     embedding_summary = None
     if not args.skip_embed:
         emb_dir = base_dir / "emb" / "qdrant_3collections"
@@ -107,6 +114,7 @@ def main() -> None:
         "expc_html_summary": expc_html_summary,
         "dataset_manifest": dataset_manifest,
         "appendix_validation_summary": appendix_validation_summary,
+        "legal_relation_handoff_summary": legal_relation_handoff_summary,
         "embedding_summary": embedding_summary,
     }
     _write_json(base_dir / "manifest" / "rebuild_dataset_and_handoff_summary.json", summary)

@@ -10,12 +10,21 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.common.embedding_backend import load_embedding_settings
 from src.common.io_utils import _iter_jsonl
 
 APPENDIX_VECTOR_PLACEHOLDER = "[NO_APPENDIX_LINKED]"
-DEFAULT_MODEL_NAME = "text-embedding-3-large"
-DEFAULT_PRICE_PER_1M_TOKENS = 0.13
+CURRENT_EMBEDDING_SETTINGS = load_embedding_settings()
+DEFAULT_MODEL_NAME = CURRENT_EMBEDDING_SETTINGS.model_name
+DEFAULT_PRICE_PER_1M_TOKENS = {
+    "text-embedding-3-large": 0.13,
+    "text-embedding-3-small": 0.02,
+}.get(DEFAULT_MODEL_NAME, 0.13)
 DEFAULT_CHARS_PER_TOKEN = 2.5
+TARGET_PROFILES: dict[str, tuple[str, ...]] = {
+    "current_qdrant": ("law_article_body", "law_article_appendix", "legal_case"),
+    "dataset_all": ("law_article_body", "law_article_appendix", "legal_case", "legal_relation"),
+}
 
 
 def _load_token_counter(
@@ -106,6 +115,7 @@ def _build_cost_summary(
     *,
     model_name: str,
     price_per_1m_tokens: float,
+    target_profile: str,
     allow_rough_estimate: bool,
     chars_per_token: float,
 ) -> dict:
@@ -115,15 +125,26 @@ def _build_cost_summary(
         chars_per_token=chars_per_token,
     )
     breakdown = _summarize_dataset(dataset_dir, count_tokens=count_tokens)
-    total_tokens = breakdown["total"]["tokens"]
+    target_keys = TARGET_PROFILES[target_profile]
+    selected_breakdown = {key: breakdown[key] for key in target_keys}
+    selected_total = {
+        "rows": sum(item["rows"] for item in selected_breakdown.values()),
+        "tokens": sum(item["tokens"] for item in selected_breakdown.values()),
+    }
+    total_tokens = selected_total["tokens"]
     estimated_cost_usd = (total_tokens / 1_000_000) * price_per_1m_tokens
 
     return {
         "dataset_dir": str(dataset_dir),
         "model_name": model_name,
         "token_counter_mode": token_counter_mode,
+        "embedding_provider": CURRENT_EMBEDDING_SETTINGS.provider,
+        "target_profile": target_profile,
+        "embedding_targets": list(target_keys),
         "price_per_1m_tokens_usd": price_per_1m_tokens,
         "estimated_cost_usd": round(estimated_cost_usd, 6),
+        "selected_total": selected_total,
+        "selected_breakdown": selected_breakdown,
         "breakdown": breakdown,
     }
 
@@ -133,6 +154,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset-dir", type=Path, default=Path("data/dataset"))
     parser.add_argument("--model", default=DEFAULT_MODEL_NAME)
     parser.add_argument("--price-per-1m-tokens", type=float, default=DEFAULT_PRICE_PER_1M_TOKENS)
+    parser.add_argument("--target-profile", choices=tuple(TARGET_PROFILES), default="current_qdrant")
     parser.add_argument("--allow-rough-estimate", action="store_true")
     parser.add_argument("--chars-per-token", type=float, default=DEFAULT_CHARS_PER_TOKEN)
     return parser.parse_args()
@@ -144,6 +166,7 @@ def main() -> None:
         args.dataset_dir,
         model_name=args.model,
         price_per_1m_tokens=args.price_per_1m_tokens,
+        target_profile=args.target_profile,
         allow_rough_estimate=args.allow_rough_estimate,
         chars_per_token=args.chars_per_token,
     )

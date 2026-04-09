@@ -7,15 +7,15 @@
 - `legal_relation`: 법령↔사례 관계 정보
 
 ## 1. 기능 목적
-국가법령정보 Open API 수집 유지하면서, 최종검색 대상을 3개의 Qdrant collection으로 정리
+국가법령정보 Open API 수집을 유지하면서 dataset과 검색 적재 산출물을 생성한다.
 
 1. `law_article`
-   - 법령 조문을 중심으로 저장
-   - appendix(별표)는 별도 collection이 아니라 `law_article` payload 및 appendix vector로 통합
+   - 현행 법령 조문을 중심으로 저장한다.
+   - 별표는 별도 collection이 아니라 `law_article` payload 및 appendix vector로 통합한다.
 2. `legal_case`
-   - `prec`, `detc`, `expc`, `decc`의 dedupe된 canonical case 본문을 저장
+   - `prec`, `detc`, `expc`, `decc`의 dedupe된 canonical case 본문을 저장한다.
 3. `legal_relation`
-   - 법령명, 관련 조문, 검색 hit, 일부 사건번호 참조(`cited_case`)까지 저장
+   - 법령명, 관련 조문, 검색 hit, 일부 사건번호 참조(`cited_case`)까지 저장한다.
 
 핵심 흐름은 다음과 같다.
 
@@ -24,7 +24,7 @@
 - `03_expanded_related_docs`: 법령↔사례 relation 생성
 - `dataset`: 최종 JSONL 생성
 - `emb/handoff`: 현재 `law_article`, `legal_case` 임베딩 및 적재용 handoff 생성
-- `legal_relation`: dataset/OpenSearch 레이어에는 유지, 임베딩 제외 정책은 별도 반영
+- `legal_relation`: dataset/OpenSearch 레이어에는 유지하고 Qdrant 임베딩 대상에서는 제외
 ---
 
 ## 2. 실행
@@ -39,7 +39,7 @@
 ### 2-2. 설치(프로젝트 루트 기준)
 
 ```bash
-uv apps/backend/legal-pipeline/ sync
+uv sync --project apps/backend/legal-pipeline
 ```
 
 ### 2-3. 전체 수집 + 전처리 + dataset 생성(프로젝트 루트 기준)
@@ -89,7 +89,8 @@ uv run apps/backend/legal-pipeline/scripts/run_current_law_collection.py --max-r
 - dataset는 계속 `law_article`, `legal_case`, `legal_relation` 3종을 생성
 - Qdrant용 새 임베딩 생성은 현재 `law_article`, `legal_case`만 대상
 - `legal_relation`은 현재 OpenSearch only 정책으로 유지
-- 기존 `legal_relation` 적재분 삭제/정리와 query-side 검색 동기화는 후속 작업으로 미룸
+- `legal_relation`은 source/import JSONL은 계속 생성하지만 `.npy` 임베딩은 만들지 않는다
+- 현재 기준 manifest는 OpenAI `text-embedding-3-large`, `1024`차원, `law_article 1982`, `legal_case 73690`이다
 
 기본 임베딩 backend는 `sentence-transformers`다. OpenAI로 전환하려면 예시처럼 설정한다.
 
@@ -139,12 +140,24 @@ uv run apps/backend/legal-pipeline/scripts/embed_qdrant_3collections.py \
 
 참고:
 
-- 기존 실행에서 만들어진 `legal_relation` 관련 `.npy`/handoff 파일이 디스크에 남아 있을 수 있다.
-- 현재 스크립트는 새로 생성할 때 `legal_relation` 임베딩을 만들지 않는다.
+- `legal_relation` 임베딩 파일(`.npy`, `*.meta.jsonl`, `*.manifest.json`)은 현재 정책상 생성하지 않는다.
 - `legal_relation`은 현재 OpenSearch 적재 대상으로 유지한다.
-- 기존 DB/Qdrant 정리와 query-side 검색 동기화는 후속 작업이다.
+- retrieval profile에는 `legal_relation` 항목이 남아 있을 수 있지만 현재 manifest 기준 `available=false`다.
 
-### 3-4. OpenSearch 인덱스 생성 / 전체 적재
+### 3-4. 현재 운영 기준 명령 순서
+
+
+```bash
+uv run --project apps/backend/legal-pipeline pytest apps/backend/legal-pipeline/tests -q
+uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/rebuild_dataset_and_handoff.py --skip-embed
+uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/embed_qdrant_3collections.py
+uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/upload/indexing.py
+uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/upload/load_qdrant.py
+uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/upload/index_opensearch.py
+uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/upload/load_opensearch.py
+```
+
+### 3-5. OpenSearch 인덱스 생성 / 전체 적재
 
 로컬에서 Qdrant/OpenSearch를 같이 띄우려면:
 
@@ -199,7 +212,7 @@ dry-run 시 bulk NDJSON만 생성:
 uv run apps/backend/legal-pipeline/scripts/upload/load_opensearch.py --dry-run
 ```
 
-### 3-5. 증분 업데이트 + OpenSearch 반영
+### 3-6. 증분 업데이트 + OpenSearch 반영
 
 증분 patch 기준 OpenSearch 반영:
 
