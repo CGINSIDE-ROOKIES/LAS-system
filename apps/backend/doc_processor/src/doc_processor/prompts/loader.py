@@ -12,13 +12,7 @@ def _prompt_path(profile: str, key: str) -> Path:
     return root / profile / f"{key}.md"
 
 
-def load_prompt(
-    key: str,
-    *,
-    profile: str = "default",
-    reload: bool = False,
-) -> str:
-    """Load markdown prompt by `profile/key`."""
+def load_prompt(key: str, *, profile: str = "default", reload: bool = False) -> str:
     cache_key = (profile, key)
     if not reload and cache_key in _CACHE:
         return _CACHE[cache_key]
