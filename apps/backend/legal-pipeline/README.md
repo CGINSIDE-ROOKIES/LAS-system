@@ -328,3 +328,142 @@ data/
     ├── current_law_collection_summary.json
     ├── appendix_validation_summary.json
     └── appendix_asset_pipeline_summary.json    # optional
+```
+
+## 5. Neo4j 일반 배포 준비
+
+현재 `legal-pipeline` 안에서 지원하는 Neo4j 경로는 full graph export + full reseed 기준이다.
+
+- export source: `data/dataset/legal_corpus.jsonl`, `data/dataset/legal_relations.jsonl`
+- current graph scope:
+  - `Law`
+  - `Article`
+  - `HAS_ARTICLE`
+  - `HAS_CHILD_LAW`
+  - `DELEGATES_TO_LAW`
+  - `REFERS_TO_LAW`
+  - `REFERS_TO_ARTICLE`
+- incremental Neo4j patching은 아직 지원하지 않는다.
+
+### 5-1. 환경변수
+
+운영 기준 환경변수는 아래 4개를 필수로 본다.
+
+```env
+NEO4J_URI=bolt://<host>:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=<strong-password>
+NEO4J_DATABASE=neo4j
+```
+
+예시 파일은 `apps/backend/legal-pipeline/.env.neo4j.example` 를 사용한다.
+
+### 5-2. 로컬 검증용 Neo4j 실행
+
+로컬에서 빠르게 검증할 때는 기존 local compose를 사용한다.
+
+```bash
+docker compose \
+  -f apps/backend/legal-pipeline/docker-compose.local-neo4j.yml \
+  up -d
+```
+
+기본 접속 예시:
+
+```env
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=testtest12
+NEO4J_DATABASE=neo4j
+```
+
+브라우저:
+
+```text
+http://localhost:7474
+```
+
+### 5-3. VM + Docker 운영 배포 기준
+
+운영 VM에서는 `apps/backend/legal-pipeline/docker-compose.neo4j.yml` 기준으로 배포한다.
+
+권장 절차:
+
+1. VM에 Docker / Docker Compose plugin 설치
+2. `apps/backend/legal-pipeline/.env.neo4j.example`를 복사해 실제 값으로 채움
+3. compose로 Neo4j 기동
+4. dataset 최신화 후 graph export 실행
+5. seed 스크립트로 full reseed 수행
+
+기동 예시:
+
+```bash
+docker compose \
+  --env-file apps/backend/legal-pipeline/.env.neo4j.example \
+  -f apps/backend/legal-pipeline/docker-compose.neo4j.yml \
+  up -d
+```
+
+주의:
+
+- 운영에서는 local compose의 고정 비밀번호를 사용하지 않는다.
+- `neo4j_data`, `neo4j_logs` volume은 유지형으로 본다.
+- 1차 운영은 full reseed 기준이므로 재적재 시점을 명시적으로 잡아야 한다.
+
+### 5-4. Graph export
+
+dataset가 준비된 뒤 graph export를 수행한다.
+
+```bash
+uv run --project apps/backend/legal-pipeline \
+  python apps/backend/legal-pipeline/scripts/export_law_graph.py \
+  --output-dir apps/backend/legal-pipeline/data/handoff/law_graph_v1
+```
+
+기본 산출물:
+
+- `graph_law_nodes.jsonl`
+- `graph_article_nodes.jsonl`
+- `graph_edges_has_article.jsonl`
+- `graph_edges_has_child_law.jsonl`
+- `graph_edges_delegates_to_law.jsonl`
+- `graph_edges_refers_to_law.jsonl`
+- `graph_edges_refers_to_article.jsonl`
+- `graph_manifest.json`
+
+### 5-5. Neo4j seed
+
+export 결과를 기준으로 full seed를 수행한다.
+
+```bash
+uv run --project apps/backend/legal-pipeline \
+  python apps/backend/legal-pipeline/scripts/seed_law_graph_neo4j.py \
+  --graph-dir apps/backend/legal-pipeline/data/handoff/law_graph_v1
+```
+
+dry-run으로 row count만 먼저 확인하려면:
+
+```bash
+uv run --project apps/backend/legal-pipeline \
+  python apps/backend/legal-pipeline/scripts/seed_law_graph_neo4j.py \
+  --graph-dir apps/backend/legal-pipeline/data/handoff/law_graph_v1 \
+  --dry-run
+```
+
+### 5-6. 운영 순서
+
+현재 권장 운영 순서는 아래다.
+
+1. `pytest`
+2. dataset rebuild
+3. graph export
+4. Neo4j full reseed
+
+예시:
+
+```bash
+uv run --project apps/backend/legal-pipeline pytest apps/backend/legal-pipeline/tests -q
+uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/rebuild_dataset_and_handoff.py --skip-embed
+uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/export_law_graph.py --output-dir apps/backend/legal-pipeline/data/handoff/law_graph_v1
+uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/seed_law_graph_neo4j.py --graph-dir apps/backend/legal-pipeline/data/handoff/law_graph_v1
+```
