@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SimpleMarkdown } from "./SimpleMarkdown";
 import { FileText, BookOpen, ExternalLink, ThumbsUp, ThumbsDown, ChevronDown, FilterX, Scale } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { submitFeedback } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useSettings } from "@/hooks/useSettings";
 
 interface AnswerCardProps {
   data: {
@@ -23,6 +25,7 @@ export function AnswerCard({ data, qaId }: AnswerCardProps) {
   const [thumbsUp, setThumbsUp] = useState<boolean | null>(null);
   const [comment, setComment] = useState("");
   const [showComment, setShowComment] = useState(false);
+  const { showCitations } = useSettings();
 
   const handleFeedback = async (value: boolean) => {
     if (thumbsUp === value) return;
@@ -86,11 +89,11 @@ export function AnswerCard({ data, qaId }: AnswerCardProps) {
           <FileText className="h-3.5 w-3.5" />
           답변 요약
         </div>
-        <p className="text-sm font-medium leading-relaxed text-foreground">{data.summary}</p>
+        <SimpleMarkdown>{data.summary}</SimpleMarkdown>
       </div>
 
       {/* 근거 조문 */}
-      {!data.isIrrelevant && data.citations.length > 0 && (
+      {showCitations && !data.isIrrelevant && data.citations.length > 0 && (
         <Collapsible defaultOpen>
           <div className="rounded-lg border-2 border-legal-citation-border bg-legal-citation p-4">
             <CollapsibleTrigger className="flex w-full items-center justify-between mb-1">

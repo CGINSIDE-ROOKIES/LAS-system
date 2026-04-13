@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from src.db import get_db
 from src.dependencies import get_query_parser, get_rag_pipeline
-from rag_pipeline.generation.pipeline import RagPipeline
+from rag_pipeline.generation.pipeline import RagPipeline, build_system_prompt
 from rag_pipeline.observability.tracing import end_span, start_span, start_trace, update_trace
 from rag_pipeline.query_parser import QueryParser
 from src.history import delete_history_item, delete_history_items, get_history, get_history_item, save_feedback, save_qa
@@ -97,11 +97,22 @@ def _irrelevant_ask_response() -> "AskResponse":
     )
 
 
+_VALID_ANSWER_DETAILS = {"brief", "normal", "detailed"}
+
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     session_id: str | None = None
     doc_types: list[str] | None = None
     law_filter: list[str] | None = None
+    answer_detail: str | None = None
+
+    @field_validator("answer_detail")
+    @classmethod
+    def answer_detail_valid(cls, v: str | None) -> str | None:
+        if v is not None and v not in _VALID_ANSWER_DETAILS:
+            raise ValueError(f"유효하지 않은 answer_detail: {v!r}. 허용값: {sorted(_VALID_ANSWER_DETAILS)}")
+        return v
 
     @field_validator("question")
     @classmethod
@@ -251,6 +262,7 @@ def ask(
 
     result = pipeline.run(
         request.question,
+        system_prompt=build_system_prompt(request.answer_detail),
         doc_types=request.doc_types,
         law_names=effective_law_names,
         intent=parsed.intent,
@@ -322,6 +334,7 @@ def ask_stream(
                 yield f"data: {json.dumps(status_payload, ensure_ascii=False)}\n\n"
             meta, chunks = pipeline.stream(
                 request.question,
+                system_prompt=build_system_prompt(request.answer_detail),
                 doc_types=request.doc_types,
                 law_names=effective_law_names,
                 intent=parsed.intent,

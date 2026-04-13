@@ -4,9 +4,11 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { ChatContainer, Citation } from "@/components/ChatContainer";
 import { LawReferencePanel } from "@/components/LawReferencePanel";
 import { LawGraphPanel } from "@/components/LawGraphPanel";
+import { useSettings } from "@/hooks/useSettings";
 
 const Index = () => {
   const [citations, setCitations] = useState<Citation[]>([]);
+  const { showLawGraph } = useSettings();
 
   return (
     <SidebarProvider>
@@ -27,12 +29,14 @@ const Index = () => {
 
             {/* Right: Reference + Graph */}
             <div className="hidden w-[380px] shrink-0 flex-col lg:flex">
-              <div className="flex-1 overflow-hidden border-b border-border">
+              <div className={`overflow-hidden ${showLawGraph ? "flex-1 border-b border-border" : "flex-1"}`}>
                 <LawReferencePanel citations={citations} />
               </div>
-              <div className="h-[280px] shrink-0">
-                <LawGraphPanel />
-              </div>
+              {showLawGraph && (
+                <div className="h-[280px] shrink-0">
+                  <LawGraphPanel />
+                </div>
+              )}
             </div>
           </div>
         </div>

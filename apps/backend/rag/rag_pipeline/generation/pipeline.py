@@ -36,7 +36,7 @@ _NO_RESULT_ANSWER = (
     "질문을 더 구체적으로 입력하시거나, 법령 필터가 설정되어 있다면 해제 후 다시 시도해보세요."
 )
 
-DEFAULT_SYSTEM_PROMPT = (
+_SYSTEM_PROMPT_BASE = (
     "당신은 노동법 및 하도급법 전문 법률 Q&A 어시스턴트입니다.\n"
     "주요 대상 법령은 근로기준법, 기간제 및 단시간근로자 보호 등에 관한 법률, "
     "파견근로자 보호 등에 관한 법률, 최저임금법, 남녀고용평등과 일·가정 양립 지원에 관한 법률, "
@@ -44,10 +44,45 @@ DEFAULT_SYSTEM_PROMPT = (
     "답변 시 다음 원칙을 따르세요:\n"
     "- 제공된 컨텍스트에 있는 내용만 근거로 답변하세요.\n"
     "- 조문 번호나 출처 표기는 하지 마세요. 근거 문서는 별도로 제공됩니다.\n"
-    "- 핵심 내용을 3~5문장 이내로 간결하게 전달하세요.\n"
     "- 컨텍스트에 없는 사실은 추측하거나 단정하지 말고, 근거가 부족한 경우 한 문장으로 짧게 밝히세요.\n"
-    "- 전문적이되 자연스러운 구어체로 작성하세요."
+    "{detail_instruction}"
 )
+
+_DETAIL_INSTRUCTIONS: dict[str, str] = {
+    "brief": (
+        "- 핵심 내용을 3~5문장 이내로 간결하게 전달하세요.\n"
+        "- 법령명·핵심 개념·중요 조건은 **볼드**로 강조하세요.\n"
+        "- 전문적이되 자연스러운 구어체로 작성하세요.\n"
+    ),
+    "normal": (
+        "- 핵심 내용을 5~10문장 내외로 전달하세요.\n"
+        "- 법령명·핵심 개념·중요 조건은 **볼드**로 강조하세요.\n"
+        "- 전문적이되 자연스러운 구어체로 작성하세요.\n"
+    ),
+    "detailed": (
+        "- 관련 조문·사례를 포함해 충분한 근거와 함께 상세히 설명하세요.\n\n"
+        "**[출력 형식 — 반드시 준수]**\n"
+        "- 연속 문단(산문) 나열 금지. 구조화된 마크다운으로만 작성하세요.\n"
+        "- 주제나 단계가 2개 이상이면 ## 소제목으로 섹션을 나누세요.\n"
+        "- 나열 항목은 번호 목록(1. 2. 3.) 또는 글머리 기호(-)를 사용하세요.\n"
+        "- 법령명, 핵심 개념, 중요 조건은 **볼드**로 강조하세요.\n"
+    ),
+}
+
+DEFAULT_SYSTEM_PROMPT = _SYSTEM_PROMPT_BASE.format(
+    detail_instruction=_DETAIL_INSTRUCTIONS["normal"]
+)
+
+
+def build_system_prompt(answer_detail: str | None) -> str:
+    """답변 상세도 설정에 따른 시스템 프롬프트를 반환한다.
+
+    Args:
+        answer_detail: "brief" | "normal" | "detailed" | None.
+            None 또는 미지원 값이면 기본(normal) 프롬프트를 반환한다.
+    """
+    instruction = _DETAIL_INSTRUCTIONS.get(answer_detail or "normal", _DETAIL_INSTRUCTIONS["normal"])
+    return _SYSTEM_PROMPT_BASE.format(detail_instruction=instruction)
 
 
 @dataclass
