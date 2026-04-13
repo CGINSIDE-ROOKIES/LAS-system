@@ -1,4 +1,5 @@
 """검색 레이어 공통 기반 모듈."""
+"""검색 레이어 공통 기반 모듈."""
 
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
 DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1"
 # snippet 길이 상수는 qdrant/opensearch 정규화 모듈에서 공통으로 사용한다.
@@ -180,6 +182,8 @@ def _embed_query_openai(
 def embed_query(
     text: str,
     model_name: str,
+    *,
+    api_key: str | None,
     *,
     api_key: str | None,
     api_base_url: str = DEFAULT_OPENAI_API_BASE_URL,

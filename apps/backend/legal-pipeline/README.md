@@ -32,8 +32,10 @@
 ### 2-1. 요구사항
 
 - Python `==3.13.*`
+- Python `==3.13.*`
 - `uv` 사용 권장
 - `.env` 파일에 `LAW_OC=<국가법령정보 API 키>` 필요
+- 임베딩 생성 시 `OPENAI_API_KEY` 필요
 - 임베딩 생성 시 `OPENAI_API_KEY` 필요
 
 ### 2-2. 설치(프로젝트 루트 기준)
@@ -93,10 +95,14 @@ uv run apps/backend/legal-pipeline/scripts/run_current_law_collection.py --max-r
 - 현재 기준 manifest는 OpenAI `text-embedding-3-large`, `1024`차원, `law_article 1982`, `legal_case 73690`이다
 
 임베딩 backend는 OpenAI-compatible API만 사용한다.
+임베딩 backend는 OpenAI-compatible API만 사용한다.
 
 ```bash
 export EMBEDDING_MODEL="text-embedding-3-large"
 export OPENAI_API_KEY="<YOUR_OPENAI_API_KEY>"
+# 선택 사항: 기본 차원 대신 축소할 때만 지정
+# export OPENAI_BASE_URL="https://api.openai.com/v1"
+# export OPENAI_EMBEDDING_DIMENSIONS="1024"
 # 선택 사항: 기본 차원 대신 축소할 때만 지정
 # export OPENAI_BASE_URL="https://api.openai.com/v1"
 # export OPENAI_EMBEDDING_DIMENSIONS="1024"
