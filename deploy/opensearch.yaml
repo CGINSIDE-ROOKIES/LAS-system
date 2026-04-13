@@ -21,6 +21,15 @@ services:
       - "9600:9600"
     volumes:
       - /home/cg-rookies/docker-volumes/opensearch_storage:/usr/share/opensearch/data
+      - /home/cg-rookies/docker-volumes/opensearch_plugins:/usr/share/opensearch/plugins
+    entrypoint:
+      - /bin/bash
+      - -lc
+    command: >
+      if [ ! -d /usr/share/opensearch/plugins/analysis-nori ]; then
+        /usr/share/opensearch/bin/opensearch-plugin install --batch analysis-nori;
+      fi;
+      exec /usr/share/opensearch/opensearch-docker-entrypoint.sh
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
       interval: 10s
