@@ -6,22 +6,20 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "document-processor",
-    "jpype1>=1.6.0",
-    "langgraph>=1.1.4",
-    "langchain-google-genai>=2.1.8",
-    "pydantic>=2.12.0",
-    "python-dotenv>=1.0.1",
-    "python-docx>=1.2.0",
-    "python-hwpx",
-    "langfuse>=2.0.0",
-    "langchain>=1.2.14",
+    "langchain>=1.0.0",
+    "langchain-google-genai>=4.2.1",
     "langchain-openai>=1.1.12",
+    "langfuse>=4.0.0",
+    "langgraph>=1.1.6",
+    "pydantic>=2.11.7",
 ]
 
-[dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/doc_processor"]
 
 [tool.uv.sources]
 document-processor = { path = "../../../../document-processor" }
