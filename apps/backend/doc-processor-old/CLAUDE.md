@@ -62,4 +62,4 @@ HWPX styles require multi-step XML lookups (`charPrIDRef` → style attributes �
 
 - `python-hwpx` — custom HWPX parser (git: `github.com/maxjo0418/python-hwpx.git`, not on PyPI)
 - `jpype1` — Java bridge for HWP→HWPX conversion via bundled JAR in `vendor/hwp2hwpx/`
-- Python `==3.12.*` required
+- Python `==3.13.*` required

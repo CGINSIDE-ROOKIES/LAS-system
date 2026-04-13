@@ -31,10 +31,10 @@
 
 ### 2-1. 요구사항
 
-- Python `>= 3.12`
+- Python `==3.13.*`
 - `uv` 사용 권장
 - `.env` 파일에 `LAW_OC=<국가법령정보 API 키>` 필요
-- OpenAI 임베딩 사용 시 `OPENAI_API_KEY`, `EMBEDDING_PROVIDER=openai` 필요
+- 임베딩 생성 시 `OPENAI_API_KEY` 필요
 
 ### 2-2. 설치(프로젝트 루트 기준)
 
@@ -92,14 +92,14 @@ uv run apps/backend/legal-pipeline/scripts/run_current_law_collection.py --max-r
 - `legal_relation`은 source/import JSONL은 계속 생성하지만 `.npy` 임베딩은 만들지 않는다
 - 현재 기준 manifest는 OpenAI `text-embedding-3-large`, `1024`차원, `law_article 1982`, `legal_case 73690`이다
 
-기본 임베딩 backend는 `sentence-transformers`다. OpenAI로 전환하려면 예시처럼 설정한다.
+임베딩 backend는 OpenAI-compatible API만 사용한다.
 
 ```bash
-export EMBEDDING_PROVIDER="openai"
 export EMBEDDING_MODEL="text-embedding-3-large"
 export OPENAI_API_KEY="<YOUR_OPENAI_API_KEY>"
-# 선택 사항: 차원 축소가 필요할 때만 지정
-export OPENAI_EMBEDDING_DIMENSIONS="1024"
+# 선택 사항: 기본 차원 대신 축소할 때만 지정
+# export OPENAI_BASE_URL="https://api.openai.com/v1"
+# export OPENAI_EMBEDDING_DIMENSIONS="1024"
 ```
 
 ### 3-2. Qdrant 임베딩 실행
@@ -140,9 +140,14 @@ uv run apps/backend/legal-pipeline/scripts/embed_qdrant_3collections.py \
 
 참고:
 
+<<<<<<< Updated upstream
 - `legal_relation` 임베딩 파일(`.npy`, `*.meta.jsonl`, `*.manifest.json`)은 현재 정책상 생성하지 않는다.
 - `legal_relation`은 현재 OpenSearch 적재 대상으로 유지한다.
 - retrieval profile에는 `legal_relation` 항목이 남아 있을 수 있지만 현재 manifest 기준 `available=false`다.
+=======
+- 현재 스크립트는 `legal_relation` 임베딩을 만들지 않는다.
+- `legal_relation`은 현재 OpenSearch 적재 대상으로 유지한다.
+>>>>>>> Stashed changes
 
 ### 3-4. 현재 운영 기준 명령 순서
 

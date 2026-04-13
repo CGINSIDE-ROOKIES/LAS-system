@@ -14,7 +14,7 @@ name = "doc_processor"
 version = "0.1.0"
 description = "HWPX document parsing and IR construction pipeline"
 readme = "README.md"
-requires-python = "==3.12.*"
+requires-python = "==3.13.*"
 dependencies = [
     "jpype1>=1.6.0",
     "langchain-community>=0.4.1",

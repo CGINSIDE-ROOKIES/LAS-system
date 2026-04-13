@@ -10,15 +10,12 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-# 기본 임베딩 모델: 다국어(한국어 포함) 지원 경량 문장 임베딩 모델
-DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+# 기본 임베딩 모델: Embeddings API 기본 모델
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
+DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1"
 
 # 결과 snippet 최대 길이 (모든 normalize 함수에서 공통 사용)
 SNIPPET_MAX_LEN = 180
-
-# 모델 인스턴스를 메모리에 캐싱 (같은 모델명이면 재로드 방지)
-_MODEL_CACHE: dict[str, Any] = {}
-
 
 class RetrievalError(Exception):
     """네트워크·임베딩 등 검색 과정에서 발생하는 오류.
@@ -106,30 +103,29 @@ def http_json(
 
 
 # ── 텍스트 임베딩 ─────────────────────────────────────────────────────────────
-def embed_query(text: str, model_name: str) -> list[float]:
-    """텍스트를 임베딩 벡터로 변환한다.
-
-    sentence-transformers 패키지를 런타임에 임포트한다.
-    모델은 _MODEL_CACHE에 캐싱되어 반복 호출 시 재로드하지 않는다.
-
-    Args:
-        text:       임베딩할 쿼리 텍스트.
-        model_name: HuggingFace 모델 이름 또는 로컬 경로.
-
-    Returns:
-        정규화된 float 벡터 (L2 norm = 1).
-
-    Raises:
-        RetrievalError: 패키지 미설치, 빈 텍스트, 토크나이징 실패 시.
-    """
+def _embed_query_openai(
+    query_text: str,
+    model_name: str,
+    api_key: str,
+    api_base_url: str,
+    dimensions: int | None = None,
+) -> list[float]:
+    payload: dict[str, Any] = {"model": model_name, "input": query_text}
+    if dimensions is not None:
+        payload["dimensions"] = dimensions
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    res = http_json("POST", f"{api_base_url}/embeddings", payload, headers, timeout=30)
     try:
-        from sentence_transformers import SentenceTransformer
-    except Exception as exc:  # pragma: no cover
-        raise RetrievalError(
-            "sentence-transformers가 필요합니다.\n" "설치: uv add sentence-transformers"
-        ) from exc
+        return list(res["data"][0]["embedding"])
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RetrievalError(f"OpenAI 임베딩 응답 파싱 실패: {exc}\n응답: {res}") from exc
 
-    # 입력 타입 방어
+
+def embed_query(text: str, model_name: str) -> list[float]:
+    """텍스트를 Embeddings API로 벡터화한다."""
     if isinstance(text, str):
         query_text = text.strip()
     elif isinstance(text, (list, tuple)):
@@ -140,48 +136,13 @@ def embed_query(text: str, model_name: str) -> list[float]:
     if not query_text:
         raise RetrievalError("질문 텍스트가 비어 있습니다.")
 
-    # 캐시에 없으면 모델 로드 후 저장
-    model = _MODEL_CACHE.get(model_name)
-    if model is None:
-        try:
-            model = SentenceTransformer(model_name)
-        except Exception as exc:
-            raise RetrievalError(
-                "임베딩 모델 로드 실패: EMBEDDING_MODEL/네트워크 상태를 확인하세요.\n"
-                f"현재 EMBEDDING_MODEL={model_name}\n"
-                f"원인: {type(exc).__name__}: {exc}"
-            ) from exc
-        _MODEL_CACHE[model_name] = model
-
-    query_text = str(query_text)
-    try:
-        vec = model.encode([query_text], normalize_embeddings=True)
-    except TypeError:
-        # 간헐적 tokenizer 타입 오류 대응: 모델 재로딩 후 1회 재시도
-        _MODEL_CACHE.pop(model_name, None)
-        try:
-            model = SentenceTransformer(model_name)
-            _MODEL_CACHE[model_name] = model
-            vec = model.encode(
-                [query_text.replace("\x00", " ").strip()],
-                normalize_embeddings=True,
-            )
-        except Exception as retry_exc:
-            raise RetrievalError(
-                "임베딩 모델 토크나이징 실패: EMBEDDING_MODEL이 문장 임베딩용 모델인지 확인하세요.\n"
-                f"현재 EMBEDDING_MODEL={model_name}\n"
-                f"원인: {type(retry_exc).__name__}: {retry_exc}"
-            ) from retry_exc
-
-    # numpy 배열 또는 중첩 list 모두 1차원 float list로 평탄화
-    if hasattr(vec, "tolist"):
-        arr = vec.tolist()
-        if isinstance(arr, list) and arr and isinstance(arr[0], list):
-            return list(arr[0])
-        return list(arr)
-    if isinstance(vec, list) and vec and isinstance(vec[0], list):
-        return list(vec[0])
-    return list(vec)
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise RetrievalError("OPENAI_API_KEY가 필요합니다.")
+    api_base_url = os.getenv("OPENAI_BASE_URL", DEFAULT_OPENAI_API_BASE_URL).strip() or DEFAULT_OPENAI_API_BASE_URL
+    raw_dimensions = os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "").strip()
+    dimensions = int(raw_dimensions) if raw_dimensions else None
+    return _embed_query_openai(query_text, model_name, api_key, api_base_url.rstrip("/"), dimensions)
 
 
 # ── 중복 제거 유틸리티 ────────────────────────────────────────────────────────

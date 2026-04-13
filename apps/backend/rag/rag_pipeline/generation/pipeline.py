@@ -15,9 +15,14 @@ from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
+<<<<<<< Updated upstream
 from ..observability.tracing import end_span, start_generation_span, start_span, start_trace, update_trace
 from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, embed_query, is_embedding_model_cached
 from ..retrieval.context import build_llm_context_rows, build_llm_context_text, truncate_on_semantic_boundary
+=======
+from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, embed_query
+from ..retrieval.context import build_llm_context_rows, build_llm_context_text
+>>>>>>> Stashed changes
 from ..retrieval.fusion import fuse_rrf, fuse_rrf_multi
 from ..retrieval.opensearch import search_bm25
 from ..retrieval.qdrant import search_qdrant_with_vector
@@ -157,7 +162,6 @@ class RagPipeline:
                     opensearch_password=os.getenv("OPENSEARCH_PASSWORD") or None,
                     opensearch_search_text_field=os.getenv("OPENSEARCH_SEARCH_TEXT_FIELD", "search_text"),
                     embedding_model=os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
-                    embedding_provider=os.getenv("EMBEDDING_PROVIDER", "sentence_transformers"),
                     embedding_api_key=os.getenv("OPENAI_API_KEY") or None,
                     embedding_api_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
                     embedding_dimensions=int(d) if (d := os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "").strip()) else None,
@@ -202,9 +206,20 @@ class RagPipeline:
             enforce = self._cfg.enforce_min_law_contexts
 
         t0 = time.perf_counter()
+<<<<<<< Updated upstream
         retrieval_span = start_span(
             trace, "retrieval",
             input={"question": question, "doc_types": doc_types, "law_names": law_names, "intent": intent},
+=======
+
+        # 임베딩을 한 번만 계산한 뒤 Qdrant(복수 컬렉션) + OpenSearch를 병렬 실행한다.
+        vector = embed_query(
+            question,
+            rcfg.embedding_model,
+            api_key=rcfg.embedding_api_key,
+            api_base_url=rcfg.embedding_api_base_url,
+            dimensions=rcfg.embedding_dimensions,
+>>>>>>> Stashed changes
         )
 
         # ── embed ──────────────────────────────────────────────────────────────
@@ -389,13 +404,6 @@ class RagPipeline:
             answer=answer,
             retrieved_docs=retrieved_docs,
             law_context_status=law_context_status,
-        )
-
-    def is_embedding_cold_start(self) -> bool:
-        """현재 프로세스에서 임베딩 모델 첫 로드가 필요한 상태인지 반환한다."""
-        return not is_embedding_model_cached(
-            self._cfg.retrieval.embedding_model,
-            provider=self._cfg.retrieval.embedding_provider,
         )
 
     def run(

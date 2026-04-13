@@ -123,7 +123,7 @@ def test_build_retrieval_policy_marks_legal_relation_unavailable_when_not_embedd
     assert citation_trace[0]["available"] is False
 
 
-def test_write_embedding_manifest_uses_collection_dim_and_provider(tmp_path):
+def test_write_embedding_manifest_uses_collection_dim(tmp_path):
     manifest_path = write_embedding_manifest(
         handoff_dir=tmp_path / "handoff",
         dataset_dir=tmp_path / "dataset",
@@ -132,7 +132,6 @@ def test_write_embedding_manifest_uses_collection_dim_and_provider(tmp_path):
             {
                 "collection_name": "law_article",
                 "model_name": "text-embedding-3-large",
-                "embedding_provider": "openai",
                 "embedding_dim": 1024,
             }
         ],
@@ -141,5 +140,4 @@ def test_write_embedding_manifest_uses_collection_dim_and_provider(tmp_path):
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
 
     assert payload["model_name"] == "text-embedding-3-large"
-    assert payload["embedding_provider"] == "openai"
     assert payload["embedding_dim"] == 1024

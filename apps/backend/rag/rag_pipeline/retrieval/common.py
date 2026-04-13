@@ -1,11 +1,4 @@
-"""검색 레이어 공통 기반 모듈.
-
-포함 내용:
-  - RetrievalError: 검색 과정 예외
-  - http_json: 표준 라이브러리 기반 HTTP 클라이언트
-  - embed_query: 텍스트 임베딩
-  - normalize_source_id / dedup_normalized_rows: 중복 제거 유틸리티
-"""
+"""검색 레이어 공통 기반 모듈."""
 
 from __future__ import annotations
 
@@ -18,12 +11,12 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-large"
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
 DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1"
 # snippet 길이 상수는 qdrant/opensearch 정규화 모듈에서 공통으로 사용한다.
 SNIPPET_MAX_LEN = 180
 
+<<<<<<< Updated upstream
 _MODEL_CACHE: dict[str, Any] = {}
 _MODEL_CACHE_LOCK = threading.RLock()
 
@@ -38,6 +31,8 @@ def is_embedding_model_cached(model_name: str, provider: str = "sentence_transfo
     with _MODEL_CACHE_LOCK:
         return model_name in _MODEL_CACHE
 
+=======
+>>>>>>> Stashed changes
 
 class RetrievalError(Exception):
     """네트워크·임베딩 등 검색 과정에서 발생하는 오류.
@@ -185,11 +180,12 @@ def _embed_query_openai(
 def embed_query(
     text: str,
     model_name: str,
-    provider: str = "sentence_transformers",
-    api_key: str | None = None,
+    *,
+    api_key: str | None,
     api_base_url: str = DEFAULT_OPENAI_API_BASE_URL,
     dimensions: int | None = None,
 ) -> list[float]:
+<<<<<<< Updated upstream
     """텍스트를 임베딩 벡터로 변환한다.
 
     provider가 'openai'이면 OpenAI Embeddings API를 호출한다.
@@ -202,10 +198,20 @@ def embed_query(
     if not isinstance(text, str):
         raise EmbeddingError(f"질문 텍스트는 문자열이어야 합니다. 현재 타입: {type(text).__name__}")
     query_text = text.strip()
+=======
+    """텍스트를 Embeddings API로 벡터화한다."""
+    if isinstance(text, str):
+        query_text = text.strip()
+    elif isinstance(text, (list, tuple)):
+        query_text = " ".join(str(x) for x in text if x is not None).strip()
+    else:
+        query_text = str(text).strip()
+>>>>>>> Stashed changes
 
     if not query_text:
         raise EmbeddingError("질문 텍스트가 비어 있습니다.")
 
+<<<<<<< Updated upstream
     if provider == "openai":
         if not api_key:
             raise EmbeddingError("OpenAI 임베딩 사용 시 api_key가 필요합니다.")
@@ -269,6 +275,11 @@ def embed_query(
     if isinstance(vec, list) and vec and isinstance(vec[0], list):
         return list(vec[0])
     return list(vec)
+=======
+    if not api_key:
+        raise RetrievalError("OPENAI_API_KEY가 필요합니다.")
+    return _embed_query_openai(query_text, model_name, api_key, api_base_url, dimensions)
+>>>>>>> Stashed changes
 
 
 # ── 중복 제거 ─────────────────────────────────────────────────────────────────

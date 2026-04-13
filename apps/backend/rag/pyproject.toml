@@ -1,20 +1,16 @@
 [project]
 name = "rag-pipeline"
 version = "0.1.0"
-description = "Local RAG pipeline utilities for LAS-system"
+description = "API-backed RAG pipeline utilities for LAS-system"
 readme = "README.md"
-requires-python = "==3.12.*"
+requires-python = "==3.13.*"
 dependencies = [
     "python-dotenv>=1.0.0",
-    "sentence-transformers>=5.2.3",
-    "langfuse>=3.0.0,<4.0.0",
 ]
 
 [project.optional-dependencies]
 eval = [
     "ragas>=0.2",
-    "langchain-google-genai>=2.0",
-    "datasets>=2.19",
 ]
 
 [tool.setuptools.packages.find]

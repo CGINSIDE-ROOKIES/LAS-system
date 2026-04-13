@@ -23,8 +23,6 @@ from src.export.qdrant_point_id import (
 
 EMBEDDING_SETTINGS = load_embedding_settings()
 MODEL_NAME = EMBEDDING_SETTINGS.model_name
-EMBEDDING_PROVIDER = EMBEDDING_SETTINGS.provider
-EMBEDDING_PASSAGE_PREFIX = ""
 NORMALIZE_EMBEDDINGS = EMBEDDING_SETTINGS.normalize_embeddings
 EMBEDDING_DTYPE = EMBEDDING_SETTINGS.dtype
 DEFAULT_BATCH_SIZE = 128
@@ -32,7 +30,6 @@ CASE_DOC_TYPES = {"prec", "detc", "decc", "expc"}
 COLLECTIONS = ("law_article", "legal_case")
 APPENDIX_VECTOR_PLACEHOLDER = "[NO_APPENDIX_LINKED]"
 LAW_ARTICLE_VECTOR_NAMES = ("body", "appendix")
-DEVICE_MODE = EMBEDDING_SETTINGS.device_mode
 
 RELATION_MODEL_SEARCH_PROFILES = {
     "law_to_case": {
@@ -350,7 +347,6 @@ def _build_law_article_import_rows(
     appendix_embeddings: np.ndarray,
     *,
     embedding_model: str,
-    embedding_provider: str,
 ) -> list[dict]:
     rows: list[dict] = []
     for meta, body_text, appendix_text, body_vector, appendix_vector in zip(
@@ -370,8 +366,6 @@ def _build_law_article_import_rows(
         }
         row["_score"] = None
         row["embedding_model"] = embedding_model
-        row["embedding_provider"] = embedding_provider
-        row["embedding_passage_prefix"] = EMBEDDING_PASSAGE_PREFIX
         row["normalized"] = NORMALIZE_EMBEDDINGS
         rows.append(row)
     return rows
@@ -383,7 +377,6 @@ def _build_simple_import_rows(
     embeddings: np.ndarray,
     *,
     embedding_model: str,
-    embedding_provider: str,
 ) -> list[dict]:
     rows: list[dict] = []
     for meta, text, vector in zip(metas, texts, embeddings, strict=True):
@@ -392,8 +385,6 @@ def _build_simple_import_rows(
         row["_vector"] = vector.astype(np.float32).tolist()
         row["_score"] = None
         row["embedding_model"] = embedding_model
-        row["embedding_provider"] = embedding_provider
-        row["embedding_passage_prefix"] = EMBEDDING_PASSAGE_PREFIX
         row["normalized"] = NORMALIZE_EMBEDDINGS
         rows.append(row)
     return rows
@@ -485,7 +476,6 @@ def embed_law_article(
         body_embeddings,
         appendix_embeddings,
         embedding_model=model.model_name,
-        embedding_provider=model.provider,
     )
     source_path = _write_variant_source(handoff_dir, collection_name, source_rows)
     import_path = _write_variant_import(handoff_dir, collection_name, import_rows)
@@ -493,7 +483,6 @@ def embed_law_article(
     manifest = {
         "collection_name": collection_name,
         "model_name": model.model_name,
-        "embedding_provider": model.provider,
         "count": len(metas),
         "embedding_dim": int(body_embeddings.shape[1]) if len(body_embeddings) else 0,
         "normalized": NORMALIZE_EMBEDDINGS,
@@ -568,7 +557,6 @@ def embed_simple_collection(
         texts,
         embeddings,
         embedding_model=model.model_name,
-        embedding_provider=model.provider,
     )
     source_path = _write_variant_source(handoff_dir, collection_name, source_rows)
     import_path = _write_variant_import(handoff_dir, collection_name, import_rows)
@@ -576,7 +564,6 @@ def embed_simple_collection(
     manifest = {
         "collection_name": collection_name,
         "model_name": model.model_name,
-        "embedding_provider": model.provider,
         "count": len(metas),
         "embedding_dim": int(embeddings.shape[1]) if len(embeddings) else 0,
         "normalized": NORMALIZE_EMBEDDINGS,
@@ -658,18 +645,12 @@ def write_embedding_manifest(
     handoff_dir.mkdir(parents=True, exist_ok=True)
     embedding_dim = max((int(item.get("embedding_dim") or 0) for item in collection_manifests), default=0)
     model_name = next((str(item.get("model_name") or "") for item in collection_manifests if item.get("model_name")), MODEL_NAME)
-    embedding_provider = next(
-        (str(item.get("embedding_provider") or "") for item in collection_manifests if item.get("embedding_provider")),
-        EMBEDDING_PROVIDER,
-    )
     payload = {
         "model_name": model_name,
-        "embedding_provider": embedding_provider,
         "embedding_dim": embedding_dim,
         "normalized": NORMALIZE_EMBEDDINGS,
         "dtype": "float32",
         "metric": "cosine",
-        "embedding_passage_prefix": EMBEDDING_PASSAGE_PREFIX,
         "dataset_dir": str(dataset_dir),
         "emb_dir": str(emb_dir),
         "collections": list(collection_manifests),
@@ -722,7 +703,7 @@ def main() -> None:
     if not dataset_dir.exists():
         raise FileNotFoundError(f"dataset_dir not found: {dataset_dir}")
 
-    print(f"[embed] provider={EMBEDDING_PROVIDER} model={MODEL_NAME} device_mode={DEVICE_MODE}")
+    print(f"[embed] model={MODEL_NAME}")
 
     model = create_embedding_backend(EMBEDDING_SETTINGS)
 
