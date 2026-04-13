@@ -138,7 +138,10 @@ def _print_env_summary() -> None:
     print("Langfuse environment")
     for key in RELEVANT_ENV_KEYS:
         value = os.getenv(key)
-        display = _mask_secret(value) if key.endswith(("PUBLIC_KEY", "SECRET_KEY")) else (value or "<unset>")
+        if key.endswith(("PUBLIC_KEY", "SECRET_KEY")):
+            display = "<redacted>" if value else "<unset>"
+        else:
+            display = value or "<unset>"
         print(f"  {key}={display}")
 
 
