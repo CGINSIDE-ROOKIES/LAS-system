@@ -80,6 +80,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from src.db import close_pool, init_pool
 from src.dependencies import warmup_dependencies
+from rag_pipeline.observability import initialize_langfuse, shutdown_langfuse
 from rag_pipeline.retrieval.common import EmbeddingError, LLMError, LLMTimeoutError, RetrievalError
 from src.routers import health, qa
 
@@ -94,7 +95,10 @@ async def lifespan(app: FastAPI):
     await run_in_threadpool(init_pool)
     # 의존성 선초기화: 첫 요청 전에 환경변수/설정 오류를 조기 발견한다.
     await run_in_threadpool(warmup_dependencies)
+    # Langfuse 클라이언트를 조기 초기화해 첫 트레이스 지연을 줄인다.
+    await run_in_threadpool(initialize_langfuse)
     yield
+    await run_in_threadpool(shutdown_langfuse)
     await run_in_threadpool(close_pool)
     logger.info("애플리케이션 종료")
 

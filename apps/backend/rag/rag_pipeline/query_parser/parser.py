@@ -214,7 +214,7 @@ class QueryParser:
         try:
             # QueryParser는 현재 동기 LLM 클라이언트(generate_answer)를 사용한다.
             # API 라우터도 sync endpoint로 동작해 일관성을 유지한다.
-            raw_text = generate_answer(
+            raw_text, _ = generate_answer(
                 _build_prompt(query),
                 provider="gemini",
                 url=cfg.url,
