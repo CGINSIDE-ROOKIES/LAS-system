@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTheme } from "next-themes";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,6 +32,7 @@ const defaultSettings: Settings = {
 
 const Settings = () => {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const { theme, setTheme } = useTheme();
 
   useEffect(() => {
     const saved = localStorage.getItem("legal-ai-settings");
@@ -68,14 +70,38 @@ const Settings = () => {
                 </p>
               </div>
 
+              {/* Display Settings */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">화면 설정</CardTitle>
+                  <CardDescription>화면 표시 방식을 설정합니다.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="theme">테마</Label>
+                    <Select value={theme} onValueChange={setTheme}>
+                      <SelectTrigger id="theme" className="w-full max-w-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="light">라이트</SelectItem>
+                        <SelectItem value="dark">다크</SelectItem>
+                        <SelectItem value="system">시스템 설정 따르기</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      변경 즉시 적용됩니다.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
               {/* Model Settings */}
               {/* TODO: per-request 모델 변경은 현재 미지원. 백엔드에서 모델 파라미터 수신 지원 시 활성화 */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">모델 설정</CardTitle>
-                  <CardDescription>
-                    사용할 LLM 모델을 설정합니다.
-                  </CardDescription>
+                  <CardDescription>사용할 LLM 모델을 설정합니다.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="space-y-2">
@@ -129,9 +155,7 @@ const Settings = () => {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">검색 설정</CardTitle>
-                  <CardDescription>
-                    법령 검색 설정을 구성합니다.
-                  </CardDescription>
+                  <CardDescription>법령 검색 설정을 구성합니다.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="space-y-2">
@@ -162,73 +186,65 @@ const Settings = () => {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">응답 설정</CardTitle>
-                  <CardDescription>
-                    AI 응답 표시 방식을 설정합니다.
-                  </CardDescription>
+                  <CardDescription>AI 응답 표시 방식을 설정합니다.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label htmlFor="streaming">스트리밍 응답</Label>
-                      <p className="text-xs text-muted-foreground">
-                        답변을 실시간으로 스트리밍합니다.
-                      </p>
+                <CardContent>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="streaming">스트리밍 응답</Label>
+                        <p className="text-xs text-muted-foreground">답변을 실시간으로 표시합니다.</p>
+                      </div>
+                      <Switch
+                        id="streaming"
+                        checked={settings.streamingResponse}
+                        onCheckedChange={(checked) =>
+                          setSettings((prev) => ({ ...prev, streamingResponse: checked }))
+                        }
+                      />
                     </div>
-                    <Switch
-                      id="streaming"
-                      checked={settings.streamingResponse}
-                      onCheckedChange={(checked) =>
-                        setSettings((prev) => ({ ...prev, streamingResponse: checked }))
-                      }
-                    />
-                  </div>
 
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label htmlFor="citations">근거 조문 표시</Label>
-                      <p className="text-xs text-muted-foreground">
-                        답변에 참조된 법령 조문을 표시합니다.
-                      </p>
+                    <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="citations">근거 조문 표시</Label>
+                        <p className="text-xs text-muted-foreground">참조된 법령 조문을 표시합니다.</p>
+                      </div>
+                      <Switch
+                        id="citations"
+                        checked={settings.showCitations}
+                        onCheckedChange={(checked) =>
+                          setSettings((prev) => ({ ...prev, showCitations: checked }))
+                        }
+                      />
                     </div>
-                    <Switch
-                      id="citations"
-                      checked={settings.showCitations}
-                      onCheckedChange={(checked) =>
-                        setSettings((prev) => ({ ...prev, showCitations: checked }))
-                      }
-                    />
-                  </div>
 
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label htmlFor="followUp">후속 질문 추천</Label>
-                      <p className="text-xs text-muted-foreground">
-                        답변 후 관련 후속 질문을 추천합니다.
-                      </p>
+                    <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="followUp">후속 질문 추천</Label>
+                        <p className="text-xs text-muted-foreground">관련 후속 질문을 추천합니다.</p>
+                      </div>
+                      <Switch
+                        id="followUp"
+                        checked={settings.showFollowUpQuestions}
+                        onCheckedChange={(checked) =>
+                          setSettings((prev) => ({ ...prev, showFollowUpQuestions: checked }))
+                        }
+                      />
                     </div>
-                    <Switch
-                      id="followUp"
-                      checked={settings.showFollowUpQuestions}
-                      onCheckedChange={(checked) =>
-                        setSettings((prev) => ({ ...prev, showFollowUpQuestions: checked }))
-                      }
-                    />
-                  </div>
 
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label htmlFor="graph">법령 관계 그래프 표시</Label>
-                      <p className="text-xs text-muted-foreground">
-                        관련 법령 간의 관계를 그래프로 시각화합니다.
-                      </p>
+                    <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="graph">법령 관계 그래프</Label>
+                        <p className="text-xs text-muted-foreground">법령 간 관계를 그래프로 표시합니다.</p>
+                      </div>
+                      <Switch
+                        id="graph"
+                        checked={settings.showLawGraph}
+                        onCheckedChange={(checked) =>
+                          setSettings((prev) => ({ ...prev, showLawGraph: checked }))
+                        }
+                      />
                     </div>
-                    <Switch
-                      id="graph"
-                      checked={settings.showLawGraph}
-                      onCheckedChange={(checked) =>
-                        setSettings((prev) => ({ ...prev, showLawGraph: checked }))
-                      }
-                    />
                   </div>
                 </CardContent>
               </Card>
