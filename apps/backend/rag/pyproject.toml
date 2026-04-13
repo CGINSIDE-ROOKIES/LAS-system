@@ -5,6 +5,7 @@ description = "API-backed RAG pipeline utilities for LAS-system"
 readme = "README.md"
 requires-python = "==3.13.*"
 dependencies = [
+    "langfuse>=4.0.0",
     "python-dotenv>=1.0.0",
 ]
 
