@@ -1,3 +1,12 @@
+"""Parse law article references for `law_to_law` relation building.
+
+Observed relation examples from the current dataset:
+- `explicit_law_article`: `민법 제750조`
+- `relative_scope`: `같은 법 제9조`, noisy fallback like `제43조(하도급계약의 특례) 법 제48조`
+- `previous_article` / `current_article`: `전조`, `동조`
+- `same_law_article`: `제7조부터 제9조까지`
+"""
+
 from __future__ import annotations
 
 import re
@@ -5,25 +14,28 @@ from typing import Any
 
 from src.common.law_meta import normalize_classified_level
 
-ARTICLE_PATTERN = re.compile(r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?")
+BASE_ARTICLE_REF_PATTERN = r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?"
+SUBARTICLE_UNIT_BLOCK_PATTERN = r"(?P<unit_block>(?:\s*제\s*\d+\s*(?:항|호|목))*)"
+ARTICLE_PATTERN = re.compile(rf"{BASE_ARTICLE_REF_PATTERN}{SUBARTICLE_UNIT_BLOCK_PATTERN}")
 ARTICLE_RANGE_PATTERN = re.compile(
     r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*(?:부터|내지)\s*제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*(?:까지)?"
 )
 ARTICLE_BLOCK_PATTERN = (
-    r"제\s*\d+\s*조(?:\s*의\s*\d+)?"
+    r"제\s*\d+\s*조(?:\s*의\s*\d+)?(?:\s*제\s*\d+\s*(?:항|호|목))*"
     r"(?:\s*(?:부터|내지)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:까지)?)?"
-    r"(?:\s*(?:,|및|와|과|또는|혹은|·)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?)*"
+    r"(?:\s*(?:,|및|와|과|또는|혹은|·)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?(?:\s*제\s*\d+\s*(?:항|호|목))*)*"
 )
 SINGLE_ARTICLE_BLOCK_PATTERN = (
-    r"제\s*\d+\s*조(?:\s*의\s*\d+)?"
+    r"제\s*\d+\s*조(?:\s*의\s*\d+)?(?:\s*제\s*\d+\s*(?:항|호|목))*"
     r"(?:\s*(?:부터|내지)\s*제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:까지)?)?"
 )
+SUBARTICLE_UNIT_PATTERN = re.compile(r"제\s*(\d+)\s*(항|호|목)")
 LAW_NAME_TOKEN_PATTERN = r"(?!및\b|또는\b|혹은\b|와\b|과\b|전조\b|동조\b|같은\b|이\b)[가-힣0-9·ㆍ()]+"
 EXPLICIT_LAW_WITH_ARTICLE_PATTERN = re.compile(
     rf"(?<![가-힣0-9])(?P<law_name>{LAW_NAME_TOKEN_PATTERN}(?:\s+{LAW_NAME_TOKEN_PATTERN}){{0,7}})\s*(?P<article_block>{ARTICLE_BLOCK_PATTERN})"
 )
 RELATIVE_SCOPE_WITH_ARTICLE_PATTERN = re.compile(
-    r"(?P<prefix>이|같은)\s*(?P<scope>법|영|규칙|조례)\s*"
+    r"(?P<prefix>이|같은|동)\s*(?P<scope>법|영|규칙|조례)\s*"
     rf"(?P<article_block>{SINGLE_ARTICLE_BLOCK_PATTERN})"
 )
 BARE_ARTICLE_BLOCK_PATTERN = re.compile(
@@ -58,6 +70,12 @@ def _is_noisy_explicit_law_name(text: str) -> bool:
     if not candidate:
         return True
 
+    if re.match(r"^제\s*\d+\s*조(?:\s*의\s*\d+)?", candidate):
+        return True
+
+    if "(" in candidate or ")" in candidate:
+        return True
+
     if candidate in {"법", "법 시행령", "법 시행규칙", "같은 법 시행령", "같은 법 시행규칙"}:
         return True
 
@@ -65,27 +83,78 @@ def _is_noisy_explicit_law_name(text: str) -> bool:
     if len(tokens) >= 2 and tokens[0] == "법":
         return True
 
+    if len(tokens) >= 4 and candidate.endswith("법"):
+        return True
+
     topic_particles = ("은", "는", "이", "가")
     object_particles = ("을", "를")
     conjunctive_particles = ("과", "와")
+    institutional_suffixes = ("장관", "위원회", "청장", "협회", "원장", "시장", "군수", "구청장", "도지사")
 
     for token in tokens[:-1]:
         if token.endswith(topic_particles + object_particles + conjunctive_particles):
+            return True
+        if token.endswith(institutional_suffixes):
             return True
 
     return False
 
 
-def _article_ref(main_no: str, branch_no: str | None) -> dict[str, str]:
+def _infer_scope_from_noisy_candidate(text: str) -> str | None:
+    candidate = _normalize_space(text)
+    if not candidate or not _is_noisy_explicit_law_name(candidate):
+        return None
+
+    suffix_to_scope = (
+        ("시행규칙", "규칙"),
+        ("부령", "규칙"),
+        ("규칙", "규칙"),
+        ("시행령", "영"),
+        ("대통령령", "영"),
+        ("령", "영"),
+        ("법률", "법"),
+        ("법", "법"),
+        ("조례", "조례"),
+    )
+    for suffix, scope in suffix_to_scope:
+        if candidate.endswith(suffix):
+            return scope
+    return None
+
+
+def _extract_subarticle_units(unit_block: str | None) -> dict[str, str | None]:
+    paragraph_no: str | None = None
+    item_no: str | None = None
+    subitem_no: str | None = None
+
+    for match in SUBARTICLE_UNIT_PATTERN.finditer(str(unit_block or "")):
+        number = str(int(match.group(1)))
+        unit = match.group(2)
+        if unit == "항" and paragraph_no is None:
+            paragraph_no = number
+        elif unit == "호" and item_no is None:
+            item_no = number
+        elif unit == "목" and subitem_no is None:
+            subitem_no = number
+
+    return {
+        "paragraph_no": paragraph_no,
+        "item_no": item_no,
+        "subitem_no": subitem_no,
+    }
+
+
+def _article_ref(main_no: str, branch_no: str | None, unit_block: str | None = None) -> dict[str, str | None]:
     article_key = str(int(main_no)) if not branch_no else f"{int(main_no)}-{int(branch_no)}"
     article_no_display = f"제{int(main_no)}조" if not branch_no else f"제{int(main_no)}조의{int(branch_no)}"
     return {
         "article_key": article_key,
         "article_no_display": article_no_display,
+        **_extract_subarticle_units(unit_block),
     }
 
 
-def _expand_article_range(start: tuple[str, str | None], end: tuple[str, str | None]) -> list[dict[str, str]]:
+def _expand_article_range(start: tuple[str, str | None], end: tuple[str, str | None]) -> list[dict[str, str | None]]:
     start_main, start_branch = start
     end_main, end_branch = end
     if start_branch is None and end_branch is None:
@@ -101,25 +170,38 @@ def _expand_article_range(start: tuple[str, str | None], end: tuple[str, str | N
     return [_article_ref(start_main, start_branch), _article_ref(end_main, end_branch)]
 
 
-def extract_article_refs(article_block: str) -> list[dict[str, str]]:
-    refs: list[dict[str, str]] = []
+def extract_article_refs(article_block: str) -> list[dict[str, str | None]]:
+    refs: list[dict[str, str | None]] = []
     seen: set[str] = set()
 
     for match in ARTICLE_RANGE_PATTERN.finditer(article_block):
         for article in _expand_article_range(match.group(1, 2), match.group(3, 4)):
-            if article["article_key"] in seen:
+            signature = _article_ref_signature(article)
+            if signature in seen:
                 continue
-            seen.add(article["article_key"])
+            seen.add(signature)
             refs.append(article)
 
     for match in ARTICLE_PATTERN.finditer(article_block):
-        article = _article_ref(match.group(1), match.group(2))
-        if article["article_key"] in seen:
+        article = _article_ref(match.group(1), match.group(2), match.group("unit_block"))
+        signature = _article_ref_signature(article)
+        if signature in seen:
             continue
-        seen.add(article["article_key"])
+        seen.add(signature)
         refs.append(article)
 
     return refs
+
+
+def _article_ref_signature(article_ref: dict[str, str | None]) -> str:
+    return "::".join(
+        [
+            str(article_ref.get("article_key") or "").strip(),
+            str(article_ref.get("paragraph_no") or "").strip(),
+            str(article_ref.get("item_no") or "").strip(),
+            str(article_ref.get("subitem_no") or "").strip(),
+        ]
+    )
 
 
 def _mask_span(text: str, start: int, end: int) -> str:
@@ -220,6 +302,12 @@ def _resolve_scope_target_law_names(
     if source_level == desired_level and source_law_name:
         return [source_law_name]
 
+    if desired_level == "법" and root_law_name:
+        for law in family_laws:
+            law_name = str(law.get("law_name") or "").strip()
+            if law_name == root_law_name:
+                return [law_name]
+
     resolved: list[str] = []
     for law in family_laws:
         law_name = str(law.get("law_name") or "").strip()
@@ -276,10 +364,20 @@ def _append_reference(
 ) -> None:
     article_keys = [item["article_key"] for item in article_refs]
     article_no_displays = [item["article_no_display"] for item in article_refs]
+    article_ref_details = [
+        {
+            "article_key": item["article_key"],
+            "article_no_display": item["article_no_display"],
+            "paragraph_no": item.get("paragraph_no"),
+            "item_no": item.get("item_no"),
+            "subitem_no": item.get("subitem_no"),
+        }
+        for item in article_refs
+    ]
     dedup_key = (
         reference_type,
         str(target_law_name or "").strip(),
-        "|".join(article_keys) or _normalize_space(reference_text),
+        "|".join(_article_ref_signature(item) for item in article_refs) or _normalize_space(reference_text),
     )
     if dedup_key in seen:
         return
@@ -292,6 +390,7 @@ def _append_reference(
             "related_law_names": list(dict.fromkeys([name for name in related_law_names or [] if str(name).strip()])),
             "target_article_keys": article_keys,
             "target_article_no_displays": article_no_displays,
+            "target_article_ref_details": article_ref_details,
             "resolution_status": resolution_status,
             "resolution_confidence": resolution_confidence,
         }
@@ -342,13 +441,37 @@ def parse_law_article_references(
     for match in EXPLICIT_LAW_WITH_ARTICLE_PATTERN.finditer(raw_text):
         candidate_law_name = _normalize_space(match.group("law_name"))
         article_refs = extract_article_refs(match.group("article_block"))
-        if (
-            not candidate_law_name
-            or not article_refs
-            or not _looks_like_law_name(candidate_law_name)
-            or _is_noisy_explicit_law_name(candidate_law_name)
-        ):
+        if not candidate_law_name or not article_refs or not _looks_like_law_name(candidate_law_name):
             continue
+
+        inferred_scope = _infer_scope_from_noisy_candidate(candidate_law_name)
+        if inferred_scope:
+            candidates = _resolve_scope_target_law_names(
+                scope=inferred_scope,
+                source_law_name=source_law_name,
+                source_law_level=source_law_level,
+                root_law_name=root_law_name,
+                family_laws=family_laws,
+            )
+            resolution_status = "resolved" if len(candidates) == 1 else "ambiguous"
+            target_law_name = candidates[0] if len(candidates) == 1 else None
+            _append_reference(
+                results,
+                seen,
+                reference_type="relative_scope",
+                reference_text=match.group(0),
+                target_law_name=target_law_name,
+                related_law_names=candidates,
+                article_refs=article_refs,
+                resolution_status=resolution_status,
+                resolution_confidence=0.88 if resolution_status == "resolved" else 0.55,
+            )
+            masked_text = _mask_span(masked_text, match.start(), match.end())
+            continue
+
+        if _is_noisy_explicit_law_name(candidate_law_name):
+            continue
+
         candidates, resolution_status = _resolve_law_name_candidates(
             candidate_law_name,
             root_law_name=root_law_name,

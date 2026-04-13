@@ -93,7 +93,14 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
 
     console.log("[LAS:QA] 질문 전송:", userQuestion.slice(0, 80));
     try {
-      for await (const event of askStream({ question: userQuestion }, controller.signal)) {
+      let lawFilter: string[] | undefined;
+      try {
+        const raw = localStorage.getItem("las_law_filter");
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(parsed) && parsed.length > 0) lawFilter = parsed;
+      } catch {}
+
+      for await (const event of askStream({ question: userQuestion, law_filter: lawFilter }, controller.signal)) {
         if (event.type === "chunk") {
           setMessages((prev) =>
             prev.map((m) =>
@@ -172,10 +179,14 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
                     content: "",
                     isStreaming: false,
                     statusMessage: undefined,
+                    qa_id: event.qa_id ?? undefined,
                     answerData: {
                       summary: m.content,
                       citations: parsedCitations,
                       references: [],
+                      isIrrelevant: event.law_context_status === "irrelevant",
+                      lawContextStatus: event.law_context_status,
+                      lawFilterActive: !!lawFilter,
                     },
                   }
                 : m

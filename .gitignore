@@ -3,6 +3,9 @@ reference-docs/
 .claude/
 .codex/
 .codex
+
+# 개인 Claude 지침 문서
+CLAUDE.md
 results/
 
 # Byte-compiled / optimized / DLL files
@@ -218,6 +221,7 @@ node_modules/
 .pnpm-store/
 .turbo/
 .next/
+*.tsbuildinfo
 
 # Windows ADS metadata
 *:Zone.Identifier

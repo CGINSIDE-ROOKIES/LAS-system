@@ -8,40 +8,34 @@ from pathlib import Path
 
 import psycopg2
 import psycopg2.pool
+from alembic import command
+from alembic.config import Config
 
 logger = logging.getLogger(__name__)
 
 _pool: psycopg2.pool.ThreadedConnectionPool | None = None
-_MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
+_ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
 
 
-def _apply_migrations(conn: psycopg2.extensions.connection) -> None:
-    if not _MIGRATIONS_DIR.exists():
-        logger.warning("DB migrations directory not found: %s", _MIGRATIONS_DIR)
-        return
-
-    for path in sorted(_MIGRATIONS_DIR.glob("*.sql")):
-        sql = path.read_text(encoding="utf-8").strip()
-        if not sql:
-            continue
-        logger.info("Applying DB migration: %s", path.name)
-        with conn.cursor() as cur:
-            cur.execute(sql)
-        conn.commit()
+def _run_migrations() -> None:
+    cfg = Config(_ALEMBIC_INI)
+    # SQLAlchemy 2.0은 postgres:// 미지원 → postgresql://로 정규화
+    url = os.environ["DATABASE_URL"].replace("postgres://", "postgresql://", 1)
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+    logger.info("DB 마이그레이션 완료 (alembic upgrade head)")
 
 
 def init_pool() -> None:
     global _pool
     dsn = os.environ["DATABASE_URL"]
     _pool = psycopg2.pool.ThreadedConnectionPool(minconn=1, maxconn=10, dsn=dsn)
-    conn = _pool.getconn()
     try:
-        _apply_migrations(conn)
+        _run_migrations()
     except Exception:
-        conn.rollback()
+        _pool.closeall()
+        _pool = None
         raise
-    finally:
-        _pool.putconn(conn)
     logger.info("DB 커넥션 풀 초기화 완료 (maxconn=10)")
 
 

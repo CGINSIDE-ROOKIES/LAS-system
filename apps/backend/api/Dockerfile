@@ -12,7 +12,8 @@ COPY rag/rag_pipeline/ rag/rag_pipeline/
 COPY api/pyproject.toml api/uv.lock api/
 COPY api/main.py api/main.py
 COPY api/src/ api/src/
-COPY api/migrations/ api/migrations/
+COPY api/alembic.ini api/alembic.ini
+COPY api/alembic/ api/alembic/
 
 WORKDIR /app/api
 RUN uv sync --frozen --no-dev
@@ -25,7 +26,8 @@ WORKDIR /app/api
 COPY --from=builder /app/api/.venv /app/api/.venv
 COPY --from=builder /app/api/main.py /app/api/main.py
 COPY --from=builder /app/api/src/ /app/api/src/
-COPY --from=builder /app/api/migrations/ /app/api/migrations/
+COPY --from=builder /app/api/alembic.ini /app/api/alembic.ini
+COPY --from=builder /app/api/alembic/ /app/api/alembic/
 # rag is installed as editable — keep source at expected path
 COPY --from=builder /app/rag/ /app/rag/
 

@@ -146,12 +146,70 @@ def _confidence(
     article_refs: list[dict[str, str]],
     matched_law_names: list[str],
     law_name: str,
+    has_structured_article_ref: bool = False,
 ) -> float:
+    if has_structured_article_ref:
+        return 0.98
     if article_refs:
         return 0.95
     if law_name in matched_law_names:
         return 0.85
     return 0.65
+
+
+def _merge_article_refs(
+    parsed: dict[str, Any],
+    body_text: str,
+    family_law_names: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    merged: dict[str, list[dict[str, Any]]] = {}
+
+    for item in parsed.get("structured_article_refs") or []:
+        if not isinstance(item, dict):
+            continue
+        law_name = str(item.get("law_name") or "").strip()
+        article_key = str(item.get("article_key") or "").strip()
+        article_no_display = str(item.get("article_no_display") or "").strip()
+        if not law_name or not article_key or not article_no_display:
+            continue
+        merged.setdefault(law_name, [])
+        article = {
+            "article_key": article_key,
+            "article_no_display": article_no_display,
+            "reference_sources": ["structured_field"],
+        }
+        if not any(
+            existing["article_key"] == article["article_key"]
+            and existing["article_no_display"] == article["article_no_display"]
+            for existing in merged[law_name]
+        ):
+            merged[law_name].append(article)
+
+    body_refs_map = extract_explicit_article_refs(body_text, family_law_names) if body_text else {}
+    for law_name, refs in body_refs_map.items():
+        merged.setdefault(law_name, [])
+        for article in refs:
+            existing = next(
+                (
+                    item
+                    for item in merged[law_name]
+                    if item["article_key"] == article["article_key"]
+                    and item["article_no_display"] == article["article_no_display"]
+                ),
+                None,
+            )
+            if existing is None:
+                merged[law_name].append(
+                    {
+                        **article,
+                        "reference_sources": ["body_regex"],
+                    }
+                )
+                continue
+            if "body_regex" not in existing["reference_sources"]:
+                existing["reference_sources"].append("body_regex")
+
+    return merged
 
 
 
@@ -212,6 +270,8 @@ def build_root_relation_payloads(
         payload = _load_detail_payload(canonical_row or {})
         parsed = parse_case_payload(target, payload or {}, fallback=canonical_row or hits[0])
         body_text = str(parsed.get("body_text") or "").strip()
+        if str(parsed.get("body_type") or "").strip() == "image_only":
+            body_text = ""
 
         family_law_names = sorted(
             {
@@ -221,8 +281,13 @@ def build_root_relation_payloads(
             }
         )
         matched_law_names = find_related_law_names(body_text, family_law_names) if body_text else []
-        article_refs_map = extract_explicit_article_refs(body_text, family_law_names) if body_text else {}
+        article_refs_map = _merge_article_refs(parsed, body_text, family_law_names)
         article_refs = article_refs_map.get(law_name, [])
+        has_structured_article_ref = any(
+            str(item.get("law_name") or "").strip() == law_name
+            for item in (parsed.get("structured_article_refs") or [])
+            if isinstance(item, dict)
+        )
         referenced_case_numbers = (
             extract_case_number_refs(body_text, exclude_numbers=[parsed.get("doc_number")])
             if body_text and "cited_case" in relation_rules
@@ -235,12 +300,21 @@ def build_root_relation_payloads(
         if article_refs and "related_law" in relation_rules:
             relation_types.append("related_law")
 
+        body_verified = bool(law_name in matched_law_names or article_refs or has_structured_article_ref)
         relation_types = list(dict.fromkeys(relation_types))
         source_law_uid = str(hits[0].get("source_law_uid") or build_law_uid(None, None, law_name))
         preview_anchor = law_name if law_name in matched_law_names else (referenced_case_numbers[0] if referenced_case_numbers else None)
         evidence_preview = build_evidence_preview(body_text, law_name=law_name, anchor=preview_anchor)
         article_keys = [item["article_key"] for item in article_refs]
         article_no_displays = [item["article_no_display"] for item in article_refs]
+        article_reference_sources = sorted(
+            {
+                source
+                for item in article_refs
+                for source in (item.get("reference_sources") or [])
+                if str(source).strip()
+            }
+        )
         source_file_paths = sorted(
             {
                 str(hit.get("source_file_path") or "").strip()
@@ -276,7 +350,9 @@ def build_root_relation_payloads(
             "relation_types": relation_types,
             "article_keys": article_keys,
             "article_no_displays": article_no_displays,
-            "relation_confidence": _confidence(article_refs, matched_law_names, law_name),
+            "article_reference_sources": article_reference_sources,
+            "body_verified": body_verified,
+            "relation_confidence": _confidence(article_refs, matched_law_names, law_name, has_structured_article_ref) if body_verified else 0.45,
             "evidence_preview": evidence_preview,
             "display_text": _display_text(evidence_preview or body_text),
             "source_hit_count": len(hits),
@@ -358,6 +434,49 @@ def _merge_relation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 
+_LAW_LEVEL_RANK = {"법": 0, "시행령": 1, "시행규칙": 2}
+
+
+def _classify_law_level(law_name: str | None) -> str:
+    name = str(law_name or "")
+    if "시행규칙" in name:
+        return "시행규칙"
+    if "시행령" in name:
+        return "시행령"
+    return "법"
+
+
+def _dedup_family_search_hits(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """search_hit만 가진 레코드 중 법령 패밀리 중복을 제거한다.
+
+    같은 (canonical_case_id, root_law_uid) 내에서 cited_law/related_law가 있는
+    법령은 유지하고, search_hit만 있는 법령 중 최상위(법>시행령>시행규칙)만 남긴다.
+    """
+    keep: list[dict[str, Any]] = []
+    search_hit_only: dict[tuple[str, str], list[dict[str, Any]]] = {}
+
+    for row in rows:
+        types = row.get("relation_types") or []
+        has_strong = any(t in types for t in ("cited_law", "related_law"))
+        if has_strong or row.get("relation_model") != "law_to_case":
+            keep.append(row)
+            continue
+        case_id = str(row.get("canonical_case_id") or row.get("canonical_id") or "").strip()
+        root_uid = str(row.get("root_law_uid") or "").strip()
+        key = (case_id, root_uid)
+        search_hit_only.setdefault(key, []).append(row)
+
+    for group_rows in search_hit_only.values():
+        if len(group_rows) <= 1:
+            keep.extend(group_rows)
+            continue
+        group_rows.sort(key=lambda r: _LAW_LEVEL_RANK.get(_classify_law_level(r.get("source_law_name")), 99))
+        keep.append(group_rows[0])
+
+    keep.sort(key=lambda r: str(r.get("id") or ""))
+    return keep
+
+
 def build_legal_relation_records(
     expanded_base_dir: str | Path = "data/expanded/03_expanded_related_docs",
     raw_related_base_dir: str | Path | None = None,
@@ -385,7 +504,7 @@ def build_legal_relation_records(
                     )
                 )
 
-            return _merge_relation_rows(built_rows)
+            return _dedup_family_search_hits(_merge_relation_rows(built_rows))
 
     expanded_dir = Path(expanded_base_dir)
     if raw_related_base_dir is not None and expanded_dir == Path("data/expanded/03_expanded_related_docs"):

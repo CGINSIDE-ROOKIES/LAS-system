@@ -29,7 +29,7 @@ NORMALIZE_EMBEDDINGS = EMBEDDING_SETTINGS.normalize_embeddings
 EMBEDDING_DTYPE = EMBEDDING_SETTINGS.dtype
 DEFAULT_BATCH_SIZE = 128
 CASE_DOC_TYPES = {"prec", "detc", "decc", "expc"}
-COLLECTIONS = ("law_article", "legal_case", "legal_relation")
+COLLECTIONS = ("law_article", "legal_case")
 APPENDIX_VECTOR_PLACEHOLDER = "[NO_APPENDIX_LINKED]"
 LAW_ARTICLE_VECTOR_NAMES = ("body", "appendix")
 DEVICE_MODE = EMBEDDING_SETTINGS.device_mode
@@ -597,6 +597,57 @@ def embed_simple_collection(
     return manifest
 
 
+def export_legal_relation_handoff(
+    dataset_dir: Path,
+    handoff_dir: Path,
+) -> dict:
+    """legal_relation의 source/import JSONL을 임베딩 없이 생성한다.
+
+    임베딩 대상에서 제외된 legal_relation은 OpenSearch 전용이다.
+    dataset 재빌드 시 항상 import JSONL을 최신화하기 위해 사용한다.
+    """
+    collection_name = "legal_relation"
+    rows = _iter_simple_rows(dataset_dir, collection_name)
+    canonical_id_counter: Counter[str] = Counter(_canonical_id_from_row(r) for r in rows)
+    duplicate_canonical_ids: set[str] = {cid for cid, n in canonical_id_counter.items() if n > 1}
+    relation_model_counter: Counter[str] = Counter(
+        str(r.get("relation_model") or "unknown") for r in rows
+    )
+
+    metas: list[dict] = []
+    texts: list[str] = []
+    source_rows: list[dict] = []
+
+    for row in rows:
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        point_id = _build_point_id(row, duplicate_canonical_ids)
+        meta = _build_meta(collection_name, row, point_id, text)
+        metas.append(meta)
+        texts.append(text)
+        source_rows.append(dict(row))
+
+    # 임베딩 없이 import row 구성 (_vector 제외)
+    import_rows: list[dict] = []
+    for meta, text in zip(metas, texts):
+        row = dict(meta)
+        row["text"] = text
+        row["_score"] = None
+        import_rows.append(row)
+
+    source_path = _write_variant_source(handoff_dir, collection_name, source_rows)
+    import_path = _write_variant_import(handoff_dir, collection_name, import_rows)
+
+    return {
+        "collection_name": collection_name,
+        "count": len(metas),
+        "relation_model_counts": dict(relation_model_counter),
+        "source_jsonl_path": str(source_path),
+        "import_jsonl_path": str(import_path),
+    }
+
+
 def write_embedding_manifest(
     handoff_dir: Path,
     dataset_dir: Path,
@@ -630,7 +681,9 @@ def write_embedding_manifest(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Embed Qdrant 3-collection handoff files.")
+    parser = argparse.ArgumentParser(
+        description="Embed Qdrant handoff files for law_article and legal_case."
+    )
     parser.add_argument(
         "--dataset-dir",
         type=Path,
@@ -684,7 +737,7 @@ def main() -> None:
                 batch_size=batch_size,
             )
         )
-        for collection_name in ("legal_case", "legal_relation"):
+        for collection_name in ("legal_case",):
             collection_manifests.append(
                 embed_simple_collection(
                     model=model,

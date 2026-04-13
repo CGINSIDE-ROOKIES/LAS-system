@@ -18,9 +18,52 @@ from src.common.payload_utils import _first_non_empty, _walk_objects
 
 DECISION_DATE_KEYS_BY_TARGET = {
     "prec": ("선고일자", "판결일자", "선고일"),
-    "detc": ("선고일자", "결정일자", "선고일"),
-    "expc": ("회신일자", "등록일자", "생산일자", "작성일자"),
+    "detc": ("종국일자", "선고일자", "결정일자", "선고일"),
+    "expc": ("회신일자", "해석일자", "등록일자", "생산일자", "작성일자"),
     "decc": ("재결일자", "의결일자", "결정일자"),
+}
+
+BODY_SECTION_KEYS_BY_TARGET = {
+    "prec": (
+        ("판시사항", ("판시사항",)),
+        ("판결요지", ("판결요지",)),
+        ("참조조문", ("참조조문",)),
+        ("참조판례", ("참조판례",)),
+        ("판례내용", ("판례내용",)),
+    ),
+    "detc": (
+        ("판시사항", ("판시사항",)),
+        ("결정요지", ("결정요지",)),
+        ("심판대상조문", ("심판대상조문",)),
+        ("참조조문", ("참조조문",)),
+        ("참조판례", ("참조판례",)),
+        ("전문", ("전문",)),
+    ),
+    "expc": (
+        ("질의요지", ("질의요지",)),
+        ("회답", ("회답",)),
+        ("이유", ("이유",)),
+    ),
+    "decc": (
+        ("청구취지", ("청구취지",)),
+        ("주문", ("주문",)),
+        ("재결요지", ("재결요지",)),
+        ("이유", ("이유",)),
+    ),
+}
+
+CASE_REFERENCE_KEYS_BY_TARGET = {
+    "prec": ("참조판례",),
+    "detc": ("참조판례",),
+    "expc": (),
+    "decc": (),
+}
+
+ARTICLE_REFERENCE_KEYS_BY_TARGET = {
+    "prec": ("참조조문",),
+    "detc": ("참조조문",),
+    "expc": (),
+    "decc": (),
 }
 
 GENERIC_TEXT_KEYS = (
@@ -192,6 +235,34 @@ def extract_case_body_text(
     return sanitize_inline_urls("\n\n".join(deduped).strip())
 
 
+def extract_case_body_sections(
+    target: str,
+    payload: dict[str, Any],
+    fallback_text: str | None = None,
+) -> list[dict[str, str]]:
+    sections: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    for label, keys in BODY_SECTION_KEYS_BY_TARGET.get(target, ()):
+        texts = _find_all_recursive(payload, keys)
+        deduped = _dedup_texts(texts)
+        if not deduped:
+            continue
+        section_text = sanitize_inline_urls("\n\n".join(deduped).strip())
+        normalized = _normalize_space(section_text)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        sections.append({"label": label, "text": section_text})
+
+    if not sections and fallback_text not in (None, ""):
+        fallback_body = _normalize_structure(str(fallback_text))
+        if fallback_body:
+            sections.append({"label": "본문", "text": sanitize_inline_urls(fallback_body)})
+
+    return sections
+
+
 
 def parse_case_payload(
     target: str,
@@ -201,10 +272,27 @@ def parse_case_payload(
     fallback = fallback or {}
     meta = extract_case_meta(target, payload, fallback=fallback)
     body_text = extract_case_body_text(target, payload, fallback_text=str(fallback.get("text") or ""))
+    body_sections = extract_case_body_sections(target, payload, fallback_text=str(fallback.get("text") or ""))
+    structured_case_refs = extract_structured_case_number_refs(
+        target,
+        payload,
+        exclude_numbers=[meta.get("doc_number")],
+    )
+    structured_article_refs = extract_structured_article_refs(target, payload)
+
+    body_type = "text"
+    if len(body_text) < 100:
+        raw_html = str(payload.get("text") or payload.get("html") or "")
+        if "<img" in raw_html.lower():
+            body_type = "image_only"
 
     return {
         **meta,
         "body_text": body_text,
+        "body_type": body_type,
+        "body_sections": body_sections,
+        "structured_case_refs": structured_case_refs,
+        "structured_article_refs": structured_article_refs,
         "source_format": payload.get("_response_format"),
         "source_content_type": payload.get("_response_content_type"),
         "source_url": payload.get("_response_url"),
@@ -230,8 +318,9 @@ def find_related_law_names(text: str, family_law_names: list[str]) -> list[str]:
 
 
 
-FIRST_ARTICLE_PATTERN = re.compile(r"^제(\d+)조(?:의(\d+))?")
-CONTINUED_ARTICLE_PATTERN = re.compile(r"^(?:,|및|와|과|또는|혹은|·)(?:제)?(\d+)조(?:의(\d+))?")
+_SUBARTICLE_UNIT_BLOCK = r"(?P<unit_block>(?:\s*제\s*\d+\s*(?:항|호|목))*)"
+FIRST_ARTICLE_PATTERN = re.compile(rf"^제(\d+)조(?:의(\d+))?{_SUBARTICLE_UNIT_BLOCK}")
+CONTINUED_ARTICLE_PATTERN = re.compile(rf"^(?:,|및|와|과|또는|혹은|·)(?:제)?(\d+)조(?:의(\d+))?{_SUBARTICLE_UNIT_BLOCK}")
 CASE_NUMBER_REF_PATTERN = re.compile(r"(?<!\d)(?P<year>\d{2,4})(?P<case_type>[가-힣]{1,4})(?P<serial>\d{1,8})(?!\d)")
 ALLOWED_CASE_TYPE_TOKENS = {
     "가",
@@ -328,12 +417,35 @@ CASE_REF_CONTEXT_PATTERN = re.compile(
 CASE_REF_TRAILING_NOISE_PATTERN = re.compile(r"^(?:원|만원|천원|억원|조원|개|건|명|차|항|호|조)")
 
 
-def _format_article_ref(main_no: str, branch_no: str | None) -> dict[str, str]:
+_SUBARTICLE_UNIT_PARSE_PATTERN = re.compile(r"제\s*(\d+)\s*(항|호|목)")
+
+
+def _extract_subarticle_units(unit_block: str | None) -> dict[str, str | None]:
+    paragraph_no: str | None = None
+    item_no: str | None = None
+    subitem_no: str | None = None
+    for match in _SUBARTICLE_UNIT_PARSE_PATTERN.finditer(str(unit_block or "")):
+        number = str(int(match.group(1)))
+        unit = match.group(2)
+        if unit == "항" and paragraph_no is None:
+            paragraph_no = number
+        elif unit == "호" and item_no is None:
+            item_no = number
+        elif unit == "목" and subitem_no is None:
+            subitem_no = number
+    return {"paragraph_no": paragraph_no, "item_no": item_no, "subitem_no": subitem_no}
+
+
+def _format_article_ref(main_no: str, branch_no: str | None, unit_block: str | None = None) -> dict[str, str | None]:
     article_key = str(int(main_no)) if not branch_no else f"{int(main_no)}-{int(branch_no)}"
     article_display = f"제{int(main_no)}조" if not branch_no else f"제{int(main_no)}조의{int(branch_no)}"
+    units = _extract_subarticle_units(unit_block)
     return {
         "article_key": article_key,
         "article_no_display": article_display,
+        "paragraph_no": units["paragraph_no"],
+        "item_no": units["item_no"],
+        "subitem_no": units["subitem_no"],
     }
 
 
@@ -346,6 +458,25 @@ def _is_valid_case_type_token(case_type: str) -> bool:
     if any(char in DISALLOWED_CASE_TYPE_TOKENS for char in token):
         return False
     return token in ALLOWED_CASE_TYPE_TOKENS
+
+
+_DETC_CASE_TYPE_TOKENS = {"헌가", "헌나", "헌다", "헌라", "헌마", "헌바", "헌사", "헌아"}
+
+
+def classify_case_type_from_number(case_number: str) -> str | None:
+    """사건번호에서 사례 유형(prec/detc)을 분류한다.
+
+    헌[가나다라마바사아] → "detc", 기타 유효 토큰 → "prec", 그 외 → None.
+    """
+    match = re.fullmatch(r"(\d{2,4})([가-힣]{1,4})(\d{1,8})", str(case_number or "").strip())
+    if not match:
+        return None
+    token = match.group(2)
+    if token in _DETC_CASE_TYPE_TOKENS:
+        return "detc"
+    if token in ALLOWED_CASE_TYPE_TOKENS:
+        return "prec"
+    return None
 
 
 def _has_case_reference_context(text: str, start: int, end: int) -> bool:
@@ -383,8 +514,9 @@ def extract_explicit_article_refs(text: str, family_law_names: list[str]) -> dic
                 start = law_idx + len(normalized_law)
                 continue
 
-            main_no, branch_no = first_match.groups()
-            article = _format_article_ref(main_no, branch_no)
+            main_no, branch_no = first_match.group(1), first_match.group(2)
+            unit_block = first_match.group("unit_block")
+            article = _format_article_ref(main_no, branch_no, unit_block)
             if article["article_key"] not in seen_keys:
                 seen_keys.add(article["article_key"])
                 matches.append(article)
@@ -394,8 +526,9 @@ def extract_explicit_article_refs(text: str, family_law_names: list[str]) -> dic
                 continued_match = CONTINUED_ARTICLE_PATTERN.match(normalized_text[cursor:])
                 if not continued_match:
                     break
-                main_no, branch_no = continued_match.groups()
-                article = _format_article_ref(main_no, branch_no)
+                main_no, branch_no = continued_match.group(1), continued_match.group(2)
+                unit_block = continued_match.group("unit_block")
+                article = _format_article_ref(main_no, branch_no, unit_block)
                 if article["article_key"] not in seen_keys:
                     seen_keys.add(article["article_key"])
                     matches.append(article)
@@ -472,6 +605,71 @@ def extract_case_number_refs(text: str, exclude_numbers: Iterable[str] | None = 
             continue
         seen.add(normalized_candidate)
         results.append(candidate)
+
+    return results
+
+
+def extract_structured_case_number_refs(
+    target: str,
+    payload: dict[str, Any],
+    exclude_numbers: Iterable[str] | None = None,
+) -> list[dict[str, str]]:
+    keys = CASE_REFERENCE_KEYS_BY_TARGET.get(target, ())
+    if not keys:
+        return []
+
+    results: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    for text in _find_all_recursive(payload, keys):
+        for case_number in extract_case_number_refs(text, exclude_numbers=exclude_numbers):
+            normalized_case_number = _normalize_name(case_number)
+            if not normalized_case_number or normalized_case_number in seen:
+                continue
+            seen.add(normalized_case_number)
+            results.append(
+                {
+                    "case_number": case_number,
+                    "source": "structured_field",
+                    "field_name": keys[0],
+                }
+            )
+
+    return results
+
+
+def extract_structured_article_refs(target: str, payload: dict[str, Any]) -> list[dict[str, str]]:
+    keys = ARTICLE_REFERENCE_KEYS_BY_TARGET.get(target, ())
+    if not keys:
+        return []
+
+    results: list[dict[str, str]] = []
+
+    for text in _find_all_recursive(payload, keys):
+        normalized_text = _normalize_structure(text)
+        if not normalized_text:
+            continue
+        family_law_names = []
+        for law_match in re.finditer(r"([가-힣0-9ㆍ·()\-\s]+?)\s*제\d+조(?:의\d+)?", normalized_text):
+            law_name = re.sub(r"\s+", " ", str(law_match.group(1) or "")).strip(" ,./")
+            if law_name and law_name not in family_law_names:
+                family_law_names.append(law_name)
+
+        refs_map = extract_explicit_article_refs(normalized_text, family_law_names)
+        for law_name, refs in refs_map.items():
+            for article in refs:
+                row = {
+                    "law_name": law_name,
+                    "article_key": article["article_key"],
+                    "article_no_display": article["article_no_display"],
+                    "paragraph_no": article.get("paragraph_no"),
+                    "item_no": article.get("item_no"),
+                    "subitem_no": article.get("subitem_no"),
+                    "source": "structured_field",
+                    "field_name": keys[0],
+                }
+                if row not in results:
+                    results.append(row)
 
     return results
 

@@ -4,9 +4,8 @@ Legal AI Assistant FastAPI 백엔드 서버.
 
 ## 사전 준비
 
-- OpenSearch가 로컬 Docker에서 실행 중이어야 한다.
-- Qdrant는 외부 서버에 컬렉션(`law_article`, `legal_case`, `legal_relation`)이 준비되어 있어야 한다.
-- `.env` 파일에 환경변수가 설정되어 있어야 한다.
+- Qdrant·OpenSearch는 서버에서 운영 중. `.env`에 연결 정보 설정 필요.
+- PostgreSQL 연결 정보도 `.env`에 설정 필요.
 
 ## 실행
 
@@ -14,45 +13,56 @@ Legal AI Assistant FastAPI 백엔드 서버.
 
 ```bash
 cd apps/backend/api
-ln -sf ../rag/.env .env   # rag/.env를 공유 (최초 1회, rag/.env가 먼저 설정되어 있어야 함)
-
-uv run uvicorn main:app --reload                    # 개발 서버
-uv run uvicorn main:app --host 0.0.0.0 --port 8000  # 운영 서버
+cp .env.example .env   # 최초 1회
+uv run uvicorn main:app --reload    # 개발 서버 (localhost:8000)
 ```
 
 ## 환경변수
 
-`.env` 파일에 아래 항목을 설정한다. 전체 항목은 `../rag/.env.example` 참조.
+`.env` 파일에 아래 항목을 설정한다.
 
 ```env
-# Qdrant — 외부 서버 IP로 변경 필요
+# PostgreSQL
+DATABASE_URL=postgresql://...
+
+# 로그 레벨 (기본: INFO)
+LOG_LEVEL=INFO
+
+# Qdrant — 서버 연결 정보
 QDRANT_URL=http://<서버IP>:6333
 QDRANT_COLLECTIONS=law_article,legal_case,legal_relation
 # QDRANT_API_KEY=
 
-# OpenSearch — 로컬 Docker
-OPENSEARCH_URL=http://localhost:9200
+# OpenSearch — 서버 연결 정보
+OPENSEARCH_URL=http://<서버IP>:9200
 OPENSEARCH_INDEX=las_legal_docs
 
-# 임베딩 provider (sentence_transformers | openai)
+# 임베딩
 EMBEDDING_PROVIDER=sentence_transformers
 EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-mpnet-base-v2
 # OpenAI 사용 시: EMBEDDING_PROVIDER=openai, EMBEDDING_MODEL=text-embedding-3-large, OPENAI_API_KEY=...
 
-# LLM — Gemini
+# LLM
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-flash-latest
 LLM_MAX_TOKENS=4096
 ```
 
+앱 버전(`FastAPI version`)은 `apps/backend/api/pyproject.toml`의 `project.version`을 읽어 사용한다.
+
 ## 엔드포인트
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/health` | 서버 상태 확인 |
-| POST | `/api/v1/qa/ask` | Q&A 단일 응답 |
-| POST | `/api/v1/qa/ask/stream` | Q&A SSE 스트리밍 응답 |
+| `GET` | `/health` | 서버 상태 확인 |
+| `POST` | `/api/v1/qa/ask` | Q&A 단일 응답 |
+| `POST` | `/api/v1/qa/ask/stream` | Q&A SSE 스트리밍 응답 |
+| `GET` | `/api/v1/qa/history` | Q&A 히스토리 목록 |
+| `GET` | `/api/v1/qa/history/{id}` | 히스토리 단건 조회 |
+| `DELETE` | `/api/v1/qa/history/{id}` | 히스토리 단건 삭제 |
+| `DELETE` | `/api/v1/qa/history` | 히스토리 다건 삭제 |
+| `POST` | `/api/v1/qa/{id}/feedback` | 답변 피드백 제출 (👍/👎) |
 
 ### POST /api/v1/qa/ask
 
@@ -61,19 +71,17 @@ LLM_MAX_TOKENS=4096
 {
   "question": "연장근로 최대 시간은?",
   "doc_types": ["law"],
-  "law_names": ["근로기준법"]
+  "law_filter": ["근로기준법"]
 }
 ```
-`doc_types`, `law_names`는 선택 항목이다.
+`doc_types`, `law_filter`는 선택 항목.
 
 응답:
 ```json
 {
   "answer": "...",
-  "sources": [{"source_id": "...", "doc_type": "...", "law_name": "...", "rank": 1, "score": 0.9}],
   "retrieved_docs": [...],
-  "law_context_status": "ok",
-  "law_context_added": false
+  "law_context_status": "ok"
 }
 ```
 
@@ -84,5 +92,47 @@ LLM_MAX_TOKENS=4096
 ```
 data: {"type": "chunk", "content": "연장근로는"}
 data: {"type": "chunk", "content": " 주 12시간을"}
-data: {"type": "done"}
+data: {"type": "done", "retrieved_docs": [...], "law_context_status": "ok", "qa_id": "..."}
+data: {"type": "error", "code": "EMBEDDING_ERROR", "error": "..."}
+data: {"type": "error", "code": "LLM_TIMEOUT", "error": "..."}
+data: {"type": "error", "code": "LLM_ERROR", "error": "..."}
+data: {"type": "error", "code": "PIPELINE_ERROR", "error": "..."}
+```
+
+## 에러 코드
+
+### 공통(JSON)
+
+| code | HTTP status | 설명 |
+|---|---:|---|
+| `VALIDATION_ERROR` | 422 | 요청 바디/쿼리 유효성 오류 |
+| `HTTP_ERROR` | 가변 | 라우터에서 명시적으로 raise한 HTTPException |
+| `EMBEDDING_ERROR` | 503 | 임베딩 단계 오류 |
+| `LLM_TIMEOUT` | 504 | LLM 요청 타임아웃 |
+| `LLM_ERROR` | 502 | LLM 호출/응답 파싱 오류 |
+| `PIPELINE_ERROR` | 503 | 기타 retrieval 파이프라인 오류 |
+| `INTERNAL_ERROR` | 500 | 서버 내부 오류 |
+
+### 스트리밍(SSE)
+
+`/api/v1/qa/ask/stream`의 오류 이벤트는 아래 형식이다.
+
+```text
+data: {"type":"error","code":"EMBEDDING_ERROR|LLM_TIMEOUT|LLM_ERROR|PIPELINE_ERROR|INTERNAL_ERROR","error":"..."}
+```
+
+### POST /api/v1/qa/{id}/feedback
+
+요청:
+```json
+{
+  "thumbs_up": true,
+  "comment": "도움이 됐어요"
+}
+```
+`comment`는 선택 항목. 동일 `qa_id` 재제출 시 덮어씀 (upsert).
+
+응답 (`201 Created`):
+```json
+{ "id": "<feedback_uuid>" }
 ```
