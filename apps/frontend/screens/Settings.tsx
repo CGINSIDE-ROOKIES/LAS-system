@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTheme } from "next-themes";
+import { defaultSettings, SETTINGS_KEY, type Settings } from "@/hooks/useSettings";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,43 +11,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { Save } from "lucide-react";
 
-interface Settings {
-  model: string;
-  topK: number;
-  answerDetail: string;
-  streamingResponse: boolean;
-  showCitations: boolean;
-  showLawGraph: boolean;
-  showFollowUpQuestions: boolean;
-}
-
-const defaultSettings: Settings = {
-  model: "gemini",
-  topK: 5,
-  answerDetail: "normal",
-  streamingResponse: true,
-  showCitations: true,
-  showLawGraph: true,
-  showFollowUpQuestions: true,
-};
-
 const Settings = () => {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const { theme, setTheme } = useTheme();
 
   useEffect(() => {
-    const saved = localStorage.getItem("legal-ai-settings");
-    if (saved) {
-      try {
-        setSettings({ ...defaultSettings, ...JSON.parse(saved) });
-      } catch (e) {
-        console.error("Failed to parse settings:", e);
-      }
-    }
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (raw) setSettings({ ...defaultSettings, ...JSON.parse(raw) });
+    } catch {}
   }, []);
 
   const handleSave = () => {
-    localStorage.setItem("legal-ai-settings", JSON.stringify(settings));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     toast.success("설정이 저장되었습니다.", {
       description: "변경사항이 적용됩니다.",
     });
