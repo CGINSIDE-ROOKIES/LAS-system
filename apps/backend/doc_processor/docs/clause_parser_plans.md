@@ -1,12 +1,12 @@
-## Structure Analysis Status
+## Parser Status
 
 Terminology:
 
 - `clause` = `조`
 - `subclause` = `항`
-- `호`, `목` are still out of scope
+- `호`, `목` remain out of scope for now
 
-Current stage coverage:
+Current parser coverage:
 
 1. Load a document into `DocIR`
 2. Optionally reject obviously irrelevant documents
@@ -15,13 +15,13 @@ Current stage coverage:
 5. Review boundary suspects with a batch LLM call when enabled
 6. Label paragraphs deterministically
 7. Review only ambiguous labels with per-unit LLM workers when enabled
-8. Write structure metadata back onto `working_doc`
+8. Write parser metadata back onto `working_doc`
 
 Important implementation details:
 
-- Clause and subclause numbering rules are chosen at the document level, not by “first thing seen wins”.
-- Paragraph metadata is attached through `paragraph.meta.phase1`.
-- Document-level metadata is attached through `working_doc.meta.phase1_doc`.
+- Clause and subclause numbering rules are chosen at the document level.
+- Paragraph metadata should be exposed as `paragraph.meta.parser`.
+- Document-level metadata should be exposed as `working_doc.meta.parser_doc`.
 - Tables inherit the owning paragraph context for now.
 
 Current graph shape:
@@ -34,9 +34,15 @@ Current graph shape:
 - `llm_analysis_worker`
 - `finalize_llm`
 
-Planned later work:
+Planned next work:
 
-1. Separate follow-on analysis stages instead of expanding the current router
-2. Richer tail/signature detachment around contract endings
-3. Clause-level risk review and annotation stages
-4. Human-in-the-loop edit application on top of versioned `DocIR`
+1. Keep the parser stage separate from downstream review/apply stages
+2. Add richer tail/signature detachment around contract endings
+3. Add clause-level risk review and annotation stages
+4. Add pause/resume human review on top of versioned `DocIR`
+5. Add native document write-back plus re-parse verification
+6. Add API orchestration in `apps/backend/api`
+
+Detailed API planning lives in:
+
+- [api_integration_plan.md](/home/maxjo/Work/LAS-system/apps/backend/doc_processor/docs/api_integration_plan.md)
