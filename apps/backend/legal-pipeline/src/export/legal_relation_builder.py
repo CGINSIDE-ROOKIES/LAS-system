@@ -411,6 +411,8 @@ def _merge_relation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             dict.fromkeys(list(current.get("_referenced_case_numbers", [])) + list(row.get("_referenced_case_numbers", [])))
         )
         current["relation_confidence"] = max(float(current.get("relation_confidence") or 0), float(row.get("relation_confidence") or 0))
+        if row.get("body_verified") is True:
+            current["body_verified"] = True
         if not current.get("evidence_preview") and row.get("evidence_preview"):
             current["evidence_preview"] = row.get("evidence_preview")
         if not current.get("source_file_path") and row.get("source_file_path"):
@@ -445,7 +447,7 @@ def _is_unverified_search_hit(row: dict[str, Any]) -> bool:
 
     제거 기준:
       - relation_model == "law_to_case"
-      - body_verified is False
+      - body_verified이 True가 아님 (False 또는 필드 없음 — legacy expanded row 포함)
       - relation_types == ["search_hit"]
 
     보조 검증: 위 조건이 참이면 confidence가 0.45여야 한다.
@@ -453,7 +455,7 @@ def _is_unverified_search_hit(row: dict[str, Any]) -> bool:
     """
     if row.get("relation_model") != "law_to_case":
         return False
-    if row.get("body_verified") is not False:
+    if row.get("body_verified") is True:
         return False
     types = list(row.get("relation_types") or [])
     if types != ["search_hit"]:

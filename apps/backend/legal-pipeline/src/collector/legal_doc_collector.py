@@ -481,6 +481,8 @@ def collect_list_refs_for_law_name(
     seen: set[tuple[str, str, str]] = set()
     filtered_out = 0
     exclude_doc_kinds = exclude_doc_kinds or set()
+    page = 0
+    items: list[dict[str, Any]] = []
 
     for page in range(1, max_pages + 1):
         payload = fetch_list_page(
