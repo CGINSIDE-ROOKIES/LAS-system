@@ -199,7 +199,6 @@ def _run_callback_mode(config: Phase1Config, *, repeat: int, payload_size: int) 
         with langfuse_callback_context(
             config,
             source=f"tests/langfuse_export_check.py:callback:{index + 1}",
-            input_payload={"mode": "callback", "iteration": index + 1},
         ) as invoke_config:
             call_config = dict(invoke_config)
             call_config["run_name"] = "doc_processor.langfuse_export_check.callback"

@@ -12,9 +12,9 @@ def _prompt_path(profile: str, key: str) -> Path:
     return root / profile / f"{key}.md"
 
 
-def load_prompt(key: str, *, profile: str = "default", reload: bool = False) -> str:
+def load_prompt(key: str, *, profile: str = "default") -> str:
     cache_key = (profile, key)
-    if not reload and cache_key in _CACHE:
+    if cache_key in _CACHE:
         return _CACHE[cache_key]
 
     path = _prompt_path(profile, key)

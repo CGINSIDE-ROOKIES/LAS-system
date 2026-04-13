@@ -162,7 +162,6 @@ def langfuse_callback_context(
     config: Any | None,
     *,
     source: str,
-    input_payload: dict[str, Any] | None = None,
 ) -> Iterator[dict[str, Any]]:
     if not langfuse_enabled(config):
         yield {}

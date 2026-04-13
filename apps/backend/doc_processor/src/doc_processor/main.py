@@ -16,18 +16,10 @@ def run_phase1(
     graph = build_phase1_graph()
     resolved_config = config or Phase1Config()
     initial = WorkflowState(target_file=Path(source), phase1_config=resolved_config)
-    trace_input = {
-        "source": str(initial.target_file),
-        "relevance_mode": initial.phase1_config.relevance_mode,
-        "boundary_review_enabled": initial.phase1_config.boundary_review_enabled,
-        "label_review_enabled": initial.phase1_config.label_review_enabled,
-        "max_concurrent_workers": initial.phase1_config.max_concurrent_workers,
-    }
     log_info(initial.phase1_config, "structure analysis run start source=%s", initial.target_file)
     with langfuse_callback_context(
         initial.phase1_config,
         source=str(initial.target_file),
-        input_payload=trace_input,
     ) as invoke_config:
         if invoke_config:
             invoke_config = dict(invoke_config)

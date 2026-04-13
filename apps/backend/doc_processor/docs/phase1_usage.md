@@ -1,16 +1,20 @@
-# Phase 1 Usage
+# Structure Analysis Usage
 
-This document shows how to manually run and inspect the phase-1 clause parser in:
+This document shows how to manually run and inspect the current structure-analysis stage in:
 
 - [src/doc_processor](/home/maxjo/Work/LAS-system/apps/backend/doc_processor/src/doc_processor)
 
-Phase 1 currently does:
+The code still lives under the `phase1` package and `Phase1*` types, but the stage name in logs and tracing is `structure_analysis`.
+
+Current behavior:
 
 - document loading through `document-processor`
 - optional relevance screening
 - deterministic clause/subclause parsing
 - boundary suspect detection
 - optional LLM review for relevance / boundaries / ambiguous labels
+- boundary review as a batch request over suspect blocks
+- ambiguous label review as per-unit worker fan-out
 - fixed paragraph-category labeling
 - clause/subclause entry generation
 - writing phase-1 metadata back onto `working_doc`
@@ -45,6 +49,16 @@ Relevant types:
 - [WorkflowState](/home/maxjo/Work/LAS-system/apps/backend/doc_processor/src/doc_processor/state.py)
 - [WorkflowMeta](/home/maxjo/Work/LAS-system/apps/backend/doc_processor/src/doc_processor/types.py)
 - [ClauseEntry](/home/maxjo/Work/LAS-system/apps/backend/doc_processor/src/doc_processor/types.py)
+
+Current graph nodes:
+
+- `load_document`
+- `screen_relevance`
+- `regex_analysis`
+- `llm_analysis`
+- `boundary_llm_batch`
+- `llm_analysis_worker`
+- `finalize_llm`
 
 ## Quick deterministic run
 
@@ -122,15 +136,22 @@ Prompt files live here:
 
 ## Langfuse observability
 
-Phase 1 now has optional Langfuse instrumentation for:
+The stage has optional Langfuse instrumentation for:
 
 - the top-level `run_phase1(...)` execution
-- each graph node as a nested span
+- graph/node execution through the LangChain callback path
 - LangChain/LangGraph-compatible LLM calls through Langfuse's `CallbackHandler`
 
 The integration code lives here:
 
 - [observability/langfuse.py](/home/maxjo/Work/LAS-system/apps/backend/doc_processor/src/doc_processor/observability/langfuse.py)
+
+Important behavior:
+
+- graph traces keep the workflow visible in Langfuse
+- `DocIR` is sanitized before graph node inputs/outputs are sent to Langfuse
+- the trace keeps a compact document summary instead of full pages/paragraph text
+- LLM generations are still traced normally
 
 ### Config fields
 
