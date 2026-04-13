@@ -12,17 +12,21 @@ import { Save } from "lucide-react";
 interface Settings {
   model: string;
   topK: number;
+  answerDetail: string;
   streamingResponse: boolean;
   showCitations: boolean;
   showLawGraph: boolean;
+  showFollowUpQuestions: boolean;
 }
 
 const defaultSettings: Settings = {
   model: "gemini",
-  topK: 10,
+  topK: 5,
+  answerDetail: "normal",
   streamingResponse: true,
   showCitations: true,
   showLawGraph: true,
+  showFollowUpQuestions: true,
 };
 
 const Settings = () => {
@@ -32,7 +36,7 @@ const Settings = () => {
     const saved = localStorage.getItem("legal-ai-settings");
     if (saved) {
       try {
-        setSettings(JSON.parse(saved));
+        setSettings({ ...defaultSettings, ...JSON.parse(saved) });
       } catch (e) {
         console.error("Failed to parse settings:", e);
       }
@@ -65,6 +69,7 @@ const Settings = () => {
               </div>
 
               {/* Model Settings */}
+              {/* TODO: per-request 모델 변경은 현재 미지원. 백엔드에서 모델 파라미터 수신 지원 시 활성화 */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">모델 설정</CardTitle>
@@ -74,12 +79,13 @@ const Settings = () => {
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="space-y-2">
-                    <Label htmlFor="model">LLM 모델</Label>
+                    <Label htmlFor="model" className="text-muted-foreground">LLM 모델</Label>
                     <Select
                       value={settings.model}
                       onValueChange={(value) =>
                         setSettings((prev) => ({ ...prev, model: value }))
                       }
+                      disabled
                     >
                       <SelectTrigger id="model" className="w-full max-w-xs">
                         <SelectValue placeholder="모델 선택" />
@@ -90,6 +96,31 @@ const Settings = () => {
                         <SelectItem value="kt-midm">KT midm</SelectItem>
                       </SelectContent>
                     </Select>
+                    <p className="text-xs text-muted-foreground">
+                      현재 모델 변경은 지원되지 않습니다. 추후 업데이트 예정입니다.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="answerDetail">답변 상세도</Label>
+                    <Select
+                      value={settings.answerDetail}
+                      onValueChange={(value) =>
+                        setSettings((prev) => ({ ...prev, answerDetail: value }))
+                      }
+                    >
+                      <SelectTrigger id="answerDetail" className="w-full max-w-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="brief">간략</SelectItem>
+                        <SelectItem value="normal">보통 (기본)</SelectItem>
+                        <SelectItem value="detailed">상세</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      상세할수록 더 긴 답변을 제공합니다.
+                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -104,7 +135,7 @@ const Settings = () => {
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="space-y-2">
-                    <Label htmlFor="topk">Top-K 결과</Label>
+                    <Label htmlFor="topk">검색 범위</Label>
                     <Select
                       value={settings.topK.toString()}
                       onValueChange={(value) =>
@@ -115,13 +146,13 @@ const Settings = () => {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="5">5개</SelectItem>
-                        <SelectItem value="10">10개</SelectItem>
-                        <SelectItem value="20">20개</SelectItem>
+                        <SelectItem value="5">빠른 검색 (기본)</SelectItem>
+                        <SelectItem value="10">일반 검색</SelectItem>
+                        <SelectItem value="20">정밀 검색</SelectItem>
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">
-                      검색 결과로 반환할 최대 문서 수입니다.
+                      범위가 넓을수록 더 많은 법령을 참조하여 답변합니다.
                     </p>
                   </div>
                 </CardContent>
@@ -164,6 +195,22 @@ const Settings = () => {
                       checked={settings.showCitations}
                       onCheckedChange={(checked) =>
                         setSettings((prev) => ({ ...prev, showCitations: checked }))
+                      }
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="followUp">후속 질문 추천</Label>
+                      <p className="text-xs text-muted-foreground">
+                        답변 후 관련 후속 질문을 추천합니다.
+                      </p>
+                    </div>
+                    <Switch
+                      id="followUp"
+                      checked={settings.showFollowUpQuestions}
+                      onCheckedChange={(checked) =>
+                        setSettings((prev) => ({ ...prev, showFollowUpQuestions: checked }))
                       }
                     />
                   </div>
