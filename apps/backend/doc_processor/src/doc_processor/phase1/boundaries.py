@@ -21,6 +21,10 @@ class BoundaryReviewOutput(BaseModel):
     occurrence: int = 1
 
 
+class BoundaryBatchReviewOutput(BaseModel):
+    reviews: list[BoundaryReviewOutput]
+
+
 def _coarse_boundary_hint(paragraph: ParagraphAnalysis) -> str:
     text = paragraph.text.strip()
     if paragraph.has_tables:
@@ -41,6 +45,12 @@ def _coarse_boundary_hint(paragraph: ParagraphAnalysis) -> str:
 def detect_boundary_suspects(analysis: Phase1Analysis) -> Phase1Analysis:
     suspect_ids: set[str] = set()
     paragraph_map = paragraph_lookup(analysis.paragraphs)
+    clauses_with_subclause_headings = {
+        paragraph.clause_id
+        for paragraph in analysis.paragraphs
+        if paragraph.clause_id
+        and any(span.kind == ParagraphCategory.SUBCLAUSE_HEADING for span in paragraph.spans)
+    }
 
     if analysis.clause_entries:
         suspect_ids.update(analysis.clause_entries[-1].member_unit_ids)
@@ -64,6 +74,7 @@ def detect_boundary_suspects(analysis: Phase1Analysis) -> Phase1Analysis:
             paragraph.text.lstrip().startswith(tuple(f"{value}." for value in range(1, 10)))
             and paragraph.clause_rule_name == "article"
             and paragraph.subclause_rule_name != "numeric_dot"
+            and paragraph.clause_id in clauses_with_subclause_headings
         ):
             reasons.append("mismatched_numeric_heading")
         if paragraph.page_number is not None and paragraph.page_number > 1 and hint in {"title", "header"}:
@@ -87,10 +98,19 @@ def review_boundary_suspects_with_llm(
     if not config.boundary_review_enabled or not analysis.boundary_suspect_unit_ids:
         return {}
 
-    results: dict[str, BoundaryReviewOutput] = {}
-    for unit_id in analysis.boundary_suspect_unit_ids:
-        results[unit_id] = review_single_boundary_suspect_with_llm(doc, analysis, unit_id, config)
-    return results
+    prompt = load_prompt("phase1/clause_context_boundary_batch", profile=config.prompt_profile)
+    blocks = _build_boundary_review_blocks(analysis)
+    payload = {"suspect_blocks": blocks}
+    output = invoke_structured_model(
+        profile=config.boundary_llm_profile,
+        prompt=prompt,
+        payload=payload,
+        schema=BoundaryBatchReviewOutput,
+        model_override=config.boundary_model_override,
+        config=config,
+    )
+    reviews = {review.unit_id: review for review in output.reviews if review.unit_id in set(analysis.boundary_suspect_unit_ids)}
+    return reviews
 
 
 def review_single_boundary_suspect_with_llm(
@@ -103,7 +123,9 @@ def review_single_boundary_suspect_with_llm(
     paragraph_map = paragraph_lookup(analysis.paragraphs)
     paragraph = paragraph_map[unit_id]
     index = analysis.paragraphs.index(paragraph)
-    prev_text = next((candidate.text for candidate in reversed(analysis.paragraphs[:index]) if candidate.text.strip()), "")
+    prev_text = analysis.paragraphs[index - 1].text if index > 0 else ""
+    if prev_text is None:
+        prev_text = ""
     next_text = next((candidate.text for candidate in analysis.paragraphs[index + 1 :] if candidate.text.strip()), "")
     payload = {
         "unit_id": paragraph.unit_id,
@@ -123,6 +145,61 @@ def review_single_boundary_suspect_with_llm(
         model_override=config.boundary_model_override,
         config=config,
     )
+
+
+def _build_boundary_review_blocks(analysis: Phase1Analysis) -> list[dict[str, object]]:
+    paragraphs = analysis.paragraphs
+    suspect_ids = set(analysis.boundary_suspect_unit_ids)
+    if not suspect_ids:
+        return []
+
+    clause_order: list[str] = []
+    suspect_indices_by_clause: dict[str, list[int]] = {}
+    for index, paragraph in enumerate(paragraphs):
+        if paragraph.unit_id not in suspect_ids:
+            continue
+        clause_id = paragraph.clause_id or f"unit:{paragraph.unit_id}"
+        if clause_id not in suspect_indices_by_clause:
+            clause_order.append(clause_id)
+            suspect_indices_by_clause[clause_id] = []
+        suspect_indices_by_clause[clause_id].append(index)
+
+    blocks: list[dict[str, object]] = []
+    for clause_id in clause_order:
+        suspect_indices = suspect_indices_by_clause[clause_id]
+        start_index = max(0, min(suspect_indices) - 1)
+        end_index = min(len(paragraphs) - 1, max(suspect_indices) + 1)
+        suspect_paragraphs = [paragraphs[index] for index in suspect_indices]
+        notes = [
+            note
+            for paragraph in suspect_paragraphs
+            for note in paragraph.notes
+            if note not in {"", None}
+        ]
+        blocks.append(
+            {
+                "block_id": clause_id,
+                "active_clause_no": suspect_paragraphs[0].clause_no,
+                "is_trailing_final_clause_chunk": any(
+                    "trailing final clause chunk" in note.lower() for note in notes
+                ),
+                "suspect_unit_ids": [paragraph.unit_id for paragraph in suspect_paragraphs],
+                "paragraphs": [
+                    {
+                        "unit_id": paragraph.unit_id,
+                        "text": paragraph.text,
+                        "is_suspect": paragraph.unit_id in suspect_ids,
+                        "current_kind": paragraph.spans[-1].kind.value if paragraph.spans else None,
+                        "active_clause_no": paragraph.clause_no,
+                        "active_subclause_no": paragraph.subclause_no,
+                        "paragraph_label": _coarse_boundary_hint(paragraph),
+                        "page_number": paragraph.page_number,
+                    }
+                    for paragraph in paragraphs[start_index : end_index + 1]
+                ],
+            }
+        )
+    return blocks
 
 
 def apply_boundary_reviews(analysis: Phase1Analysis, reviews: dict[str, BoundaryReviewOutput]) -> Phase1Analysis:

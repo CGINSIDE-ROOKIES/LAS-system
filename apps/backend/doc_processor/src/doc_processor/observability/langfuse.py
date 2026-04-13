@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import importlib.util
 import os
+from collections.abc import Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
 from typing import Any, Iterator
 
+from document_processor import DocIR
 from langgraph.types import Send
+from pydantic import BaseModel
 
 from ..env import ensure_local_env_loaded
 from ..logging_utils import log_info
@@ -59,6 +62,101 @@ def _string_metadata(config: Any | None, metadata: dict[str, Any] | None = None)
     return {key: str(value) for key, value in merged.items()}
 
 
+def _summarize_doc_ir(doc: DocIR) -> dict[str, Any]:
+    return {
+        "_excluded_type": "DocIR",
+        "doc_id": doc.doc_id,
+        "source_path": doc.source_path,
+        "source_doc_type": doc.source_doc_type,
+        "page_count": len(doc.pages),
+        "paragraph_count": len(doc.paragraphs),
+        "asset_count": len(doc.assets),
+    }
+
+
+def _sanitize_langfuse_payload(value: Any) -> Any:
+    if isinstance(value, DocIR):
+        return _summarize_doc_ir(value)
+    if isinstance(value, BaseModel):
+        data: dict[str, Any] = {}
+        for field_name, field in value.__class__.model_fields.items():
+            if field.exclude:
+                continue
+            data[field_name] = _sanitize_langfuse_payload(getattr(value, field_name))
+        return data
+    if isinstance(value, Mapping):
+        return {key: _sanitize_langfuse_payload(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_sanitize_langfuse_payload(item) for item in value]
+    return value
+
+
+def _make_langfuse_callback_handler():
+    from langfuse.langchain import CallbackHandler
+
+    class SanitizingCallbackHandler(CallbackHandler):
+        def on_chain_start(
+            self,
+            serialized,
+            inputs,
+            *,
+            run_id,
+            parent_run_id=None,
+            tags=None,
+            metadata=None,
+            **kwargs,
+        ):
+            return super().on_chain_start(
+                serialized,
+                _sanitize_langfuse_payload(inputs),
+                run_id=run_id,
+                parent_run_id=parent_run_id,
+                tags=tags,
+                metadata=metadata,
+                **kwargs,
+            )
+
+        def on_chain_end(
+            self,
+            outputs,
+            *,
+            run_id,
+            parent_run_id=None,
+            **kwargs,
+        ):
+            sanitized_kwargs = dict(kwargs)
+            if "inputs" in sanitized_kwargs:
+                sanitized_kwargs["inputs"] = _sanitize_langfuse_payload(sanitized_kwargs["inputs"])
+            return super().on_chain_end(
+                _sanitize_langfuse_payload(outputs),
+                run_id=run_id,
+                parent_run_id=parent_run_id,
+                **sanitized_kwargs,
+            )
+
+        def on_chain_error(
+            self,
+            error,
+            *,
+            run_id,
+            parent_run_id=None,
+            tags=None,
+            **kwargs,
+        ):
+            sanitized_kwargs = dict(kwargs)
+            if "inputs" in sanitized_kwargs:
+                sanitized_kwargs["inputs"] = _sanitize_langfuse_payload(sanitized_kwargs["inputs"])
+            return super().on_chain_error(
+                error,
+                run_id=run_id,
+                parent_run_id=parent_run_id,
+                tags=tags,
+                **sanitized_kwargs,
+            )
+
+    return SanitizingCallbackHandler()
+
+
 @contextmanager
 def langfuse_callback_context(
     config: Any | None,
@@ -71,11 +169,10 @@ def langfuse_callback_context(
         return
 
     from langfuse import propagate_attributes
-    from langfuse.langchain import CallbackHandler
 
-    trace_name = getattr(config, "langfuse_trace_name", "doc_processor.phase1")
-    metadata = _string_metadata(config, {"component": "doc_processor", "phase": "phase1", "source": source})
-    invoke_config: dict[str, Any] = {"callbacks": [CallbackHandler()], "run_name": trace_name}
+    trace_name = getattr(config, "langfuse_trace_name", "doc_processor.structure_analysis")
+    metadata = _string_metadata(config, {"component": "doc_processor", "phase": "structure_analysis", "source": source})
+    invoke_config: dict[str, Any] = {"callbacks": [_make_langfuse_callback_handler()], "run_name": trace_name}
     if metadata:
         invoke_config["metadata"] = metadata
     tags = getattr(config, "langfuse_tags", None)
@@ -101,9 +198,7 @@ def get_langchain_invoke_config(config: Any | None, *, metadata: dict[str, Any] 
     if current is None:
         if not langfuse_enabled(config):
             return {}
-        from langfuse.langchain import CallbackHandler
-
-        current = {"callbacks": [CallbackHandler()]}
+        current = {"callbacks": [_make_langfuse_callback_handler()]}
 
     invoke_config = dict(current)
     base_metadata = dict(invoke_config.get("metadata") or {})
@@ -123,7 +218,7 @@ def flush_langfuse(config: Any | None) -> None:
     get_client().flush()
 
 
-def traced_phase1_node(name: str):
+def traced_structure_analysis_node(name: str):
     def _summarize_goto(goto: Any) -> Any:
         if isinstance(goto, Send):
             return f"Send({goto.node})"
@@ -145,3 +240,6 @@ def traced_phase1_node(name: str):
         return wrapper
 
     return decorator
+
+
+traced_phase1_node = traced_structure_analysis_node

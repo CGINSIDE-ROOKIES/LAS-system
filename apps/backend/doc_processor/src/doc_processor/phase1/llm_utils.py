@@ -28,7 +28,12 @@ def invoke_structured_model(
             schema=schema,
         )
 
-    model = get_chat_model(profile=profile, model_override=model_override)
+    timeout_seconds = getattr(config, "llm_timeout_seconds", None) if config is not None else None
+    model = get_chat_model(
+        profile=profile,
+        model_override=model_override,
+        timeout_seconds=timeout_seconds,
+    )
     method = get_structured_method(profile=profile)
     if method is not None:
         structured = model.with_structured_output(schema, method=method)

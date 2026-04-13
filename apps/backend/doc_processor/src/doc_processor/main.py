@@ -23,7 +23,7 @@ def run_phase1(
         "label_review_enabled": initial.phase1_config.label_review_enabled,
         "max_concurrent_workers": initial.phase1_config.max_concurrent_workers,
     }
-    log_info(initial.phase1_config, "phase1 run start source=%s", initial.target_file)
+    log_info(initial.phase1_config, "structure analysis run start source=%s", initial.target_file)
     with langfuse_callback_context(
         initial.phase1_config,
         source=str(initial.target_file),
@@ -42,7 +42,7 @@ def run_phase1(
     if validated.phase1_result is not None:
         log_info(
             initial.phase1_config,
-            "phase1 run done accepted=%s clauses=%s subclauses=%s",
+            "structure analysis run done accepted=%s clauses=%s subclauses=%s",
             validated.phase1_result.accepted,
             validated.phase1_result.clause_count,
             validated.phase1_result.subclause_count,

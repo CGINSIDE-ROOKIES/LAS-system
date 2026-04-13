@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from document_processor import DocIR
 
 from ..types import ClauseEntry, ParagraphAnalysis, ParagraphCategory, Phase1Analysis, SubclauseEntry, TextSpan, WorkflowMeta
 from .rules import (
     NumberingMatch,
+    SUBCLAUSE_RULE_PRIORITY,
     detect_clause_rule,
     iter_subclause_matches,
     match_clause_start,
@@ -27,6 +28,64 @@ def _detect_inline_subclause_rule(
         if any(iter_subclause_matches(text, rule_name=rule_name, start_pos=start_pos)):
             return rule_name
     return None
+
+
+def _detect_global_subclause_rule(
+    paragraphs: list[ParagraphAnalysis],
+    *,
+    clause_rule_name: str,
+    allow_numeric_dot: bool,
+) -> str | None:
+    """Choose one document-level subclause rule from per-clause first-use evidence."""
+
+    clause_local_rules: list[str] = []
+
+    active_clause_seen = False
+    clause_has_local_rule = False
+
+    for paragraph in paragraphs:
+        text = paragraph.text or ""
+        if not text.strip():
+            continue
+
+        clause_match = match_clause_start(text, rule_name=clause_rule_name)
+        if clause_match is not None:
+            active_clause_seen = True
+            clause_has_local_rule = False
+            local_rule = _detect_inline_subclause_rule(
+                text,
+                start_pos=clause_match.end,
+                allow_numeric_dot=allow_numeric_dot,
+            )
+            if local_rule is not None:
+                clause_local_rules.append(local_rule)
+                clause_has_local_rule = True
+            continue
+
+        if not active_clause_seen or clause_has_local_rule:
+            continue
+
+        first_sub_match = match_subclause_start(
+            text,
+            allow_numeric_dot=allow_numeric_dot,
+        )
+        if first_sub_match is None:
+            continue
+
+        clause_local_rules.append(first_sub_match.rule_name)
+        clause_has_local_rule = True
+
+    if not clause_local_rules:
+        return None
+
+    counts = Counter(clause_local_rules)
+    return max(
+        counts,
+        key=lambda rule_name: (
+            counts[rule_name],
+            SUBCLAUSE_RULE_PRIORITY.get(rule_name, 0),
+        ),
+    )
 
 
 def _make_span(
@@ -77,11 +136,15 @@ def parse_document_structure(doc: DocIR) -> Phase1Analysis:
     active_clause_no: str | None = None
     active_subclause_id: str | None = None
     active_subclause_no: str | None = None
-    subclause_rule_name: str | None = None
     clause_counter = 0
     subclause_counters: dict[str, int] = defaultdict(int)
 
     allow_numeric_subclause = clause_rule_name != "numeric_dot"
+    subclause_rule_name = _detect_global_subclause_rule(
+        paragraphs,
+        clause_rule_name=clause_rule_name,
+        allow_numeric_dot=allow_numeric_subclause,
+    )
 
     for paragraph in paragraphs:
         text = paragraph.text or ""
@@ -100,13 +163,6 @@ def parse_document_structure(doc: DocIR) -> Phase1Analysis:
             paragraph.clause_id = active_clause_id
             paragraph.clause_no = active_clause_no
             paragraph.clause_rule_name = clause_rule_name
-
-            if subclause_rule_name is None:
-                subclause_rule_name = _detect_inline_subclause_rule(
-                    text,
-                    start_pos=clause_match.end,
-                    allow_numeric_dot=allow_numeric_subclause,
-                )
 
             if subclause_rule_name is not None:
                 sub_matches = list(
@@ -173,14 +229,6 @@ def parse_document_structure(doc: DocIR) -> Phase1Analysis:
             paragraph.clause_id = active_clause_id
             paragraph.clause_no = active_clause_no
             paragraph.clause_rule_name = clause_rule_name
-
-            if subclause_rule_name is None:
-                first_sub_match = match_subclause_start(
-                    text,
-                    allow_numeric_dot=allow_numeric_subclause,
-                )
-                if first_sub_match is not None:
-                    subclause_rule_name = first_sub_match.rule_name
 
             first_subclause_match = (
                 match_subclause_start(

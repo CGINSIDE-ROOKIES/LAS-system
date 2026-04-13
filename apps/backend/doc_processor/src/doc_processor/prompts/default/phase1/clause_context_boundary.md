@@ -25,7 +25,7 @@ Choose one action:
   "active_clause_no": "16",
   "active_subclause_no": null,
   "paragraph_label": "input_block",
-  "prev": "previous non-empty paragraph text",
+  "prev": "immediately previous paragraph text; may be empty when there is a blank separator paragraph",
   "next": "next non-empty paragraph text"
 }
 ```

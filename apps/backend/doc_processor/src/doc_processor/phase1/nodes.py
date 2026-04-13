@@ -8,11 +8,11 @@ from langgraph.types import Command, Send
 from document_processor import DocIR
 
 from ..logging_utils import log_info
-from ..observability import traced_phase1_node
+from ..observability import traced_structure_analysis_node
 from ..state import WorkflowState
 from ..types import Phase1Analysis, Phase1DocumentMeta, Phase1Result, RelevanceDecision, RelevanceMode, WorkflowDelta, WorkflowMeta
-from .boundaries import BoundaryReviewOutput, apply_boundary_reviews, detect_boundary_suspects, review_single_boundary_suspect_with_llm
-from .converters import annotate_doc_with_phase1
+from .boundaries import BoundaryReviewOutput, apply_boundary_reviews, detect_boundary_suspects, review_boundary_suspects_with_llm
+from .converters import attach_phase1_metadata_to_doc
 from .labels import LabelReviewOutput, apply_label_reviews, label_paragraphs, review_single_ambiguous_label_with_llm
 from .parser import build_clause_entries_from_analysis, parse_document_structure
 from .relevance import needs_llm_relevance_review, review_relevance_with_llm, score_relevance
@@ -22,7 +22,42 @@ def _coerce_state(state: WorkflowState | dict) -> WorkflowState:
     return state if isinstance(state, WorkflowState) else WorkflowState.model_validate(state)
 
 
-@traced_phase1_node("phase1.load_document")
+def _dispatch_review_tasks(
+    state: WorkflowState,
+    *,
+    review_kind: str,
+    unit_ids: list[str],
+    analysis: Phase1Analysis | None = None,
+) -> Command[str | Send]:
+    log_info(
+        state.phase1_config,
+        "[structure_analysis.llm_analysis] dispatching %s %s workers (max_concurrency=%s)",
+        len(unit_ids),
+        review_kind,
+        state.phase1_config.max_concurrent_workers,
+    )
+    return Command(
+        update={
+            "phase1_analysis": analysis or state.phase1_analysis,
+            "llm_review_stage": review_kind,
+        },
+        goto=[
+            Send(
+                "llm_analysis_worker",
+                {
+                    "working_doc": state.working_doc,
+                    "phase1_analysis": analysis or state.phase1_analysis,
+                    "phase1_config": state.phase1_config,
+                    "active_review_unit_id": unit_id,
+                    "active_review_kind": review_kind,
+                },
+            )
+            for unit_id in unit_ids
+        ],
+    )
+
+
+@traced_structure_analysis_node("structure_analysis.load_document")
 def load_document(state: WorkflowState) -> Command[str]:
     if state.working_doc is not None and state.base_doc is not None:
         return Command(goto="screen_relevance")
@@ -37,7 +72,7 @@ def load_document(state: WorkflowState) -> Command[str]:
     return Command(update={"base_doc": doc, "working_doc": doc}, goto="screen_relevance")
 
 
-@traced_phase1_node("phase1.screen_relevance")
+@traced_structure_analysis_node("structure_analysis.screen_relevance")
 def screen_relevance(state: WorkflowState) -> Command[str]:
     if state.working_doc is None:
         raise ValueError("Document must be loaded before relevance screening.")
@@ -70,198 +105,196 @@ def screen_relevance(state: WorkflowState) -> Command[str]:
             notes=["Document rejected during relevance screening."],
         )
         updates["phase1_result"] = result
-        return Command(update=updates, goto="finalize_phase1")
+        return Command(update=updates, goto="finalize_llm")
 
-    return Command(update=updates, goto="detect_numbering_rules")
+    return Command(update=updates, goto="regex_analysis")
 
 
-@traced_phase1_node("phase1.detect_numbering_rules")
-def detect_numbering_rules(state: WorkflowState) -> Command[str]:
+@traced_structure_analysis_node("structure_analysis.regex_analysis")
+def regex_analysis(state: WorkflowState) -> Command[str]:
     if state.working_doc is None:
-        raise ValueError("Document must be loaded before numbering detection.")
+        raise ValueError("Document must be loaded before regex analysis.")
+
     analysis = parse_document_structure(state.working_doc)
     if state.phase1_analysis and state.phase1_analysis.relevance is not None:
         analysis.relevance = state.phase1_analysis.relevance
-    return Command(update={"phase1_analysis": analysis}, goto="initial_assign_structure")
 
-
-@traced_phase1_node("phase1.initial_assign_structure")
-def initial_assign_structure(state: WorkflowState) -> Command[str]:
-    analysis = state.phase1_analysis
-    if analysis is None:
-        raise ValueError("phase1_analysis is required before structure assignment.")
     if analysis.clause_rule_name is None:
+        analysis.notes.append("No clause numbering rule found.")
         result = Phase1Result(
             accepted=True,
             reason="No clause numbering rule found; document kept but left structurally unsegmented.",
             relevance=analysis.relevance,
-            notes=["No clause numbering rule found in phase 1."],
+            notes=list(analysis.notes),
         )
-        return Command(update={"phase1_result": result}, goto="finalize_phase1")
+        return Command(
+            update={"phase1_analysis": analysis, "phase1_result": result},
+            goto="finalize_llm",
+        )
+
     analysis.notes.append(
         f"Detected clause rule '{analysis.clause_rule_name}'"
         + (f" and subclause rule '{analysis.subclause_rule_name}'." if analysis.subclause_rule_name else ".")
     )
-    return Command(update={"phase1_analysis": analysis}, goto="detect_boundary_suspects")
-
-
-@traced_phase1_node("phase1.detect_boundary_suspects")
-def detect_boundary_suspects_node(state: WorkflowState) -> Command[str]:
-    analysis = state.phase1_analysis
-    if analysis is None:
-        raise ValueError("phase1_analysis is required before boundary detection.")
     analysis = detect_boundary_suspects(analysis)
-    goto = "review_boundaries_llm" if analysis.boundary_suspect_unit_ids and state.phase1_config.boundary_review_enabled else "label_paragraphs"
-    return Command(update={"phase1_analysis": analysis}, goto=goto)
+    return Command(update={"phase1_analysis": analysis}, goto="llm_analysis")
 
 
-@traced_phase1_node("phase1.review_boundaries_llm")
-def review_boundaries_llm(state: WorkflowState) -> Command[str | Send]:
-    if state.working_doc is None or state.phase1_analysis is None:
-        raise ValueError("Document and analysis are required before boundary review.")
-    suspect_ids = list(state.phase1_analysis.boundary_suspect_unit_ids)
-    if not suspect_ids:
-        return Command(goto="apply_boundary_resolution")
-    log_info(
-        state.phase1_config,
-        "[phase1.review_boundaries_llm] dispatching %s workers (max_concurrency=%s)",
-        len(suspect_ids),
-        state.phase1_config.max_concurrent_workers,
-    )
-    return Command(
-        goto=[
-            Send(
-                "boundary_review_worker",
-                {
-                    "working_doc": state.working_doc,
-                    "phase1_analysis": state.phase1_analysis,
-                    "phase1_config": state.phase1_config,
-                    "active_review_unit_id": unit_id,
-                },
+@traced_structure_analysis_node("structure_analysis.llm_analysis")
+def llm_analysis(state: WorkflowState) -> Command[str | Send]:
+    if state.phase1_analysis is None:
+        raise ValueError("phase1_analysis is required before LLM analysis.")
+
+    analysis = state.phase1_analysis
+    stage = state.llm_review_stage
+
+    if stage is None:
+        suspect_ids = list(analysis.boundary_suspect_unit_ids)
+        if suspect_ids and state.phase1_config.boundary_review_enabled:
+            log_info(
+                state.phase1_config,
+                "[structure_analysis.llm_analysis] dispatching boundary batch review (%s suspects)",
+                len(suspect_ids),
             )
-            for unit_id in suspect_ids
-        ]
-    )
+            return Command(
+                update={"phase1_analysis": analysis, "llm_review_stage": "boundary"},
+                goto="boundary_llm_batch",
+            )
+
+        analysis = label_paragraphs(analysis)
+        ambiguous_ids = list(analysis.ambiguous_label_unit_ids)
+        if ambiguous_ids and state.phase1_config.label_review_enabled:
+            return _dispatch_review_tasks(
+                state,
+                review_kind="label",
+                unit_ids=ambiguous_ids,
+                analysis=analysis,
+            )
+        return Command(
+            update={"phase1_analysis": analysis, "llm_review_stage": None},
+            goto="finalize_llm",
+        )
+
+    if stage == "boundary":
+        reviews = {
+            item["unit_id"]: BoundaryReviewOutput.model_validate(item["review"])
+            for item in state.boundary_review_results
+        }
+        analysis = apply_boundary_reviews(analysis, reviews)
+        analysis = label_paragraphs(analysis)
+        ambiguous_ids = list(analysis.ambiguous_label_unit_ids)
+        if ambiguous_ids and state.phase1_config.label_review_enabled:
+            return _dispatch_review_tasks(
+                state,
+                review_kind="label",
+                unit_ids=ambiguous_ids,
+                analysis=analysis,
+            )
+        return Command(
+            update={"phase1_analysis": analysis, "llm_review_stage": None},
+            goto="finalize_llm",
+        )
+
+    if stage == "label":
+        reviews = {
+            item["unit_id"]: LabelReviewOutput.model_validate(item["review"])
+            for item in state.label_review_results
+        }
+        analysis = apply_label_reviews(analysis, reviews)
+        return Command(
+            update={"phase1_analysis": analysis, "llm_review_stage": None},
+            goto="finalize_llm",
+        )
+
+    raise ValueError(f"Unsupported llm_review_stage: {stage}")
 
 
-@traced_phase1_node("phase1.review_boundaries_llm.worker")
-def boundary_review_worker(state: WorkflowState) -> Command[str]:
+@traced_structure_analysis_node("structure_analysis.llm_analysis.boundary_batch")
+def boundary_llm_batch(state: WorkflowState) -> Command[str]:
     state = _coerce_state(state)
-    if state.working_doc is None or state.phase1_analysis is None or state.active_review_unit_id is None:
-        raise ValueError("Boundary review worker requires document, analysis, and active_review_unit_id.")
-    unit_id = state.active_review_unit_id
+    if state.working_doc is None or state.phase1_analysis is None:
+        raise ValueError("Boundary batch review requires document and analysis.")
+
     try:
-        review = review_single_boundary_suspect_with_llm(
+        reviews = review_boundary_suspects_with_llm(
             state.working_doc,
             state.phase1_analysis,
-            unit_id,
             state.phase1_config,
         )
     except Exception as exc:  # pragma: no cover
-        log_info(state.phase1_config, "[phase1.review_boundaries_llm.worker] unit=%s failed", unit_id)
-        return Command(update={"errors": [f"Boundary LLM review failed for {unit_id}: {exc}"]})
-    log_info(state.phase1_config, "[phase1.review_boundaries_llm.worker] unit=%s complete", unit_id)
+        log_info(
+            state.phase1_config,
+            "[structure_analysis.llm_analysis.boundary_batch] failed",
+        )
+        return Command(
+            update={"errors": [f"Boundary LLM review failed: {exc}"]},
+            goto="llm_analysis",
+        )
+
+    log_info(
+        state.phase1_config,
+        "[structure_analysis.llm_analysis.boundary_batch] complete (%s reviews)",
+        len(reviews),
+    )
     return Command(
         update={
             "boundary_review_results": [
-                {"unit_id": unit_id, "review": review.model_dump(mode="json")},
+                {"unit_id": unit_id, "review": review.model_dump(mode="json")}
+                for unit_id, review in reviews.items()
             ]
-        }
+        },
+        goto="llm_analysis",
     )
 
 
-@traced_phase1_node("phase1.apply_boundary_resolution")
-def apply_boundary_resolution(state: WorkflowState) -> Command[str]:
-    if state.phase1_analysis is None:
-        raise ValueError("phase1_analysis is required before applying boundary review.")
-    reviews = {
-        item["unit_id"]: BoundaryReviewOutput.model_validate(item["review"])
-        for item in state.boundary_review_results
-    }
-    analysis = apply_boundary_reviews(state.phase1_analysis, reviews)
-    return Command(update={"phase1_analysis": analysis}, goto="label_paragraphs")
-
-
-@traced_phase1_node("phase1.label_paragraphs")
-def label_paragraphs_node(state: WorkflowState) -> Command[str]:
-    analysis = state.phase1_analysis
-    if analysis is None:
-        raise ValueError("phase1_analysis is required before labeling.")
-    analysis = label_paragraphs(analysis)
-    goto = "review_labels_llm" if analysis.ambiguous_label_unit_ids and state.phase1_config.label_review_enabled else "build_clause_entries"
-    return Command(update={"phase1_analysis": analysis}, goto=goto)
-
-
-@traced_phase1_node("phase1.review_labels_llm")
-def review_labels_llm(state: WorkflowState) -> Command[str | Send]:
-    if state.working_doc is None or state.phase1_analysis is None:
-        raise ValueError("Document and analysis are required before label review.")
-    unit_ids = list(state.phase1_analysis.ambiguous_label_unit_ids)
-    if not unit_ids:
-        return Command(goto="build_clause_entries")
-    log_info(
-        state.phase1_config,
-        "[phase1.review_labels_llm] dispatching %s workers (max_concurrency=%s)",
-        len(unit_ids),
-        state.phase1_config.max_concurrent_workers,
-    )
-    return Command(
-        goto=[
-            Send(
-                "label_review_worker",
-                {
-                    "working_doc": state.working_doc,
-                    "phase1_analysis": state.phase1_analysis,
-                    "phase1_config": state.phase1_config,
-                    "active_review_unit_id": unit_id,
-                },
-            )
-            for unit_id in unit_ids
-        ]
-    )
-
-
-@traced_phase1_node("phase1.review_labels_llm.worker")
-def label_review_worker(state: WorkflowState) -> Command[str]:
+@traced_structure_analysis_node("structure_analysis.llm_analysis.worker")
+def llm_analysis_worker(state: WorkflowState) -> Command[str]:
     state = _coerce_state(state)
     if state.working_doc is None or state.phase1_analysis is None or state.active_review_unit_id is None:
-        raise ValueError("Label review worker requires document, analysis, and active_review_unit_id.")
+        raise ValueError("Review worker requires document, analysis, and active_review_unit_id.")
+    if state.active_review_kind is None:
+        raise ValueError("Review worker requires active_review_kind.")
+
     unit_id = state.active_review_unit_id
+    review_kind = state.active_review_kind
+
     try:
-        review = review_single_ambiguous_label_with_llm(
-            state.working_doc,
-            state.phase1_analysis,
-            unit_id,
-            state.phase1_config,
-        )
+        if review_kind == "label":
+            review = review_single_ambiguous_label_with_llm(
+                state.working_doc,
+                state.phase1_analysis,
+                unit_id,
+                state.phase1_config,
+            )
+            update_key = "label_review_results"
+        else:
+            raise ValueError(f"Unsupported parallel review kind: {review_kind}")
     except Exception as exc:  # pragma: no cover
-        log_info(state.phase1_config, "[phase1.review_labels_llm.worker] unit=%s failed", unit_id)
-        return Command(update={"errors": [f"Label LLM review failed for {unit_id}: {exc}"]})
-    log_info(state.phase1_config, "[phase1.review_labels_llm.worker] unit=%s complete", unit_id)
+        log_info(
+            state.phase1_config,
+            "[structure_analysis.llm_analysis.worker] kind=%s unit=%s failed",
+            review_kind,
+            unit_id,
+        )
+        return Command(update={"errors": [f"{review_kind.capitalize()} LLM review failed for {unit_id}: {exc}"]})
+
+    log_info(
+        state.phase1_config,
+        "[structure_analysis.llm_analysis.worker] kind=%s unit=%s complete",
+        review_kind,
+        unit_id,
+    )
     return Command(
         update={
-            "label_review_results": [
+            update_key: [
                 {"unit_id": unit_id, "review": review.model_dump(mode="json")},
             ]
         }
     )
 
 
-@traced_phase1_node("phase1.build_clause_entries")
-def build_clause_entries_node(state: WorkflowState) -> Command[str]:
-    if state.phase1_analysis is None:
-        raise ValueError("phase1_analysis is required before building clause entries.")
-    reviews = {
-        item["unit_id"]: LabelReviewOutput.model_validate(item["review"])
-        for item in state.label_review_results
-    }
-    analysis = apply_label_reviews(state.phase1_analysis, reviews)
-    analysis.clause_entries = build_clause_entries_from_analysis(analysis.paragraphs)
-    return Command(update={"phase1_analysis": analysis}, goto="finalize_phase1")
-
-
-@traced_phase1_node("phase1.finalize_phase1")
-def finalize_phase1(state: WorkflowState) -> Command[str]:
+@traced_structure_analysis_node("structure_analysis.finalize_llm")
+def finalize_llm(state: WorkflowState) -> Command[str]:
     if state.working_doc is None:
         raise ValueError("Document must be loaded before finalization.")
 
@@ -284,20 +317,34 @@ def finalize_phase1(state: WorkflowState) -> Command[str]:
         )
 
     analysis = state.phase1_analysis or Phase1Analysis()
-    finalized_doc = annotate_doc_with_phase1(state.working_doc, analysis)
+    analysis.clause_entries = build_clause_entries_from_analysis(analysis.paragraphs)
+    finalized_doc = attach_phase1_metadata_to_doc(state.working_doc, analysis)
     subclause_count = sum(len(entry.subclauses) for entry in analysis.clause_entries)
-    result = Phase1Result(
-        accepted=True,
-        reason="Phase 1 clause parsing completed.",
-        relevance=analysis.relevance,
-        clause_rule_name=analysis.clause_rule_name,
-        subclause_rule_name=analysis.subclause_rule_name,
-        clause_count=len(analysis.clause_entries),
-        subclause_count=subclause_count,
-        boundary_suspect_unit_ids=list(analysis.boundary_suspect_unit_ids),
-        ambiguous_label_unit_ids=list(analysis.ambiguous_label_unit_ids),
-        notes=list(analysis.notes),
-    )
+
+    if state.phase1_result is not None and state.phase1_result.accepted:
+        result = state.phase1_result.model_copy(deep=True)
+        result.relevance = analysis.relevance
+        result.clause_rule_name = analysis.clause_rule_name
+        result.subclause_rule_name = analysis.subclause_rule_name
+        result.clause_count = len(analysis.clause_entries)
+        result.subclause_count = subclause_count
+        result.boundary_suspect_unit_ids = list(analysis.boundary_suspect_unit_ids)
+        result.ambiguous_label_unit_ids = list(analysis.ambiguous_label_unit_ids)
+        result.notes = list(analysis.notes)
+    else:
+        result = Phase1Result(
+            accepted=True,
+            reason="Phase 1 clause parsing completed.",
+            relevance=analysis.relevance,
+            clause_rule_name=analysis.clause_rule_name,
+            subclause_rule_name=analysis.subclause_rule_name,
+            clause_count=len(analysis.clause_entries),
+            subclause_count=subclause_count,
+            boundary_suspect_unit_ids=list(analysis.boundary_suspect_unit_ids),
+            ambiguous_label_unit_ids=list(analysis.ambiguous_label_unit_ids),
+            notes=list(analysis.notes),
+        )
+
     return Command(
         update={
             "working_doc": finalized_doc,

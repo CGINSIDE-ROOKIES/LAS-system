@@ -4,7 +4,7 @@ import logging
 import sys
 from typing import Any
 
-_LOGGER_NAME = "doc_processor.phase1"
+_LOGGER_NAME = "doc_processor.structure_analysis"
 
 
 def get_logger(config: Any | None = None) -> logging.Logger:

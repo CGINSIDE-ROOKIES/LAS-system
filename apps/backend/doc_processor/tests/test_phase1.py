@@ -6,20 +6,34 @@ from pathlib import Path
 from document_processor import DocIR, ParaStyleInfo
 
 from doc_processor import Phase1Config, WorkflowState
+from doc_processor.phase1.boundaries import detect_boundary_suspects, review_boundary_suspects_with_llm
 from doc_processor.phase1.converters import clause_entry_to_targets, resolve_clause_entry
 from doc_processor.phase1.graph import build_phase1_graph
+from doc_processor.phase1.parser import parse_document_structure
 from doc_processor.types import ParagraphCategory, RelevanceMode
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DOC_SAMPLES = ROOT / "tests" / "doc_samples" / "new_test"
+STANDARD_CONTRACT_SAMPLES = ROOT / "tests" / "doc_samples" / "표준계약서모음(hwp-hwpx)"
 
 
 class FakeStructuredResponder:
     def __init__(self, outputs: dict[str, dict]):
         self.outputs = outputs
+        self.calls: list[dict] = []
 
     def invoke_structured(self, *, profile, prompt, payload, schema):
+        self.calls.append({"profile": profile, "prompt": prompt, "payload": payload, "schema": schema})
+        if "suspect_blocks" in payload:
+            reviews: list[dict] = []
+            for block in payload["suspect_blocks"]:
+                for unit_id in block["suspect_unit_ids"]:
+                    template = self.outputs.get(unit_id, self.outputs.get("__default__", {}))
+                    review = dict(template)
+                    review["unit_id"] = unit_id
+                    reviews.append(review)
+            return schema.model_validate({"reviews": reviews})
         key = payload.get("unit_id") or payload.get("title") or "__default__"
         output = self.outputs.get(key, self.outputs.get("__default__", {}))
         return schema.model_validate(output)
@@ -48,6 +62,51 @@ class Phase1GraphTests(unittest.TestCase):
         paragraph_map = {paragraph.unit_id: paragraph for paragraph in state.working_doc.paragraphs}
         self.assertEqual(paragraph_map["s1.p8"].meta.phase1.category, ParagraphCategory.CLAUSE_HEADING)
         self.assertEqual(paragraph_map["s1.p16"].meta.phase1.category, ParagraphCategory.SUBCLAUSE_HEADING)
+
+    def test_global_subclause_rule_prefers_circled_over_definition_list_numeric(self) -> None:
+        state = self._invoke_state(
+            WorkflowState(
+                target_file=STANDARD_CONTRACT_SAMPLES / "04. 2차적저작물작성권 양도계약서.hwp",
+                phase1_config=Phase1Config(
+                    relevance_mode=RelevanceMode.DISABLED,
+                    boundary_review_enabled=False,
+                    label_review_enabled=False,
+                ),
+            )
+        )
+        self.assertTrue(state.phase1_result.accepted)
+        self.assertEqual(state.phase1_result.subclause_rule_name, "circled")
+        paragraph_map = {paragraph.unit_id: paragraph for paragraph in state.working_doc.paragraphs}
+        self.assertEqual(paragraph_map["s1.p11"].meta.phase1.category, ParagraphCategory.CLAUSE_BODY)
+        self.assertEqual(paragraph_map["s1.p17"].meta.phase1.category, ParagraphCategory.CLAUSE_BODY)
+        self.assertEqual(paragraph_map["s1.p21"].meta.phase1.category, ParagraphCategory.SUBCLAUSE_HEADING)
+
+    def test_boundary_batch_payload_preserves_immediate_blank_separator_context(self) -> None:
+        target = STANDARD_CONTRACT_SAMPLES / "04. 2차적저작물작성권 양도계약서.hwp"
+        doc = DocIR.from_file(target)
+        analysis = detect_boundary_suspects(parse_document_structure(doc))
+        responder = FakeStructuredResponder(
+            {
+                "__default__": {
+                    "action": "keep",
+                    "reason": "Payload capture.",
+                    "anchor_text": None,
+                    "occurrence": 1,
+                }
+            }
+        )
+        review_boundary_suspects_with_llm(
+            doc,
+            analysis,
+            Phase1Config(boundary_model_override=responder),
+        )
+        blocks = responder.calls[0]["payload"]["suspect_blocks"]
+        block = next(item for item in blocks if "s1.p85" in item["suspect_unit_ids"])
+        paragraphs = block["paragraphs"]
+        target_index = next(index for index, paragraph in enumerate(paragraphs) if paragraph["unit_id"] == "s1.p85")
+        self.assertEqual(paragraphs[target_index - 1]["unit_id"], "s1.p84")
+        self.assertEqual(paragraphs[target_index - 1]["text"], "")
+        self.assertIn("_____년 __월 __일", [paragraph["text"] for paragraph in paragraphs[target_index + 1 :]])
 
     def test_keyword_relevance_rejects_non_contract_notice(self) -> None:
         state = self._invoke_state(
@@ -181,6 +240,8 @@ class Phase1GraphTests(unittest.TestCase):
             )
         )
         paragraph_map = {paragraph.unit_id: paragraph for paragraph in state.working_doc.paragraphs}
+        self.assertEqual(len(boundary_responder.calls), 1)
+        self.assertIn("suspect_blocks", boundary_responder.calls[0]["payload"])
         self.assertIsNone(paragraph_map["s1.p4"].meta.phase1.clause_id)
         self.assertIsNone(paragraph_map["s1.p4"].meta.phase1.clause_no)
         self.assertIsNone(paragraph_map["s1.p4"].meta.phase1.subclause_id)

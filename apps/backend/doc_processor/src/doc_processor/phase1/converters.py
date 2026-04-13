@@ -39,7 +39,7 @@ def resolve_clause_entry(
     return resolve_targets_to_paragraphs(doc, clause_entry_to_targets(entry))
 
 
-def annotate_doc_with_phase1(
+def attach_phase1_metadata_to_doc(
     doc: DocIR,
     analysis: Phase1Analysis,
 ) -> DocIR:

@@ -54,6 +54,12 @@ SUBCLAUSE_ANY_RULES: dict[str, re.Pattern[str]] = {
     "numeric_dot": ANY_SUB_NUMERIC_DOT_RE,
 }
 
+SUBCLAUSE_RULE_PRIORITY: dict[str, int] = {
+    "circled": 300,
+    "paren_numeric": 200,
+    "numeric_dot": 100,
+}
+
 _CIRCLED_TO_INT = {
     glyph: str(index)
     for index, glyph in enumerate("①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳", start=1)
