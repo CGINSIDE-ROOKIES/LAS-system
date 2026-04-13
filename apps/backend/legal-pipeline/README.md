@@ -146,14 +146,8 @@ uv run apps/backend/legal-pipeline/scripts/embed_qdrant_3collections.py \
 
 참고:
 
-<<<<<<< Updated upstream
-- `legal_relation` 임베딩 파일(`.npy`, `*.meta.jsonl`, `*.manifest.json`)은 현재 정책상 생성하지 않는다.
-- `legal_relation`은 현재 OpenSearch 적재 대상으로 유지한다.
-- retrieval profile에는 `legal_relation` 항목이 남아 있을 수 있지만 현재 manifest 기준 `available=false`다.
-=======
 - 현재 스크립트는 `legal_relation` 임베딩을 만들지 않는다.
 - `legal_relation`은 현재 OpenSearch 적재 대상으로 유지한다.
->>>>>>> Stashed changes
 
 ### 3-4. 현재 운영 기준 명령 순서
 

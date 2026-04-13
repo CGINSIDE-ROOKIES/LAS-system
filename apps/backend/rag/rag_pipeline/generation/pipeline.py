@@ -15,14 +15,9 @@ from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
-<<<<<<< Updated upstream
 from ..observability.tracing import end_span, start_generation_span, start_span, start_trace, update_trace
-from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, embed_query, is_embedding_model_cached
-from ..retrieval.context import build_llm_context_rows, build_llm_context_text, truncate_on_semantic_boundary
-=======
 from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, embed_query
-from ..retrieval.context import build_llm_context_rows, build_llm_context_text
->>>>>>> Stashed changes
+from ..retrieval.context import build_llm_context_rows, build_llm_context_text, truncate_on_semantic_boundary
 from ..retrieval.fusion import fuse_rrf, fuse_rrf_multi
 from ..retrieval.opensearch import search_bm25
 from ..retrieval.qdrant import search_qdrant_with_vector
@@ -206,32 +201,20 @@ class RagPipeline:
             enforce = self._cfg.enforce_min_law_contexts
 
         t0 = time.perf_counter()
-<<<<<<< Updated upstream
         retrieval_span = start_span(
             trace, "retrieval",
             input={"question": question, "doc_types": doc_types, "law_names": law_names, "intent": intent},
-=======
-
-        # 임베딩을 한 번만 계산한 뒤 Qdrant(복수 컬렉션) + OpenSearch를 병렬 실행한다.
-        vector = embed_query(
-            question,
-            rcfg.embedding_model,
-            api_key=rcfg.embedding_api_key,
-            api_base_url=rcfg.embedding_api_base_url,
-            dimensions=rcfg.embedding_dimensions,
->>>>>>> Stashed changes
         )
 
         # ── embed ──────────────────────────────────────────────────────────────
         embed_span = start_span(
             retrieval_span, "embed",
-            input={"model": rcfg.embedding_model, "provider": rcfg.embedding_provider},
+            input={"model": rcfg.embedding_model},
         )
         try:
             vector = embed_query(
                 question,
                 rcfg.embedding_model,
-                provider=rcfg.embedding_provider,
                 api_key=rcfg.embedding_api_key,
                 api_base_url=rcfg.embedding_api_base_url,
                 dimensions=rcfg.embedding_dimensions,
