@@ -63,7 +63,7 @@ class RelevanceDecision(BaseModel):
     doc_kind: Literal["contract", "non_contract", "uncertain"] = "uncertain"
 
 
-class Phase1NodeMeta(BaseModel):
+class ParserNodeMeta(BaseModel):
     category: ParagraphCategory | None = None
     clause_id: str | None = None
     clause_no: str | None = None
@@ -131,7 +131,7 @@ class DocTargetRef(BaseModel):
     span_end: int | None = None
 
 
-class Phase1DocumentMeta(BaseModel):
+class ParserDocumentMeta(BaseModel):
     relevance: RelevanceDecision | None = None
     clause_rule_name: str | None = None
     subclause_rule_name: str | None = None
@@ -142,13 +142,13 @@ class Phase1DocumentMeta(BaseModel):
 
 
 class WorkflowMeta(BaseModel):
-    phase1: Phase1NodeMeta | None = None
-    phase1_doc: Phase1DocumentMeta | None = None
+    parser: ParserNodeMeta | None = None
+    parser_doc: ParserDocumentMeta | None = None
     phase2: dict[str, Any] | None = None
     phase3: dict[str, Any] | None = None
 
 
-class Phase1Analysis(BaseModel):
+class ParserAnalysis(BaseModel):
     relevance: RelevanceDecision | None = None
     clause_rule_name: str | None = None
     subclause_rule_name: str | None = None
@@ -162,7 +162,7 @@ class Phase1Analysis(BaseModel):
         return {paragraph.unit_id: paragraph for paragraph in self.paragraphs}
 
 
-class Phase1Result(BaseModel):
+class ParserResult(BaseModel):
     accepted: bool
     reason: str
     relevance: RelevanceDecision | None = None

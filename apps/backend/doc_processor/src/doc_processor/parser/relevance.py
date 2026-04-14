@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from document_processor import DocIR
 
 from ..prompts import load_prompt
-from ..state import Phase1Config
+from ..state import ParserConfig
 from ..types import RelevanceDecision, RelevanceMode, WorkflowMeta
 from .llm_utils import invoke_structured_model
 from .selectors import build_paragraph_analyses, non_empty_paragraphs
@@ -41,7 +41,7 @@ class RelevanceLLMOutput(BaseModel):
     confidence: float | None = None
 
 
-def score_relevance(doc: DocIR, config: Phase1Config) -> RelevanceDecision:
+def score_relevance(doc: DocIR, config: ParserConfig) -> RelevanceDecision:
     paragraphs = non_empty_paragraphs(build_paragraph_analyses(doc))
     preview = paragraphs[: config.relevance_preview_paragraphs]
     preview_texts = [paragraph.text for paragraph in preview]
@@ -87,7 +87,7 @@ def score_relevance(doc: DocIR, config: Phase1Config) -> RelevanceDecision:
     )
 
 
-def needs_llm_relevance_review(decision: RelevanceDecision, config: Phase1Config) -> bool:
+def needs_llm_relevance_review(decision: RelevanceDecision, config: ParserConfig) -> bool:
     if config.relevance_mode != RelevanceMode.KEYWORD_THEN_LLM:
         return False
     return abs(decision.score) <= config.relevance_ambiguity_threshold
@@ -95,7 +95,7 @@ def needs_llm_relevance_review(decision: RelevanceDecision, config: Phase1Config
 
 def review_relevance_with_llm(
     doc: DocIR,
-    config: Phase1Config,
+    config: ParserConfig,
     *,
     keyword_decision: RelevanceDecision,
 ) -> RelevanceDecision:
@@ -111,7 +111,7 @@ def review_relevance_with_llm(
         ],
         "keyword_decision": keyword_decision.model_dump(mode="json"),
     }
-    prompt = load_prompt("phase1/relevance_screening", profile=config.prompt_profile)
+    prompt = load_prompt("parser/relevance_screening", profile=config.prompt_profile)
     output = invoke_structured_model(
         profile=config.relevance_llm_profile,
         prompt=prompt,
