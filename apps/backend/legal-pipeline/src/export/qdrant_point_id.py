@@ -39,9 +39,15 @@ def duplicate_canonical_ids(rows: Iterable[dict]) -> set[str]:
 
 
 def build_qdrant_point_id(row: dict, duplicate_ids: set[str] | None = None) -> str:
+    relation_model = str(row.get("relation_model") or "").strip()
+    if relation_model:
+        row_id = str(row.get("id") or "").strip()
+        if not row_id:
+            raise ValueError("relation row.id is required")
+        return row_id
+
     duplicate_ids = duplicate_ids or set()
     canonical_id = canonical_id_from_row(row)
     if canonical_id not in duplicate_ids:
         return canonical_id
     return f"{canonical_id}::ctx::{point_id_context_digest(row)}"
-
