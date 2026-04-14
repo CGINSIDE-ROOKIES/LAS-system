@@ -102,6 +102,8 @@ class AskRequest(BaseModel):
     session_id: str | None = None
     doc_types: list[str] | None = None
     law_filter: list[str] | None = None
+    previous_question: str | None = Field(default=None, max_length=2000)
+    previous_answer: str | None = Field(default=None, max_length=4000)
 
     @field_validator("question")
     @classmethod
@@ -255,6 +257,8 @@ def ask(
         law_names=effective_law_names,
         intent=parsed.intent,
         trace=trace,
+        previous_question=request.previous_question,
+        previous_answer=request.previous_answer,
     )
     qa_id: str | None = None
     if result.answer.strip():
@@ -318,6 +322,8 @@ def ask_stream(
                 law_names=effective_law_names,
                 intent=parsed.intent,
                 trace=trace,
+                previous_question=request.previous_question,
+                previous_answer=request.previous_answer,
             )
             first_chunk = True
             for chunk in chunks:

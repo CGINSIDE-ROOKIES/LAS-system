@@ -78,6 +78,8 @@ export interface AskRequest {
   question: string;
   doc_types?: string[];
   law_filter?: string[];
+  previous_question?: string;
+  previous_answer?: string;
 }
 
 export interface RetrievedDoc {

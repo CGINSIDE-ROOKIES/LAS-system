@@ -78,6 +78,8 @@ def build_user_prompt_with_limit(
     question: str,
     max_input_chars: int,
     law_context_status: str,
+    previous_question: str | None = None,
+    previous_answer: str | None = None,
 ) -> str:
     """system_prompt를 제외한 user 메시지 본문(컨텍스트 + 질문)을 조립한다."""
     status_line = ""
@@ -91,7 +93,16 @@ def build_user_prompt_with_limit(
     elif law_context_status == LAW_CONTEXT_CASE_ONLY:
         status_line = "참고: 현재 검색 결과에 법령 조문이 없고 판례·해석례만 포함되어 있습니다.\n조문 근거 없이 판례 중심으로 답변하세요.\n\n"
 
+    prev_section = ""
+    if previous_question and previous_answer:
+        prev_section = (
+            "[이전 Q&A 맥락]\n"
+            f"질문: {previous_question}\n"
+            f"답변: {previous_answer}\n\n"
+        )
+
     prefix = (
+        f"{prev_section}"
         f"{status_line}"
         "아래 검색 컨텍스트를 근거로만 답변하세요.\n"
         "근거가 부족하면 부족하다고 명시하세요.\n\n"
@@ -398,6 +409,8 @@ class RagPipeline:
         law_names: list[str] | None = None,
         intent: str | None = None,
         trace: Any | None = None,
+        previous_question: str | None = None,
+        previous_answer: str | None = None,
     ) -> RagResult:
         """검색 + 생성 파이프라인을 실행하고 최종 결과를 반환한다."""
         if trace is None:
@@ -419,7 +432,11 @@ class RagPipeline:
                 result = self._build_result(_NO_RESULT_ANSWER, [], law_context_status)
                 update_trace(trace, output={"answer": _NO_RESULT_ANSWER}, level="DEFAULT")
                 return result
-            prompt = self._build_prompt(question, context_text, law_context_status)
+            prompt = self._build_prompt(
+                question, context_text, law_context_status,
+                previous_question=previous_question,
+                previous_answer=previous_answer,
+            )
             cfg = self._generation._cfg
             gen_span = start_generation_span(
                 trace, "generation",
@@ -460,6 +477,8 @@ class RagPipeline:
         law_names: list[str] | None = None,
         intent: str | None = None,
         trace: Any | None = None,
+        previous_question: str | None = None,
+        previous_answer: str | None = None,
     ) -> tuple[RagResult, Iterator[str]]:
         """검색 후 생성을 스트리밍으로 반환한다.
 
@@ -485,7 +504,11 @@ class RagPipeline:
                 meta = self._build_result(_NO_RESULT_ANSWER, [], law_context_status)
                 update_trace(trace, output={"answer": _NO_RESULT_ANSWER}, level="DEFAULT")
                 return meta, iter([_NO_RESULT_ANSWER])
-            prompt = self._build_prompt(question, context_text, law_context_status)
+            prompt = self._build_prompt(
+                question, context_text, law_context_status,
+                previous_question=previous_question,
+                previous_answer=previous_answer,
+            )
             cfg = self._generation._cfg
             gen_span = start_generation_span(
                 trace, "generation",
@@ -527,12 +550,21 @@ class RagPipeline:
             update_trace(trace, level="ERROR")
             raise
 
-    def _build_prompt(self, question: str, context_text: str, law_context_status: str) -> str:
+    def _build_prompt(
+        self,
+        question: str,
+        context_text: str,
+        law_context_status: str,
+        previous_question: str | None = None,
+        previous_answer: str | None = None,
+    ) -> str:
         return build_user_prompt_with_limit(
             retrieved_context_text=context_text,
             question=question,
             max_input_chars=self._cfg.max_input_chars,
             law_context_status=law_context_status,
+            previous_question=previous_question,
+            previous_answer=previous_answer,
         )
 
     def _prepare_generation(

@@ -38,12 +38,15 @@ function loadMessages(): ChatMessage[] {
   }
 }
 
+type FollowUpContext = { question: string; answer: string };
+
 export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const followUpContextRef = useRef<FollowUpContext | null>(null);
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
@@ -56,8 +59,38 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   }, [messages, scrollToBottom]);
 
   useEffect(() => {
-    const stored = loadMessages();
-    if (stored.length > 0) setMessages(stored);
+    const raw = sessionStorage.getItem("las_followup_context");
+    if (raw) {
+      try {
+        const ctx: FollowUpContext = JSON.parse(raw);
+        sessionStorage.removeItem("las_followup_context");
+        sessionStorage.removeItem(STORAGE_KEY);
+        followUpContextRef.current = ctx;
+        setMessages([
+          { id: "followup-prev-q", role: "user", content: ctx.question, isFollowUpContext: true },
+          {
+            id: "followup-prev-a",
+            role: "assistant",
+            content: "",
+            isFollowUpContext: true,
+            answerData: {
+              summary: ctx.answer,
+              citations: [],
+              references: [],
+              isIrrelevant: false,
+              lawContextStatus: "ok",
+              lawFilterActive: false,
+            },
+          },
+        ]);
+      } catch {
+        const stored = loadMessages();
+        if (stored.length > 0) setMessages(stored);
+      }
+    } else {
+      const stored = loadMessages();
+      if (stored.length > 0) setMessages(stored);
+    }
   }, []);
 
   useEffect(() => {
@@ -74,6 +107,9 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   }, [messages]);
 
   const streamAnswer = useCallback(async (userQuestion: string) => {
+    const prevCtx = followUpContextRef.current;
+    followUpContextRef.current = null;
+
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -100,7 +136,14 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
         if (Array.isArray(parsed) && parsed.length > 0) lawFilter = parsed;
       } catch {}
 
-      for await (const event of askStream({ question: userQuestion, law_filter: lawFilter }, controller.signal)) {
+      for await (const event of askStream({
+        question: userQuestion,
+        law_filter: lawFilter,
+        ...(prevCtx && {
+          previous_question: prevCtx.question,
+          previous_answer: prevCtx.answer,
+        }),
+      }, controller.signal)) {
         if (event.type === "chunk") {
           setMessages((prev) =>
             prev.map((m) =>
@@ -296,8 +339,13 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-6 py-4">
         <div className="space-y-4">
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
+          {messages.map((msg, idx) => (
+            <div key={msg.id}>
+              {idx > 0 && !msg.isFollowUpContext && messages[idx - 1]?.isFollowUpContext && (
+                <div className="mb-4 h-px bg-border/50" />
+              )}
+              <MessageBubble message={msg} />
+            </div>
           ))}
         </div>
       </div>

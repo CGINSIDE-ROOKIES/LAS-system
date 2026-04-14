@@ -1,5 +1,6 @@
 import { User, Bot } from "lucide-react";
 import { AnswerCard } from "./AnswerCard";
+import { cn } from "@/lib/utils";
 
 export interface ChatMessage {
   id: string;
@@ -8,6 +9,7 @@ export interface ChatMessage {
   isStreaming?: boolean;
   statusMessage?: string;
   qa_id?: string;
+  isFollowUpContext?: boolean;
   answerData?: {
     summary: string;
     citations: { article: string; content: string }[];
@@ -25,7 +27,7 @@ interface MessageBubbleProps {
 export function MessageBubble({ message }: MessageBubbleProps) {
   if (message.role === "user") {
     return (
-      <div className="flex justify-end gap-3">
+      <div className={cn("flex justify-end gap-3", message.isFollowUpContext && "opacity-50")}>
         <div className="max-w-[70%] rounded-lg bg-primary px-4 py-3 text-sm text-primary-foreground">
           {message.content}
         </div>
@@ -37,7 +39,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   }
 
   return (
-    <div className="flex gap-3">
+    <div className={cn("flex gap-3", message.isFollowUpContext && "opacity-50")}>
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
         <Bot className="h-4 w-4 text-primary" />
       </div>

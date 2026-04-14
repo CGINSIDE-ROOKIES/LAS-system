@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { Card, CardContent } from "@/components/ui/card";
@@ -65,6 +66,7 @@ function deriveRelatedLaws(item: HistoryItem): string[] {
 }
 
 const History = () => {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [startDate, setStartDate] = useState<Date | undefined>();
   const [endDate, setEndDate] = useState<Date | undefined>();
@@ -192,10 +194,12 @@ const History = () => {
     }
   };
 
-  const handleFollowUp = (question: string) => {
-    toast.info("후속 질문 기능", {
-      description: `"${question.slice(0, 30)}..."에 대한 후속 질문을 작성합니다.`,
-    });
+  const handleFollowUp = (item: HistoryItem) => {
+    sessionStorage.setItem(
+      "las_followup_context",
+      JSON.stringify({ question: item.question, answer: item.answer })
+    );
+    router.push("/");
   };
 
   const clearFilters = () => {
@@ -488,7 +492,7 @@ const History = () => {
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      onClick={(e) => { e.stopPropagation(); handleFollowUp(item.question); }}
+                                      onClick={(e) => { e.stopPropagation(); handleFollowUp(item); }}
                                     >
                                       <MessageSquarePlus className="mr-1 h-3 w-3" />
                                       후속 질문
