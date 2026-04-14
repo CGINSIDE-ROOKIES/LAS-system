@@ -1,3 +1,19 @@
+from .annotations import (
+    Annotation,
+    AnnotationValidationError,
+    ResolvedAnnotation,
+    render_annotated_html,
+    resolve_annotations,
+)
+from .editor import (
+    ApplyEditsResult,
+    EditValidationError,
+    ParagraphTextEdit,
+    RunTextEdit,
+    apply_edits_to_doc_ir,
+    apply_edits_to_file,
+    validate_edit_commands,
+)
 from .main import build_parser_graph, run_parser
 from .state import ParserConfig, WorkflowState
 from .types import (
@@ -16,9 +32,14 @@ from .types import (
 )
 
 __all__ = [
+    "Annotation",
+    "AnnotationValidationError",
+    "ApplyEditsResult",
     "ClauseEntry",
     "DocTargetRef",
+    "EditValidationError",
     "ParagraphCategory",
+    "ParagraphTextEdit",
     "ParserAnalysis",
     "ParserConfig",
     "ParserDocumentMeta",
@@ -26,10 +47,17 @@ __all__ = [
     "ParserResult",
     "RelevanceDecision",
     "RelevanceMode",
+    "ResolvedAnnotation",
+    "RunTextEdit",
     "SubclauseEntry",
     "TextSpan",
     "WorkflowMeta",
     "WorkflowState",
+    "apply_edits_to_doc_ir",
+    "apply_edits_to_file",
     "build_parser_graph",
+    "render_annotated_html",
+    "resolve_annotations",
     "run_parser",
+    "validate_edit_commands",
 ]
