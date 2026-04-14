@@ -8,6 +8,7 @@ from scripts.embed_qdrant_3collections import (
     _scan_collection,
     write_embedding_manifest,
 )
+from src.export.qdrant_point_id import build_qdrant_point_id
 
 
 def test_scan_collection_tracks_relation_model_counts(tmp_path):
@@ -63,6 +64,33 @@ def test_build_meta_includes_relation_model_search_profile():
     assert meta["default_score_multiplier"] == 0.75
     assert meta["relation_model_priority"] == "secondary"
     assert meta["retrieval_role"] == "trace"
+
+
+def test_build_qdrant_point_id_uses_relation_row_id_for_legal_relation():
+    row = {
+        "id": "case_relation::case::prec::123456::case::prec::777777",
+        "canonical_id": "case::prec::123456",
+        "canonical_case_id": "case::prec::123456",
+        "relation_model": "case_to_case",
+        "target_canonical_case_id": "case::prec::777777",
+    }
+
+    assert build_qdrant_point_id(row, {"case::prec::123456"}) == row["id"]
+
+
+def test_build_qdrant_point_id_keeps_corpus_context_suffix_for_duplicate_case_chunks():
+    row = {
+        "id": "case_chunk::case::prec::1::1",
+        "canonical_id": "case::prec::1",
+        "canonical_case_id": "case::prec::1",
+        "doc_type": "prec",
+        "title": "임금",
+        "target": "prec",
+        "chunk_index": 1,
+    }
+
+    point_id = build_qdrant_point_id(row, {"case::prec::1"})
+    assert point_id.startswith("case::prec::1::ctx::")
 
 
 def test_build_meta_includes_law_to_law_search_profile():

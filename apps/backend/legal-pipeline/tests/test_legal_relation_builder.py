@@ -2,7 +2,10 @@ import json
 from pathlib import Path
 
 from src.common.io_utils import _write_json, _write_jsonl
-from src.export.legal_relation_builder import build_legal_relation_records
+from src.export.legal_relation_builder import (
+    _is_unverified_search_hit,
+    build_legal_relation_records,
+)
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "legal_case"
@@ -113,7 +116,8 @@ def test_build_legal_relation_records_dedupes_by_case_and_law(tmp_path):
 
     records = build_legal_relation_records(raw_related_base_dir=raw_dir)
 
-    assert len(records) == 2
+    # 근로기준법 시행령은 body_verified=False + search_hit only → 필터로 제거
+    assert len(records) == 1
 
     relation_by_law = {record["law_name"]: record for record in records}
 
@@ -125,10 +129,7 @@ def test_build_legal_relation_records_dedupes_by_case_and_law(tmp_path):
     assert "cited_law" in labor_relation["relation_types"]
     assert labor_relation["relation_confidence"] == 0.98
 
-    decree_relation = relation_by_law["근로기준법 시행령"]
-    assert decree_relation["source_hit_count"] == 1
-    assert decree_relation["article_keys"] == []
-    assert decree_relation["relation_types"] == ["search_hit"]
+    assert "근로기준법 시행령" not in relation_by_law
 
 
 def test_build_legal_relation_records_keeps_case_reference_out_of_law_case_rows(tmp_path):
@@ -295,3 +296,46 @@ def test_build_legal_relation_records_uses_structured_article_reference_field(tm
     assert record["article_no_displays"] == ["제43조의2"]
     assert record["article_reference_sources"] == ["structured_field"]
     assert record["relation_confidence"] == 0.98
+
+
+# ── _is_unverified_search_hit 회귀 테스트 ────────────────────────────────────
+
+
+def test_unverified_search_hit_law_to_case_excluded():
+    """body_verified=False + ["search_hit"] law_to_case는 미검증 search_hit로 판별된다."""
+    row = {
+        "id": "relation::case::expc::1::law_uid_1",
+        "canonical_case_id": "case::expc::1",
+        "relation_model": "law_to_case",
+        "body_verified": False,
+        "relation_types": ["search_hit"],
+        "relation_confidence": 0.45,
+        "root_law_uid": "law_uid_1",
+        "source_law_name": "파견근로자 보호 등에 관한 법률",
+        "source_law_uid": "law_uid_1",
+        "text": "폐기물처리시설 관련 해석례",
+    }
+    assert _is_unverified_search_hit(row) is True
+
+
+def test_body_verified_cited_law_search_hit_kept():
+    """body_verified=True + ["cited_law", "search_hit"] row는 미검증 아님 — 유지 대상."""
+    row = {
+        "relation_model": "law_to_case",
+        "body_verified": True,
+        "relation_types": ["cited_law", "search_hit"],
+        "relation_confidence": 0.85,
+    }
+    assert _is_unverified_search_hit(row) is False
+
+
+def test_non_law_to_case_always_kept():
+    """case_to_case, law_to_law는 body_verified·relation_types 무관하게 항상 유지된다."""
+    for model in ("case_to_case", "law_to_law"):
+        row = {
+            "relation_model": model,
+            "body_verified": False,
+            "relation_types": ["search_hit"],
+            "relation_confidence": 0.45,
+        }
+        assert _is_unverified_search_hit(row) is False, f"{model} should not be flagged"
