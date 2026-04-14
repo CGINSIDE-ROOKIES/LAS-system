@@ -9,18 +9,14 @@ from typing import Protocol
 import httpx
 import numpy as np
 import tiktoken
-import torch
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
 
-DEFAULT_SENTENCE_TRANSFORMER_MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-large"
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
-DEFAULT_CPU_WORKERS = 4
 DEFAULT_OPENAI_MAX_INPUT_TOKENS = 8192
 DEFAULT_OPENAI_MAX_BATCH_TOKENS = 300000
 DEFAULT_OPENAI_MAX_RETRIES = 5
@@ -31,9 +27,7 @@ EMBEDDING_DTYPE = "float32"
 
 @dataclass(frozen=True)
 class EmbeddingSettings:
-    provider: str
     model_name: str
-    device_mode: str
     openai_base_url: str
     openai_dimensions: int | None
     openai_max_input_tokens: int
@@ -42,13 +36,10 @@ class EmbeddingSettings:
     openai_retry_base_delay_sec: float
     normalize_embeddings: bool
     dtype: str
-    cpu_workers: int
 
 
 class EmbeddingBackend(Protocol):
-    provider: str
     model_name: str
-    device_mode: str | None
 
     def encode(self, texts: list[str], batch_size: int) -> np.ndarray:
         ...
@@ -57,47 +48,17 @@ class EmbeddingBackend(Protocol):
         ...
 
 
-def _normalize_provider(value: str | None) -> str:
-    token = str(value or "").strip().lower().replace("-", "_")
-    if token in {"", "sentence_transformers", "sentence_transformer", "sentence_transformers_cpu"}:
-        return "sentence_transformers"
-    if token in {"openai", "openai_api"}:
-        return "openai"
-    raise ValueError(f"Unsupported embedding provider: {value}")
-
-
-def _resolve_device_mode() -> str:
-    device_env = os.getenv("EMBED_DEVICE", "auto").strip().lower()
-    if device_env == "auto":
-        if torch.backends.mps.is_available():
-            return "mps"
-        return "cpu_mp"
-    return device_env
-
-
 def load_embedding_settings() -> EmbeddingSettings:
-    provider = _normalize_provider(os.getenv("EMBEDDING_PROVIDER", "sentence_transformers"))
-    if provider == "openai":
-        default_model = DEFAULT_OPENAI_EMBEDDING_MODEL
-        device_mode = "remote_api"
-    else:
-        default_model = DEFAULT_SENTENCE_TRANSFORMER_MODEL
-        device_mode = _resolve_device_mode()
-
-    model_name = os.getenv("EMBEDDING_MODEL", default_model).strip() or default_model
+    model_name = os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL).strip() or DEFAULT_EMBEDDING_MODEL
     openai_dimensions_raw = os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "").strip()
     openai_dimensions = int(openai_dimensions_raw) if openai_dimensions_raw else None
-    cpu_workers_raw = os.getenv("EMBED_CPU_WORKERS", "").strip()
-    cpu_workers = int(cpu_workers_raw) if cpu_workers_raw else DEFAULT_CPU_WORKERS
     max_input_tokens_raw = os.getenv("OPENAI_MAX_INPUT_TOKENS", "").strip()
     max_batch_tokens_raw = os.getenv("OPENAI_MAX_BATCH_TOKENS", "").strip()
     max_retries_raw = os.getenv("OPENAI_MAX_RETRIES", "").strip()
     retry_delay_raw = os.getenv("OPENAI_RETRY_BASE_DELAY_SEC", "").strip()
 
     return EmbeddingSettings(
-        provider=provider,
         model_name=model_name,
-        device_mode=device_mode,
         openai_base_url=os.getenv("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL).rstrip("/"),
         openai_dimensions=openai_dimensions,
         openai_max_input_tokens=(
@@ -112,63 +73,16 @@ def load_embedding_settings() -> EmbeddingSettings:
         ),
         normalize_embeddings=NORMALIZE_EMBEDDINGS,
         dtype=EMBEDDING_DTYPE,
-        cpu_workers=max(1, cpu_workers),
     )
 
 
-class SentenceTransformerEmbeddingBackend:
-    provider = "sentence_transformers"
-
-    def __init__(self, settings: EmbeddingSettings):
-        self.model_name = settings.model_name
-        self.device_mode = settings.device_mode
-        self._normalize_embeddings = settings.normalize_embeddings
-        self._dtype = settings.dtype
-        self._pool = None
-
-        if self.device_mode == "mps":
-            self._model = SentenceTransformer(self.model_name, device="mps")
-        else:
-            self._model = SentenceTransformer(self.model_name)
-            self._pool = self._model.start_multi_process_pool(target_devices=["cpu"] * settings.cpu_workers)
-
-    def encode(self, texts: list[str], batch_size: int) -> np.ndarray:
-        if self._pool is not None:
-            return self._model.encode(
-                texts,
-                batch_size=batch_size,
-                show_progress_bar=True,
-                convert_to_numpy=True,
-                normalize_embeddings=self._normalize_embeddings,
-                precision=self._dtype,
-                pool=self._pool,
-            ).astype(np.float32)
-
-        return self._model.encode(
-            texts,
-            batch_size=batch_size,
-            show_progress_bar=True,
-            convert_to_numpy=True,
-            normalize_embeddings=self._normalize_embeddings,
-            precision=self._dtype,
-        ).astype(np.float32)
-
-    def close(self) -> None:
-        if self._pool is not None:
-            self._model.stop_multi_process_pool(self._pool)
-            self._pool = None
-
-
 class OpenAIEmbeddingBackend:
-    provider = "openai"
-
     def __init__(self, settings: EmbeddingSettings):
         api_key = os.getenv("OPENAI_API_KEY", "").strip()
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY environment variable is not set")
 
         self.model_name = settings.model_name
-        self.device_mode = settings.device_mode
         self._dimensions = settings.openai_dimensions
         self._max_input_tokens = settings.openai_max_input_tokens
         self._max_batch_tokens = settings.openai_max_batch_tokens
@@ -266,7 +180,4 @@ class OpenAIEmbeddingBackend:
 
 
 def create_embedding_backend(settings: EmbeddingSettings | None = None) -> EmbeddingBackend:
-    resolved = settings or load_embedding_settings()
-    if resolved.provider == "openai":
-        return OpenAIEmbeddingBackend(resolved)
-    return SentenceTransformerEmbeddingBackend(resolved)
+    return OpenAIEmbeddingBackend(settings or load_embedding_settings())

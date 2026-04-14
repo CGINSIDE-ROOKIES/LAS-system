@@ -210,7 +210,6 @@ DROP_FIELDS_ON_EXTRACT = {
     "_vectors",
     "_score",
     "embedding_model",
-    "embedding_passage_prefix",
     "normalized",
 }
 

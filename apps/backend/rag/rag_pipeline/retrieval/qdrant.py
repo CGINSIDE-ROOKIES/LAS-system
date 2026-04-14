@@ -147,7 +147,6 @@ def search_qdrant(
     collection: str,
     timeout: int,
     embedding_model: str = DEFAULT_EMBEDDING_MODEL,
-    embedding_provider: str = "sentence_transformers",
     embedding_api_key: str | None = None,
     embedding_api_base_url: str = DEFAULT_OPENAI_API_BASE_URL,
     embedding_dimensions: int | None = None,
@@ -166,7 +165,6 @@ def search_qdrant(
     vector = embed_query(
         query,
         embedding_model,
-        provider=embedding_provider,
         api_key=embedding_api_key,
         api_base_url=embedding_api_base_url,
         dimensions=embedding_dimensions,

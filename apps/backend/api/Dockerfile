@@ -1,6 +1,6 @@
 # Build context: apps/backend/ (one level up, needs both api/ and rag/)
 # ── Stage 1: build ───────────────────────────────────
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ WORKDIR /app/api
 RUN uv sync --frozen --no-dev
 
 # ── Stage 2: runtime ────────────────────────────────
-FROM python:3.12-slim-bookworm
+FROM python:3.13-slim-bookworm
 
 WORKDIR /app/api
 
@@ -37,4 +37,3 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-
