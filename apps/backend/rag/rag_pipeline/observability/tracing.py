@@ -20,9 +20,9 @@ def start_trace(name: str, **kwargs: Any) -> Any | None:
     if client is None:
         return None
     try:
-        return client.start_span(name=name, **kwargs)
+        return client.start_observation(name=name, as_type="span", **kwargs)
     except Exception as exc:
-        logger.debug("trace 생성 실패 (무시): %s", exc)
+        logger.warning("Langfuse trace 생성 실패: %s", exc)
         return None
 
 
@@ -31,9 +31,9 @@ def start_span(parent: Any, name: str, **kwargs: Any) -> Any | None:
     if parent is None:
         return None
     try:
-        return parent.start_span(name=name, **kwargs)
+        return parent.start_observation(name=name, as_type="span", **kwargs)
     except Exception as exc:
-        logger.debug("span 생성 실패 (무시): %s", exc)
+        logger.warning("Langfuse span 생성 실패: %s", exc)
         return None
 
 
@@ -42,9 +42,9 @@ def start_generation_span(parent: Any, name: str, **kwargs: Any) -> Any | None:
     if parent is None:
         return None
     try:
-        return parent.start_generation(name=name, **kwargs)
+        return parent.start_observation(name=name, as_type="generation", **kwargs)
     except Exception as exc:
-        logger.debug("generation span 생성 실패 (무시): %s", exc)
+        logger.warning("Langfuse generation span 생성 실패: %s", exc)
         return None
 
 
@@ -64,7 +64,7 @@ def end_span(span: Any, **kwargs: Any) -> None:
             span.update(**kwargs)
         span.end() if end_time is None else span.end(end_time=end_time)
     except Exception as exc:
-        logger.debug("span 종료 실패 (무시): %s", exc)
+        logger.warning("Langfuse span 종료 실패: %s", exc)
 
 
 def get_trace_id(span: Any) -> str | None:
@@ -82,4 +82,4 @@ def update_trace(trace: Any, **kwargs: Any) -> None:
         trace.update(**kwargs)
         trace.end()
     except Exception as exc:
-        logger.debug("trace 업데이트 실패 (무시): %s", exc)
+        logger.warning("Langfuse trace 업데이트 실패: %s", exc)
