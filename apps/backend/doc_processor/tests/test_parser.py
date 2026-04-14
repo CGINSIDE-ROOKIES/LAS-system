@@ -5,11 +5,11 @@ from pathlib import Path
 
 from document_processor import DocIR, ParaStyleInfo
 
-from doc_processor import Phase1Config, WorkflowState
-from doc_processor.phase1.boundaries import detect_boundary_suspects, review_boundary_suspects_with_llm
-from doc_processor.phase1.converters import clause_entry_to_targets, resolve_clause_entry
-from doc_processor.phase1.graph import build_phase1_graph
-from doc_processor.phase1.parser import parse_document_structure
+from doc_processor import ParserConfig, WorkflowState
+from doc_processor.parser.boundaries import detect_boundary_suspects, review_boundary_suspects_with_llm
+from doc_processor.parser.converters import clause_entry_to_targets, resolve_clause_entry
+from doc_processor.parser.graph import build_parser_graph
+from doc_processor.parser.parser import parse_document_structure
 from doc_processor.types import ParagraphCategory, RelevanceMode
 
 
@@ -39,10 +39,10 @@ class FakeStructuredResponder:
         return schema.model_validate(output)
 
 
-class Phase1GraphTests(unittest.TestCase):
+class ParserGraphTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.graph = build_phase1_graph()
+        cls.graph = build_parser_graph()
 
     def _invoke_state(self, state: WorkflowState) -> WorkflowState:
         result = self.graph.invoke(state)
@@ -52,34 +52,34 @@ class Phase1GraphTests(unittest.TestCase):
         state = self._invoke_state(
             WorkflowState(
                 target_file=DOC_SAMPLES / "02. 청소년 대중문화예술인 표준 부속합의서.hwpx",
-                phase1_config=Phase1Config(boundary_review_enabled=False, label_review_enabled=False),
+                parser_config=ParserConfig(boundary_review_enabled=False, label_review_enabled=False),
             )
         )
-        self.assertTrue(state.phase1_result.accepted)
-        self.assertEqual(state.phase1_result.clause_rule_name, "article")
-        self.assertEqual(state.phase1_result.subclause_rule_name, "circled")
-        self.assertGreaterEqual(state.phase1_result.clause_count, 10)
+        self.assertTrue(state.parser_result.accepted)
+        self.assertEqual(state.parser_result.clause_rule_name, "article")
+        self.assertEqual(state.parser_result.subclause_rule_name, "circled")
+        self.assertGreaterEqual(state.parser_result.clause_count, 10)
         paragraph_map = {paragraph.unit_id: paragraph for paragraph in state.working_doc.paragraphs}
-        self.assertEqual(paragraph_map["s1.p8"].meta.phase1.category, ParagraphCategory.CLAUSE_HEADING)
-        self.assertEqual(paragraph_map["s1.p16"].meta.phase1.category, ParagraphCategory.SUBCLAUSE_HEADING)
+        self.assertEqual(paragraph_map["s1.p8"].meta.parser.category, ParagraphCategory.CLAUSE_HEADING)
+        self.assertEqual(paragraph_map["s1.p16"].meta.parser.category, ParagraphCategory.SUBCLAUSE_HEADING)
 
     def test_global_subclause_rule_prefers_circled_over_definition_list_numeric(self) -> None:
         state = self._invoke_state(
             WorkflowState(
                 target_file=STANDARD_CONTRACT_SAMPLES / "04. 2차적저작물작성권 양도계약서.hwp",
-                phase1_config=Phase1Config(
+                parser_config=ParserConfig(
                     relevance_mode=RelevanceMode.DISABLED,
                     boundary_review_enabled=False,
                     label_review_enabled=False,
                 ),
             )
         )
-        self.assertTrue(state.phase1_result.accepted)
-        self.assertEqual(state.phase1_result.subclause_rule_name, "circled")
+        self.assertTrue(state.parser_result.accepted)
+        self.assertEqual(state.parser_result.subclause_rule_name, "circled")
         paragraph_map = {paragraph.unit_id: paragraph for paragraph in state.working_doc.paragraphs}
-        self.assertEqual(paragraph_map["s1.p11"].meta.phase1.category, ParagraphCategory.CLAUSE_BODY)
-        self.assertEqual(paragraph_map["s1.p17"].meta.phase1.category, ParagraphCategory.CLAUSE_BODY)
-        self.assertEqual(paragraph_map["s1.p21"].meta.phase1.category, ParagraphCategory.SUBCLAUSE_HEADING)
+        self.assertEqual(paragraph_map["s1.p11"].meta.parser.category, ParagraphCategory.CLAUSE_BODY)
+        self.assertEqual(paragraph_map["s1.p17"].meta.parser.category, ParagraphCategory.CLAUSE_BODY)
+        self.assertEqual(paragraph_map["s1.p21"].meta.parser.category, ParagraphCategory.SUBCLAUSE_HEADING)
 
     def test_boundary_batch_payload_preserves_immediate_blank_separator_context(self) -> None:
         target = STANDARD_CONTRACT_SAMPLES / "04. 2차적저작물작성권 양도계약서.hwp"
@@ -98,7 +98,7 @@ class Phase1GraphTests(unittest.TestCase):
         review_boundary_suspects_with_llm(
             doc,
             analysis,
-            Phase1Config(boundary_model_override=responder),
+            ParserConfig(boundary_model_override=responder),
         )
         blocks = responder.calls[0]["payload"]["suspect_blocks"]
         block = next(item for item in blocks if "s1.p85" in item["suspect_unit_ids"])
@@ -112,30 +112,30 @@ class Phase1GraphTests(unittest.TestCase):
         state = self._invoke_state(
             WorkflowState(
                 target_file=DOC_SAMPLES / "2026년_전통시장_육성사업(백년시장)_모집공고(수정).hwpx",
-                phase1_config=Phase1Config(
+                parser_config=ParserConfig(
                     relevance_mode=RelevanceMode.KEYWORD_ONLY,
                     boundary_review_enabled=False,
                     label_review_enabled=False,
                 ),
             )
         )
-        self.assertFalse(state.phase1_result.accepted)
-        self.assertIsNotNone(state.working_doc.meta.phase1_doc.relevance)
-        self.assertFalse(state.working_doc.meta.phase1_doc.relevance.is_relevant)
+        self.assertFalse(state.parser_result.accepted)
+        self.assertIsNotNone(state.working_doc.meta.parser_doc.relevance)
+        self.assertFalse(state.working_doc.meta.parser_doc.relevance.is_relevant)
 
     def test_relevance_disabled_keeps_non_contract_document(self) -> None:
         state = self._invoke_state(
             WorkflowState(
                 target_file=DOC_SAMPLES / "2026년_전통시장_육성사업(백년시장)_모집공고(수정).hwpx",
-                phase1_config=Phase1Config(
+                parser_config=ParserConfig(
                     relevance_mode=RelevanceMode.DISABLED,
                     boundary_review_enabled=False,
                     label_review_enabled=False,
                 ),
             )
         )
-        self.assertTrue(state.phase1_result.accepted)
-        self.assertEqual(state.phase1_result.relevance.mode, RelevanceMode.DISABLED)
+        self.assertTrue(state.parser_result.accepted)
+        self.assertEqual(state.parser_result.relevance.mode, RelevanceMode.DISABLED)
 
     def test_clause_entries_round_trip_to_docir_targets(self) -> None:
         doc = DocIR.from_mapping(
@@ -151,14 +151,14 @@ class Phase1GraphTests(unittest.TestCase):
             WorkflowState(
                 base_doc=doc,
                 working_doc=doc,
-                phase1_config=Phase1Config(
+                parser_config=ParserConfig(
                     relevance_mode=RelevanceMode.DISABLED,
                     boundary_review_enabled=False,
                     label_review_enabled=False,
                 ),
             )
         )
-        entries = state.working_doc.meta.phase1_doc.clause_entries
+        entries = state.working_doc.meta.parser_doc.clause_entries
         self.assertEqual(len(entries), 2)
         self.assertEqual(entries[0].subclauses[0].subclause_no, "1")
         targets = clause_entry_to_targets(entries[0])
@@ -188,7 +188,7 @@ class Phase1GraphTests(unittest.TestCase):
             WorkflowState(
                 base_doc=doc,
                 working_doc=doc,
-                phase1_config=Phase1Config(
+                parser_config=ParserConfig(
                     relevance_mode=RelevanceMode.KEYWORD_THEN_LLM,
                     relevance_model_override=responder,
                     boundary_review_enabled=False,
@@ -196,8 +196,8 @@ class Phase1GraphTests(unittest.TestCase):
                 ),
             )
         )
-        self.assertTrue(state.phase1_result.accepted)
-        self.assertTrue(state.phase1_result.relevance.llm_used)
+        self.assertTrue(state.parser_result.accepted)
+        self.assertTrue(state.parser_result.relevance.llm_used)
 
     def test_boundary_and_label_llm_review_can_detach_and_relabel(self) -> None:
         doc = DocIR.from_mapping(
@@ -232,7 +232,7 @@ class Phase1GraphTests(unittest.TestCase):
             WorkflowState(
                 base_doc=doc,
                 working_doc=doc,
-                phase1_config=Phase1Config(
+                parser_config=ParserConfig(
                     relevance_mode=RelevanceMode.DISABLED,
                     boundary_model_override=boundary_responder,
                     label_model_override=label_responder,
@@ -242,13 +242,13 @@ class Phase1GraphTests(unittest.TestCase):
         paragraph_map = {paragraph.unit_id: paragraph for paragraph in state.working_doc.paragraphs}
         self.assertEqual(len(boundary_responder.calls), 1)
         self.assertIn("suspect_blocks", boundary_responder.calls[0]["payload"])
-        self.assertIsNone(paragraph_map["s1.p4"].meta.phase1.clause_id)
-        self.assertIsNone(paragraph_map["s1.p4"].meta.phase1.clause_no)
-        self.assertIsNone(paragraph_map["s1.p4"].meta.phase1.subclause_id)
-        self.assertIsNone(paragraph_map["s1.p4"].meta.phase1.subclause_no)
-        self.assertEqual(paragraph_map["s1.p4"].meta.phase1.category, ParagraphCategory.APPENDIX)
-        self.assertEqual(paragraph_map["s1.p4"].meta.phase1.spans, [])
-        clause_entry = state.working_doc.meta.phase1_doc.clause_entries[0]
+        self.assertIsNone(paragraph_map["s1.p4"].meta.parser.clause_id)
+        self.assertIsNone(paragraph_map["s1.p4"].meta.parser.clause_no)
+        self.assertIsNone(paragraph_map["s1.p4"].meta.parser.subclause_id)
+        self.assertIsNone(paragraph_map["s1.p4"].meta.parser.subclause_no)
+        self.assertEqual(paragraph_map["s1.p4"].meta.parser.category, ParagraphCategory.APPENDIX)
+        self.assertEqual(paragraph_map["s1.p4"].meta.parser.spans, [])
+        clause_entry = state.working_doc.meta.parser_doc.clause_entries[0]
         self.assertEqual(clause_entry.member_unit_ids, ["s1.p2", "s1.p3"])
 
     def test_clause_owned_tables_and_input_like_paragraphs_stay_clause_body(self) -> None:
@@ -277,7 +277,7 @@ class Phase1GraphTests(unittest.TestCase):
             WorkflowState(
                 base_doc=doc,
                 working_doc=doc,
-                phase1_config=Phase1Config(
+                parser_config=ParserConfig(
                     relevance_mode=RelevanceMode.DISABLED,
                     boundary_model_override=boundary_responder,
                     label_review_enabled=False,
@@ -285,9 +285,9 @@ class Phase1GraphTests(unittest.TestCase):
             )
         )
         paragraph_map = {paragraph.unit_id: paragraph for paragraph in state.working_doc.paragraphs}
-        self.assertEqual(paragraph_map["s1.p3"].meta.phase1.category, ParagraphCategory.CLAUSE_BODY)
-        self.assertEqual(paragraph_map["s1.p4"].meta.phase1.category, ParagraphCategory.CLAUSE_BODY)
-        self.assertEqual(paragraph_map["s1.p3"].tables[0].meta.phase1.category, ParagraphCategory.CLAUSE_BODY)
+        self.assertEqual(paragraph_map["s1.p3"].meta.parser.category, ParagraphCategory.CLAUSE_BODY)
+        self.assertEqual(paragraph_map["s1.p4"].meta.parser.category, ParagraphCategory.CLAUSE_BODY)
+        self.assertEqual(paragraph_map["s1.p3"].tables[0].meta.parser.category, ParagraphCategory.CLAUSE_BODY)
 
 
 if __name__ == "__main__":

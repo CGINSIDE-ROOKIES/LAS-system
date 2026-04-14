@@ -3,7 +3,7 @@ from .langfuse import (
     get_langchain_invoke_config,
     langfuse_callback_context,
     traced_structure_analysis_node,
-    traced_phase1_node,
+    traced_parser_node,
 )
 
 __all__ = [
@@ -11,5 +11,5 @@ __all__ = [
     "get_langchain_invoke_config",
     "langfuse_callback_context",
     "traced_structure_analysis_node",
-    "traced_phase1_node",
+    "traced_parser_node",
 ]
