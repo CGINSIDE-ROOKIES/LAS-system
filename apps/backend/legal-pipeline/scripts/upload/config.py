@@ -40,8 +40,8 @@ OPENSEARCH_INCREMENTAL_DIR = Path(
     os.getenv("OPENSEARCH_INCREMENTAL_DIR", PROJECT_ROOT / "data" / "handoff" / "opensearch_incremental")
 )
 
-DEFAULT_VECTOR_DIM = 768
-DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+DEFAULT_VECTOR_DIM = 3072
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
 NORMALIZE = True
 BATCH_SIZE = 500
 
@@ -210,7 +210,6 @@ DROP_FIELDS_ON_EXTRACT = {
     "_vectors",
     "_score",
     "embedding_model",
-    "embedding_passage_prefix",
     "normalized",
 }
 

@@ -138,7 +138,6 @@ def _build_cost_summary(
         "dataset_dir": str(dataset_dir),
         "model_name": model_name,
         "token_counter_mode": token_counter_mode,
-        "embedding_provider": CURRENT_EMBEDDING_SETTINGS.provider,
         "target_profile": target_profile,
         "embedding_targets": list(target_keys),
         "price_per_1m_tokens_usd": price_per_1m_tokens,
