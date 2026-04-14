@@ -8,9 +8,9 @@ from ..types import (
     ClauseEntry,
     DocTargetRef,
     ParagraphCategory,
-    Phase1Analysis,
-    Phase1DocumentMeta,
-    Phase1NodeMeta,
+    ParserAnalysis,
+    ParserDocumentMeta,
+    ParserNodeMeta,
     WorkflowMeta,
 )
 
@@ -39,16 +39,16 @@ def resolve_clause_entry(
     return resolve_targets_to_paragraphs(doc, clause_entry_to_targets(entry))
 
 
-def attach_phase1_metadata_to_doc(
+def attach_parser_metadata_to_doc(
     doc: DocIR,
-    analysis: Phase1Analysis,
+    analysis: ParserAnalysis,
 ) -> DocIR:
     annotated = doc.model_copy(deep=True)
     paragraph_map = {paragraph.unit_id: paragraph for paragraph in analysis.paragraphs}
 
     annotated.meta = _merge_meta(
         annotated.meta,
-        phase1_doc=Phase1DocumentMeta(
+        parser_doc=ParserDocumentMeta(
             relevance=analysis.relevance,
             clause_rule_name=analysis.clause_rule_name,
             subclause_rule_name=analysis.subclause_rule_name,
@@ -65,7 +65,7 @@ def attach_phase1_metadata_to_doc(
             continue
         paragraph.meta = _merge_meta(
             paragraph.meta,
-            phase1=Phase1NodeMeta(
+            parser=ParserNodeMeta(
                 category=current.category,
                 clause_id=current.clause_id,
                 clause_no=current.clause_no,
@@ -83,7 +83,7 @@ def attach_phase1_metadata_to_doc(
         for table in paragraph.tables:
             table.meta = _merge_meta(
                 table.meta,
-                phase1=Phase1NodeMeta(
+                parser=ParserNodeMeta(
                     category=current.category,
                     clause_id=current.clause_id,
                     clause_no=current.clause_no,
@@ -92,7 +92,7 @@ def attach_phase1_metadata_to_doc(
                     clause_rule_name=current.clause_rule_name,
                     subclause_rule_name=current.subclause_rule_name,
                     boundary_suspect=current.boundary_suspect,
-                    notes=["Inherited from owning paragraph during phase 1."],
+                    notes=["Inherited from owning paragraph during parser stage."],
                 ),
             )
     return annotated
@@ -101,12 +101,12 @@ def attach_phase1_metadata_to_doc(
 def _merge_meta(
     current: WorkflowMeta | None,
     *,
-    phase1: Phase1NodeMeta | None = None,
-    phase1_doc: Phase1DocumentMeta | None = None,
+    parser: ParserNodeMeta | None = None,
+    parser_doc: ParserDocumentMeta | None = None,
 ) -> WorkflowMeta:
     base = current.model_copy(deep=True) if current is not None else WorkflowMeta()
-    if phase1 is not None:
-        base.phase1 = phase1
-    if phase1_doc is not None:
-        base.phase1_doc = phase1_doc
+    if parser is not None:
+        base.parser = parser
+    if parser_doc is not None:
+        base.parser_doc = parser_doc
     return base

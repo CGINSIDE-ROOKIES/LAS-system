@@ -5,8 +5,8 @@ from pydantic import BaseModel
 from document_processor import DocIR
 
 from ..prompts import load_prompt
-from ..state import Phase1Config
-from ..types import ParagraphAnalysis, ParagraphCategory, Phase1Analysis, SplitSuggestion, WorkflowMeta
+from ..state import ParserConfig
+from ..types import ParagraphAnalysis, ParagraphCategory, ParserAnalysis, SplitSuggestion, WorkflowMeta
 from .llm_utils import invoke_structured_model
 from .parser import build_clause_entries_from_analysis
 from .rules import APPENDIX_MARKER_RE, FOOTER_RE, HEADER_KEYWORD_RE, INPUT_RE
@@ -42,7 +42,7 @@ def _coarse_boundary_hint(paragraph: ParagraphAnalysis) -> str:
     return "body"
 
 
-def detect_boundary_suspects(analysis: Phase1Analysis) -> Phase1Analysis:
+def detect_boundary_suspects(analysis: ParserAnalysis) -> ParserAnalysis:
     suspect_ids: set[str] = set()
     paragraph_map = paragraph_lookup(analysis.paragraphs)
     clauses_with_subclause_headings = {
@@ -92,13 +92,13 @@ def detect_boundary_suspects(analysis: Phase1Analysis) -> Phase1Analysis:
 
 def review_boundary_suspects_with_llm(
     doc: DocIR,
-    analysis: Phase1Analysis,
-    config: Phase1Config,
+    analysis: ParserAnalysis,
+    config: ParserConfig,
 ) -> dict[str, BoundaryReviewOutput]:
     if not config.boundary_review_enabled or not analysis.boundary_suspect_unit_ids:
         return {}
 
-    prompt = load_prompt("phase1/clause_context_boundary_batch", profile=config.prompt_profile)
+    prompt = load_prompt("parser/clause_context_boundary_batch", profile=config.prompt_profile)
     blocks = _build_boundary_review_blocks(analysis)
     payload = {"suspect_blocks": blocks}
     output = invoke_structured_model(
@@ -115,11 +115,11 @@ def review_boundary_suspects_with_llm(
 
 def review_single_boundary_suspect_with_llm(
     doc: DocIR,
-    analysis: Phase1Analysis,
+    analysis: ParserAnalysis,
     unit_id: str,
-    config: Phase1Config,
+    config: ParserConfig,
 ) -> BoundaryReviewOutput:
-    prompt = load_prompt("phase1/clause_context_boundary", profile=config.prompt_profile)
+    prompt = load_prompt("parser/clause_context_boundary", profile=config.prompt_profile)
     paragraph_map = paragraph_lookup(analysis.paragraphs)
     paragraph = paragraph_map[unit_id]
     index = analysis.paragraphs.index(paragraph)
@@ -147,7 +147,7 @@ def review_single_boundary_suspect_with_llm(
     )
 
 
-def _build_boundary_review_blocks(analysis: Phase1Analysis) -> list[dict[str, object]]:
+def _build_boundary_review_blocks(analysis: ParserAnalysis) -> list[dict[str, object]]:
     paragraphs = analysis.paragraphs
     suspect_ids = set(analysis.boundary_suspect_unit_ids)
     if not suspect_ids:
@@ -202,7 +202,7 @@ def _build_boundary_review_blocks(analysis: Phase1Analysis) -> list[dict[str, ob
     return blocks
 
 
-def apply_boundary_reviews(analysis: Phase1Analysis, reviews: dict[str, BoundaryReviewOutput]) -> Phase1Analysis:
+def apply_boundary_reviews(analysis: ParserAnalysis, reviews: dict[str, BoundaryReviewOutput]) -> ParserAnalysis:
     if not reviews:
         return analysis
 

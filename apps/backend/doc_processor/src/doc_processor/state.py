@@ -8,10 +8,10 @@ from pydantic import BaseModel, Field
 
 from document_processor import DocIR
 
-from .types import Phase1Analysis, Phase1Result, RelevanceMode, WorkflowDelta, WorkflowMeta
+from .types import ParserAnalysis, ParserResult, RelevanceMode, WorkflowDelta, WorkflowMeta
 
 
-class Phase1Config(BaseModel):
+class ParserConfig(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     relevance_mode: RelevanceMode = RelevanceMode.KEYWORD_THEN_LLM
@@ -31,7 +31,7 @@ class Phase1Config(BaseModel):
     langfuse_trace_name: str = "doc_processor.structure_analysis"
     langfuse_user_id: str | None = None
     langfuse_session_id: str | None = None
-    langfuse_tags: list[str] = Field(default_factory=lambda: ["phase1", "structure_analysis"])
+    langfuse_tags: list[str] = Field(default_factory=lambda: ["parser", "structure_analysis"])
     langfuse_metadata: dict[str, str] = Field(default_factory=dict)
     langfuse_environment: str | None = None
     langfuse_release: str | None = None
@@ -47,9 +47,9 @@ class WorkflowState(BaseModel):
     target_file: str | Path | None = None
     base_doc: DocIR | None = None
     working_doc: DocIR | None = None
-    phase1_config: Phase1Config = Field(default_factory=Phase1Config)
-    phase1_analysis: Phase1Analysis | None = None
-    phase1_result: Phase1Result | None = None
+    parser_config: ParserConfig = Field(default_factory=ParserConfig)
+    parser_analysis: ParserAnalysis | None = None
+    parser_result: ParserResult | None = None
     active_review_unit_id: str | None = None
     active_review_kind: str | None = None
     llm_review_stage: str | None = None

@@ -14,7 +14,7 @@ from .nodes import (
 )
 
 
-def build_phase1_graph():
+def build_parser_graph():
     builder = StateGraph(WorkflowState)
     builder.add_node("load_document", load_document)
     builder.add_node("screen_relevance", screen_relevance)
