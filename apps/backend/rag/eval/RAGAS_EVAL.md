@@ -208,11 +208,47 @@ eval_set.csv
 - **normative prec 0.755 → 0.698** (-0.057), **missing 4건 발생** — law_names hard filter 과적용으로 인한 retrieval 실패
 - n이 43→39로 감소 (missing 4건 = RAGAS 평가 제외)
 
-### 4-8. 종합 해석
+### 4-8. 7차 측정 (2026-04-09, intent 기반 필터 전략 적용 + RAGAS 강화)
 
-- **normative · mixed는 안정적** — OpenAI 임베딩 전환 이후 어휘 불일치 문제 크게 완화
-- **파서 적용 시 case_law 개선 / normative 하락** — law_names hard filter가 case_law 판례 retrieval을 방해하는 구조적 문제 확인
-- **다음 개선 타겟: intent 기반 필터 전략** — case_law는 law_names 필터 미적용, mixed는 enforce 해제. 이후 재측정으로 효과 확인
+> intent 기반 법령 필터 전략 적용 (`case_law` 질의는 law_names hard filter 미적용, `case_only` status 신규 도입) + RAGAS 강화 (평가 LLM gemini-2.5-flash-lite, faithfulness 메트릭, Langfuse score push). Query Parser 기본 적용.
+> **v2 eval_set 기준 (4-6 baseline, 4-7 비교 가능).**
+
+| 메트릭 | 전체 평균 |
+|---|---|
+| answer_relevancy | **0.898** (n=40) |
+| context_precision | **0.651** (n=40) |
+| law_hit | **0.571** (n=35, 신규 지표) |
+
+| intent | n | answer_relevancy | context_precision |
+|---|---|---|---|
+| normative | 20 | 0.868 | 0.640 |
+| case_law | 12 | 0.954 | 0.722 |
+| mixed | 8 | 0.890 | 0.574 |
+
+- `law_context_status`: ok 23건, case_only 14건, missing 4건, irrelevant 1건, supplemented 1건
+- `answer_relevancy` 0.0 저점수 1건
+  - normative: 육아휴직 신청을 거부하면 어떤 제재를 받나요
+- faithfulness: 0건 측정 (answer_relevancy ≥ 0.6 전 건 해당). 0.0 점 1건은 `0.0 or 1.0 = 1.0` 버그로 대상 제외됨 → 버그 수정 완료, 다음 실행부터 반영
+
+**4-7 대비 변화 분석**
+
+| intent | rel 변화 | prec 변화 |
+|---|---|---|
+| case_law | 0.755 → **0.954** (+0.199) ↑ | 0.715 → **0.722** (+0.007) → |
+| normative | 0.898 → **0.868** (-0.030) ↓ | 0.698 → **0.640** (-0.058) ↓ |
+| mixed | 0.860 → **0.890** (+0.030) ↑ | 0.767 → **0.574** (-0.193) ↓ |
+
+- **case_law rel +0.199** — intent 기반 필터로 law_names hard filter 해제 효과. `case_only` 14건 발생 = 판례 전용 retrieval 정상 동작
+- **normative prec -0.058** — case_only 도입으로 일부 법령 컨텍스트 구성 방식 변화. 원인 추가 분석 필요
+- **mixed prec -0.193** — 법령 + 판례 복합 질의에서 컨텍스트 균형이 깨진 것으로 의심. **다음 개선 타겟**
+- **law_hit 0.571** — retrieval 대상 중 57%가 gold_law 문서 포함. 절반 정도는 올바른 법령 문서를 찾고 있음
+
+### 4-9. 종합 해석
+
+- **case_law rel 0.699 → 0.954** — intent 기반 필터 전략 적용 후 판례 질의 품질이 가장 크게 개선됨. 구조적 문제(law_names hard filter가 판례 retrieval 방해) 해소 확인
+- **mixed prec 일관 하락** — 법령+판례 복합 질의에서 컨텍스트 비율 조정 전략 필요. 다음 개선 타겟
+- **normative는 안정적** — OpenAI 임베딩 전환 이후 어휘 불일치 문제 완화 유지. prec 소폭 하락은 필터 전략 변경 영향으로 추정
+- **law_hit은 retrieval recall 보조 지표** — LLM 판단 없는 결정론적 수치. RAGAS 메트릭과 함께 추세 모니터링
 - LLM 판단 기반 메트릭 특성상 실행마다 노이즈 존재. 단일 수치보다 추세로 판단 필요
 
 ---
@@ -223,14 +259,16 @@ eval_set.csv
 
 - **intent별 점수 비교** → normative의 context_precision이 일관되게 최저임을 확인
 - **law_context_status 분포** → 현재 전 건 `ok` (missing 문제는 retrieval 순위 문제로 나타남)
-- **저점수 쿼리 목록** → 0점 5건 확인 및 원인 파악 (어휘 불일치)
+- **저점수 쿼리 목록** → 0점 건 확인 및 원인 파악 (어휘 불일치)
+- **intent 기반 필터 전략** ✅ → case_law rel +0.199 개선 확인 (4-8)
+- **RAGAS 강화** ✅ → faithfulness 메트릭, Langfuse score push, law_hit 지표 도입 (4-8)
 
 ### 중기 (개선 적용 후 비교)
 
 | 개선 방향 | 기대 효과 측정 방법 |
 |---|---|
-| 동의어 사전 (기재사항 → 명시사항 등) | context_precision 변화 |
-| normative 키워드 확장 | law_context_status missing 감소 |
+| mixed 컨텍스트 비율 조정 | mixed context_precision 회복 여부 |
+| 동의어 사전 (기재사항 → 명시사항 등) | normative context_precision 변화 |
 | HyDE 도입 | context_precision + answer_relevancy 변화 |
 
 동일 eval_set으로 반복 측정하여 **개선 전후를 수치로 비교**할 수 있게 됩니다.

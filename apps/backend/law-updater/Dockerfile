@@ -1,7 +1,7 @@
 # Build context: apps/backend/law-updater/
 
 # ── Stage 1: build ───────────────────────────────────
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS builder
 
 WORKDIR /app/law-updater
 
@@ -13,7 +13,7 @@ COPY scripts/ /app/law-updater/scripts/
 COPY src/ /app/law-updater/src/
 
 # ── Stage 2: runtime ────────────────────────────────
-FROM python:3.12-slim-bookworm
+FROM python:3.13-slim-bookworm
 
 WORKDIR /app/law-updater
 
@@ -24,4 +24,3 @@ COPY --from=builder /app/law-updater/src/ /app/law-updater/src/
 
 ENV PATH="/app/law-updater/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
-

@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
 
-DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-large"
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_OPENAI_MAX_INPUT_TOKENS = 8192
 DEFAULT_OPENAI_MAX_BATCH_TOKENS = 300000
@@ -27,9 +27,7 @@ EMBEDDING_DTYPE = "float32"
 
 @dataclass(frozen=True)
 class EmbeddingSettings:
-    provider: str
     model_name: str
-    device_mode: str
     openai_base_url: str
     openai_dimensions: int | None
     openai_max_input_tokens: int
@@ -41,9 +39,7 @@ class EmbeddingSettings:
 
 
 class EmbeddingBackend(Protocol):
-    provider: str
     model_name: str
-    device_mode: str | None
 
     def encode(self, texts: list[str], batch_size: int) -> np.ndarray:
         ...
@@ -52,20 +48,8 @@ class EmbeddingBackend(Protocol):
         ...
 
 
-def _normalize_provider(value: str | None) -> str:
-    token = str(value or "").strip().lower().replace("-", "_")
-    if token in {"", "openai", "openai_api"}:
-        return "openai"
-    raise ValueError(
-        f"Unsupported embedding provider: {value}. law-updater supports external API embeddings only."
-    )
-
-
 def load_embedding_settings() -> EmbeddingSettings:
-    provider = _normalize_provider(os.getenv("EMBEDDING_PROVIDER", "openai"))
-    default_model = DEFAULT_OPENAI_EMBEDDING_MODEL
-    device_mode = "remote_api"
-    model_name = os.getenv("EMBEDDING_MODEL", default_model).strip() or default_model
+    model_name = os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL).strip() or DEFAULT_EMBEDDING_MODEL
     openai_dimensions_raw = os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "").strip()
     openai_dimensions = int(openai_dimensions_raw) if openai_dimensions_raw else None
     max_input_tokens_raw = os.getenv("OPENAI_MAX_INPUT_TOKENS", "").strip()
@@ -74,9 +58,7 @@ def load_embedding_settings() -> EmbeddingSettings:
     retry_delay_raw = os.getenv("OPENAI_RETRY_BASE_DELAY_SEC", "").strip()
 
     return EmbeddingSettings(
-        provider=provider,
         model_name=model_name,
-        device_mode=device_mode,
         openai_base_url=os.getenv("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL).rstrip("/"),
         openai_dimensions=openai_dimensions,
         openai_max_input_tokens=(
@@ -95,15 +77,12 @@ def load_embedding_settings() -> EmbeddingSettings:
 
 
 class OpenAIEmbeddingBackend:
-    provider = "openai"
-
     def __init__(self, settings: EmbeddingSettings):
         api_key = os.getenv("OPENAI_API_KEY", "").strip()
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY environment variable is not set")
 
         self.model_name = settings.model_name
-        self.device_mode = settings.device_mode
         self._dimensions = settings.openai_dimensions
         self._max_input_tokens = settings.openai_max_input_tokens
         self._max_batch_tokens = settings.openai_max_batch_tokens
@@ -201,5 +180,4 @@ class OpenAIEmbeddingBackend:
 
 
 def create_embedding_backend(settings: EmbeddingSettings | None = None) -> EmbeddingBackend:
-    resolved = settings or load_embedding_settings()
-    return OpenAIEmbeddingBackend(resolved)
+    return OpenAIEmbeddingBackend(settings or load_embedding_settings())

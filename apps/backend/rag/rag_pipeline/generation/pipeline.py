@@ -15,14 +15,26 @@ from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
-from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, embed_query, is_embedding_model_cached
-from ..retrieval.context import build_llm_context_rows, build_llm_context_text
+from ..observability.tracing import end_span, start_generation_span, start_span, start_trace, update_trace
+from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, embed_query
+from ..retrieval.context import build_llm_context_rows, build_llm_context_text, truncate_on_semantic_boundary
 from ..retrieval.fusion import fuse_rrf, fuse_rrf_multi
 from ..retrieval.opensearch import search_bm25
-from ..retrieval.qdrant import search_qdrant, search_qdrant_with_vector
-from ..retrieval.ranking import apply_law_boost, select_rows_with_law_policy
+from ..retrieval.qdrant import search_qdrant_with_vector
+from ..retrieval.ranking import (
+    LAW_CONTEXT_CASE_ONLY,
+    LAW_CONTEXT_MISSING,
+    LAW_CONTEXT_SUPPLEMENTED,
+    apply_law_boost,
+    select_rows_with_law_policy,
+)
 from ..retrieval.service import RetrievalConfig
 from .service import GenerationConfig, GenerationService
+
+_NO_RESULT_ANSWER = (
+    "관련 법령·판례 문서를 찾지 못했습니다. "
+    "질문을 더 구체적으로 입력하시거나, 법령 필터가 설정되어 있다면 해제 후 다시 시도해보세요."
+)
 
 DEFAULT_SYSTEM_PROMPT = (
     "당신은 노동법 및 하도급법 전문 법률 Q&A 어시스턴트입니다.\n"
@@ -55,7 +67,7 @@ class RagResult:
 
     answer: str
     retrieved_docs: list[dict[str, Any]]  # 컨텍스트에 사용된 문서 목록
-    law_context_status: str               # "ok" | "missing" | "supplemented"
+    law_context_status: str               # ranking.LAW_CONTEXT_* 상수 중 하나
 
 
 # ── 프롬프트 빌더 ─────────────────────────────────────────────────────────────
@@ -69,13 +81,15 @@ def build_user_prompt_with_limit(
 ) -> str:
     """system_prompt를 제외한 user 메시지 본문(컨텍스트 + 질문)을 조립한다."""
     status_line = ""
-    if law_context_status == "missing":
+    if law_context_status == LAW_CONTEXT_MISSING:
         status_line = (
             "중요: 현재 검색 결과에서 법령(law) 근거가 충분하지 않습니다.\n"
             "확정적 결론 대신 근거 부족을 명시하고, 확인 가능한 범위만 답변하세요.\n\n"
         )
-    elif law_context_status == "supplemented":
+    elif law_context_status == LAW_CONTEXT_SUPPLEMENTED:
         status_line = "참고: 법령(law) 문서를 보강한 컨텍스트로 답변합니다.\n\n"
+    elif law_context_status == LAW_CONTEXT_CASE_ONLY:
+        status_line = "참고: 현재 검색 결과에 법령 조문이 없고 판례·해석례만 포함되어 있습니다.\n조문 근거 없이 판례 중심으로 답변하세요.\n\n"
 
     prefix = (
         f"{status_line}"
@@ -93,7 +107,8 @@ def build_user_prompt_with_limit(
 
     context = retrieved_context_text
     if len(context) > keep:
-        context = context[:keep]
+        # 단순 슬라이싱 대신 의미 경계 기준으로 자른다.
+        context = truncate_on_semantic_boundary(context, keep)
     return f"{prefix}{context}{suffix}"
 
 
@@ -103,12 +118,20 @@ class RagPipeline:
     def __init__(self, config: RagPipelineConfig) -> None:
         self._cfg = config
         self._generation = GenerationService(config.generation)
+        # 요청마다 ThreadPoolExecutor를 새로 만들지 않고 파이프라인 인스턴스 단위로 재사용한다.
+        # api/dependencies.py에서 RagPipeline은 lru_cache 싱글톤으로 관리된다.
+        max_workers = max(2, len(config.retrieval.qdrant_collections) + 2)
+        self._executor = ThreadPoolExecutor(max_workers=max_workers)
 
     @classmethod
     def from_env(cls) -> RagPipeline:
         """환경변수에서 설정을 읽어 인스턴스를 생성한다."""
-        raw_collections = os.environ["QDRANT_COLLECTIONS"]
+        raw_collections = os.getenv("QDRANT_COLLECTIONS", "").strip()
+        if not raw_collections:
+            raise RetrievalError("QDRANT_COLLECTIONS 환경변수가 필요합니다. 예: law_article,legal_case,legal_relation")
         collections = [c.strip() for c in raw_collections.split(",") if c.strip()]
+        if not collections:
+            raise RetrievalError("QDRANT_COLLECTIONS가 비어 있습니다.")
 
         # QDRANT_VECTOR_NAME_MAP=law_article=body,legal_case= 형식 파싱
         vector_name_map: dict[str, str] = {}
@@ -132,8 +155,8 @@ class RagPipeline:
                     opensearch_api_key=os.getenv("OPENSEARCH_API_KEY") or None,
                     opensearch_username=os.getenv("OPENSEARCH_USERNAME") or None,
                     opensearch_password=os.getenv("OPENSEARCH_PASSWORD") or None,
+                    opensearch_search_text_field=os.getenv("OPENSEARCH_SEARCH_TEXT_FIELD", "search_text"),
                     embedding_model=os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
-                    embedding_provider=os.getenv("EMBEDDING_PROVIDER", "sentence_transformers"),
                     embedding_api_key=os.getenv("OPENAI_API_KEY") or None,
                     embedding_api_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
                     embedding_dimensions=int(d) if (d := os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "").strip()) else None,
@@ -149,6 +172,7 @@ class RagPipeline:
         doc_types: list[str] | None,
         law_names: list[str] | None,
         intent: str | None = None,
+        trace: Any | None = None,
     ) -> tuple[list[dict[str, Any]], str, str, bool]:
         """검색 → 융합 → 순위 조정 → 컨텍스트 빌드.
 
@@ -167,24 +191,43 @@ class RagPipeline:
         if intent == "case_law":
             law_names = None
             enforce = False
+            # 판례 중심 질의 — 법령 조문이 섞이지 않도록 판례류로만 제한
+            if doc_types is None:
+                doc_types = ["prec", "decc", "detc", "expc"]
+                logger.info("intent=case_law: doc_types 미지정이어서 판례류로 제한 %s", doc_types)
         elif intent == "mixed":
             enforce = False
         else:
             enforce = self._cfg.enforce_min_law_contexts
 
         t0 = time.perf_counter()
-
-        # 임베딩을 한 번만 계산한 뒤 Qdrant(복수 컬렉션) + OpenSearch를 병렬 실행한다.
-        vector = embed_query(
-            question,
-            rcfg.embedding_model,
-            provider=rcfg.embedding_provider,
-            api_key=rcfg.embedding_api_key,
-            api_base_url=rcfg.embedding_api_base_url,
-            dimensions=rcfg.embedding_dimensions,
+        retrieval_span = start_span(
+            trace, "retrieval",
+            input={"question": question, "doc_types": doc_types, "law_names": law_names, "intent": intent},
         )
-        logger.info("임베딩 완료: %.2fs", time.perf_counter() - t0)
 
+        # ── embed ──────────────────────────────────────────────────────────────
+        embed_span = start_span(
+            retrieval_span, "embed",
+            input={"model": rcfg.embedding_model},
+        )
+        try:
+            vector = embed_query(
+                question,
+                rcfg.embedding_model,
+                api_key=rcfg.embedding_api_key,
+                api_base_url=rcfg.embedding_api_base_url,
+                dimensions=rcfg.embedding_dimensions,
+            )
+        except Exception:
+            end_span(embed_span, level="ERROR")
+            end_span(retrieval_span, level="ERROR")
+            raise
+        t_embed = time.perf_counter() - t0
+        logger.info("임베딩 완료: %.2fs", t_embed)
+        end_span(embed_span, output={"dim": len(vector)}, level="DEFAULT")
+
+        # ── qdrant + opensearch 병렬 실행 ──────────────────────────────────────
         def _qdrant_task(collection: str) -> list[dict[str, Any]]:
             return search_qdrant_with_vector(
                 vector, candidate_k,
@@ -212,40 +255,90 @@ class RagPipeline:
                 law_names=law_names,
                 dedup=True,
                 fetch_multiplier=5,
+                search_text_field=rcfg.opensearch_search_text_field,
             )
 
-        with ThreadPoolExecutor() as executor:
-            qdrant_futures = [
-                executor.submit(_qdrant_task, col)
-                for col in rcfg.qdrant_collections
-            ]
-            bm25_future = executor.submit(_bm25_task) if rcfg.opensearch_url else None
-
-            collection_rows = [f.result() for f in qdrant_futures]
-
-            bm25_rows: list[dict[str, Any]] = []
-            if bm25_future is not None:
-                try:
-                    bm25_rows = bm25_future.result()
-                except RetrievalError:
-                    bm25_rows = []
-
-        qdrant_rows = fuse_rrf_multi(collection_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
-
-        # candidate_k 전체를 융합해야 law 보강 시 top_k 바깥 문서를 참조할 수 있음
-        rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
-        rrf_rows = apply_law_boost(
-            rrf_rows,
-            question=question,
-            enabled=rcfg.auto_law_boost,
-            law_boost_score=rcfg.law_boost_score,
+        # span을 submit 전에 생성해야 실제 실행 시작 시각이 반영된다.
+        qdrant_span = start_span(
+            retrieval_span, "qdrant",
+            input={"collections": rcfg.qdrant_collections, "candidate_k": candidate_k},
         )
+        opensearch_span = start_span(
+            retrieval_span, "opensearch",
+            input={"index": rcfg.opensearch_index, "candidate_k": candidate_k},
+        )
+        qdrant_futures = [
+            self._executor.submit(_qdrant_task, col)
+            for col in rcfg.qdrant_collections
+        ]
+        bm25_future = self._executor.submit(_bm25_task) if rcfg.opensearch_url else None
 
-        llm_rows, law_context_status, law_context_added = select_rows_with_law_policy(
-            rrf_rows,
-            top_k=rcfg.top_k,
-            min_law_contexts=rcfg.min_law_contexts,
-            enforce_min_law_contexts=enforce,
+        try:
+            collection_rows = [f.result() for f in qdrant_futures]
+        except Exception as exc:
+            end_span(qdrant_span, output={"error": str(exc)}, level="ERROR")
+            end_span(retrieval_span, level="ERROR")
+            raise
+        end_span(qdrant_span, output={"hits": [len(r) for r in collection_rows]}, level="DEFAULT")
+
+        bm25_rows: list[dict[str, Any]] = []
+        if bm25_future is not None:
+            try:
+                bm25_rows = bm25_future.result()
+                end_span(opensearch_span, output={"hits": len(bm25_rows)}, level="DEFAULT")
+            except RetrievalError as exc:
+                logger.warning("BM25 검색 실패로 스킵: %s", exc)
+                end_span(opensearch_span, output={"error": str(exc)}, level="WARNING")
+        else:
+            end_span(opensearch_span, output={"skipped": True}, level="DEFAULT")
+        logger.info("검색 완료: %.2fs", time.perf_counter() - t0)
+
+        # ── fusion ─────────────────────────────────────────────────────────────
+        fusion_span = start_span(
+            retrieval_span, "fusion",
+            input={"rrf_k": rcfg.rrf_k, "candidate_k": candidate_k, "auto_law_boost": rcfg.auto_law_boost},
+        )
+        try:
+            qdrant_rows = fuse_rrf_multi(
+                collection_rows,
+                rrf_k=rcfg.rrf_k,
+                top_k=candidate_k,
+                backend_names=rcfg.qdrant_collections,
+            )
+            # candidate_k 전체를 융합해야 law 보강 시 top_k 바깥 문서를 참조할 수 있음
+            rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
+            rrf_rows = apply_law_boost(
+                rrf_rows,
+                question=question,
+                enabled=rcfg.auto_law_boost,
+                law_boost_score=rcfg.law_boost_score,
+            )
+        except Exception as exc:
+            end_span(fusion_span, output={"error": str(exc)}, level="ERROR")
+            end_span(retrieval_span, level="ERROR")
+            raise
+        end_span(fusion_span, output={"fused_docs": len(rrf_rows)}, level="DEFAULT")
+
+        # ── ranking ────────────────────────────────────────────────────────────
+        ranking_span = start_span(
+            retrieval_span, "ranking",
+            input={"top_k": rcfg.top_k, "min_law_contexts": rcfg.min_law_contexts},
+        )
+        try:
+            llm_rows, law_context_status, law_context_added = select_rows_with_law_policy(
+                rrf_rows,
+                top_k=rcfg.top_k,
+                min_law_contexts=rcfg.min_law_contexts,
+                enforce_min_law_contexts=enforce,
+            )
+        except Exception as exc:
+            end_span(ranking_span, output={"error": str(exc)}, level="ERROR")
+            end_span(retrieval_span, level="ERROR")
+            raise
+        end_span(
+            ranking_span,
+            output={"selected_docs": len(llm_rows), "law_context_status": law_context_status},
+            level="DEFAULT",
         )
 
         contexts = build_llm_context_rows(
@@ -258,6 +351,11 @@ class RagPipeline:
             "retrieval 완료: %.2fs | docs=%d | law_context_status=%s",
             time.perf_counter() - t0, len(llm_rows), law_context_status,
         )
+        end_span(
+            retrieval_span,
+            output={"docs": len(llm_rows), "law_context_status": law_context_status},
+            level="DEFAULT",
+        )
         return llm_rows, context_text, law_context_status, law_context_added
 
     def _build_result(
@@ -267,6 +365,9 @@ class RagPipeline:
         law_context_status: str,
     ) -> RagResult:
         snippet_max = self._cfg.snippet_max_chars
+        def _snippet(row: dict[str, Any]) -> str:
+            raw = str(row.get("snippet", "") or "")
+            return raw[:snippet_max] if snippet_max > 0 else raw
 
         retrieved_docs = [
             {
@@ -276,7 +377,7 @@ class RagPipeline:
                 "law_name": str(row.get("law_name", "") or ""),
                 "article_no": str(row.get("article_no", "") or ""),
                 "score": row.get("score"),
-                "snippet": str(row.get("snippet", "") or "")[:snippet_max] if snippet_max > 0 else str(row.get("snippet", "") or ""),
+                "snippet": _snippet(row),
                 "text": str(row.get("text", "") or ""),
             }
             for row in llm_rows
@@ -288,13 +389,6 @@ class RagPipeline:
             law_context_status=law_context_status,
         )
 
-    def is_embedding_cold_start(self) -> bool:
-        """현재 프로세스에서 임베딩 모델 첫 로드가 필요한 상태인지 반환한다."""
-        return not is_embedding_model_cached(
-            self._cfg.retrieval.embedding_model,
-            provider=self._cfg.retrieval.embedding_provider,
-        )
-
     def run(
         self,
         question: str,
@@ -303,21 +397,59 @@ class RagPipeline:
         doc_types: list[str] | None = None,
         law_names: list[str] | None = None,
         intent: str | None = None,
+        trace: Any | None = None,
     ) -> RagResult:
         """검색 + 생성 파이프라인을 실행하고 최종 결과를 반환한다."""
-        llm_rows, context_text, law_context_status, law_context_added = self._retrieve(
-            question, doc_types=doc_types, law_names=law_names, intent=intent
-        )
-        prompt = build_user_prompt_with_limit(
-            retrieved_context_text=context_text,
-            question=question,
-            max_input_chars=self._cfg.max_input_chars,
-            law_context_status=law_context_status,
-        )
-        t_gen = time.perf_counter()
-        result = self._generation.generate(prompt, system_prompt=system_prompt)
-        logger.info("generation 완료: %.2fs", time.perf_counter() - t_gen)
-        return self._build_result(result.answer, llm_rows, law_context_status)
+        if trace is None:
+            trace = start_trace(
+                "qa_request",
+                input={
+                    "question": question,
+                    "doc_types": doc_types,
+                    "law_names": law_names,
+                    "intent": intent,
+                },
+            )
+        try:
+            llm_rows, context_text, law_context_status = self._prepare_generation(
+                question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace,
+            )
+            if not llm_rows:
+                logger.info("run: 검색 결과 0건 — LLM 호출 생략")
+                result = self._build_result(_NO_RESULT_ANSWER, [], law_context_status)
+                update_trace(trace, output={"answer": _NO_RESULT_ANSWER}, level="DEFAULT")
+                return result
+            prompt = self._build_prompt(question, context_text, law_context_status)
+            cfg = self._generation._cfg
+            gen_span = start_generation_span(
+                trace, "generation",
+                model=cfg.model,
+                model_parameters={"temperature": cfg.temperature, "max_tokens": cfg.max_tokens},
+                input=prompt,
+            )
+            t_gen = time.perf_counter()
+            try:
+                gen_result = self._generation.generate(prompt, system_prompt=system_prompt)
+            except Exception:
+                end_span(gen_span, level="ERROR")
+                raise
+            logger.info("generation 완료: %.2fs", time.perf_counter() - t_gen)
+            end_span(
+                gen_span,
+                output=gen_result.answer,
+                usage=gen_result.usage,
+                level="DEFAULT",
+            )
+            result = self._build_result(gen_result.answer, llm_rows, law_context_status)
+            update_trace(
+                trace,
+                output={"answer": gen_result.answer, "law_context_status": law_context_status},
+                level="DEFAULT",
+            )
+            return result
+        except Exception:
+            update_trace(trace, level="ERROR")
+            raise
 
     def stream(
         self,
@@ -327,20 +459,92 @@ class RagPipeline:
         doc_types: list[str] | None = None,
         law_names: list[str] | None = None,
         intent: str | None = None,
+        trace: Any | None = None,
     ) -> tuple[RagResult, Iterator[str]]:
         """검색 후 생성을 스트리밍으로 반환한다.
 
         Returns:
             (meta, chunks): meta는 sources 등 메타데이터, chunks는 토큰 조각 이터레이터.
         """
-        llm_rows, context_text, law_context_status, law_context_added = self._retrieve(
-            question, doc_types=doc_types, law_names=law_names, intent=intent
-        )
-        prompt = build_user_prompt_with_limit(
+        if trace is None:
+            trace = start_trace(
+                "qa_request",
+                input={
+                    "question": question,
+                    "doc_types": doc_types,
+                    "law_names": law_names,
+                    "intent": intent,
+                },
+            )
+        try:
+            llm_rows, context_text, law_context_status = self._prepare_generation(
+                question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace,
+            )
+            if not llm_rows:
+                logger.info("stream: 검색 결과 0건 — LLM 호출 생략")
+                meta = self._build_result(_NO_RESULT_ANSWER, [], law_context_status)
+                update_trace(trace, output={"answer": _NO_RESULT_ANSWER}, level="DEFAULT")
+                return meta, iter([_NO_RESULT_ANSWER])
+            prompt = self._build_prompt(question, context_text, law_context_status)
+            cfg = self._generation._cfg
+            gen_span = start_generation_span(
+                trace, "generation",
+                model=cfg.model,
+                model_parameters={"temperature": cfg.temperature, "max_tokens": cfg.max_tokens},
+                input=prompt,
+            )
+            usage_out: dict[str, int] = {}
+            raw_chunks = self._generation.stream(prompt, system_prompt=system_prompt, usage_out=usage_out)
+            meta = self._build_result("", llm_rows, law_context_status)
+            return meta, self._traced_stream(raw_chunks, gen_span, trace, law_context_status, usage_out)
+        except Exception:
+            update_trace(trace, level="ERROR")
+            raise
+
+    def _traced_stream(
+        self,
+        chunks: Iterator[str],
+        gen_span: Any,
+        trace: Any,
+        law_context_status: str,
+        usage_out: dict[str, int],
+    ) -> Iterator[str]:
+        """chunk를 yield하면서 스트림 종료 시 generation span과 trace를 닫는 래퍼."""
+        answer_parts: list[str] = []
+        try:
+            for chunk in chunks:
+                answer_parts.append(chunk)
+                yield chunk
+            answer = "".join(answer_parts)
+            end_span(gen_span, output=answer, usage=usage_out or None, level="DEFAULT")
+            update_trace(
+                trace,
+                output={"answer": answer, "law_context_status": law_context_status},
+                level="DEFAULT",
+            )
+        except Exception:
+            end_span(gen_span, level="ERROR")
+            update_trace(trace, level="ERROR")
+            raise
+
+    def _build_prompt(self, question: str, context_text: str, law_context_status: str) -> str:
+        return build_user_prompt_with_limit(
             retrieved_context_text=context_text,
             question=question,
             max_input_chars=self._cfg.max_input_chars,
             law_context_status=law_context_status,
         )
-        meta = self._build_result("", llm_rows, law_context_status)
-        return meta, self._generation.stream(prompt, system_prompt=system_prompt)
+
+    def _prepare_generation(
+        self,
+        question: str,
+        *,
+        doc_types: list[str] | None,
+        law_names: list[str] | None,
+        intent: str | None,
+        trace: Any | None = None,
+    ) -> tuple[list[dict[str, Any]], str, str]:
+        llm_rows, context_text, law_context_status, _ = self._retrieve(
+            question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace,
+        )
+        return llm_rows, context_text, law_context_status

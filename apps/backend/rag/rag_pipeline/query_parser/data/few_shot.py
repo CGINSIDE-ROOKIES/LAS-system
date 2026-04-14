@@ -12,10 +12,19 @@ from __future__ import annotations
 # (query, JSON 출력 문자열) 형태로 정의
 # 출처: eval_set.csv 선별 + 무관 질문 직접 작성
 FEW_SHOT_EXAMPLES: list[tuple[str, str]] = [
-    # ── normative ────────────────────────────────────────────────────────────
+    # ── normative: 법령명 명시 ────────────────────────────────────────────────
     (
-        "하도급 대금 지급 기한을 어기면 어떤 불이익이 있나요",
+        "하도급거래 공정화에 관한 법률상 대금 지급 기한을 어기면 어떤 불이익이 있나요",
         '{"law_names": ["하도급거래 공정화에 관한 법률"], "article_no": "제13조", "intent": "normative", "is_legal": true}',
+    ),
+    # ── normative: 법령명 미명시 → [] ────────────────────────────────────────
+    (
+        "연장근로 허용 한도가 어떻게 되나요",
+        '{"law_names": [], "article_no": "", "intent": "normative", "is_legal": true}',
+    ),
+    (
+        "직원 해고 시 사전 통보 기간은 어떻게 되나요",
+        '{"law_names": [], "article_no": "", "intent": "normative", "is_legal": true}',
     ),
     # ── case_law ─────────────────────────────────────────────────────────────
     (
@@ -24,8 +33,8 @@ FEW_SHOT_EXAMPLES: list[tuple[str, str]] = [
     ),
     # ── mixed ────────────────────────────────────────────────────────────────
     (
-        "연장근로 수당 관련 분쟁 판례나 해석 사례가 있나요",
-        '{"law_names": ["근로기준법"], "article_no": "제53조", "intent": "mixed", "is_legal": true}',
+        "근로기준법상 연장근로 수당 관련 판례가 있나요",
+        '{"law_names": ["근로기준법"], "article_no": "", "intent": "mixed", "is_legal": true}',
     ),
     # ── irrelevant ───────────────────────────────────────────────────────────
     (

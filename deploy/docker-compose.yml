@@ -20,32 +20,27 @@ services:
       retries: 3
       start_period: 20s
     environment:
-      - MIDM_LLM_URL=${MIDM_LLM_URL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_EMBEDDING_DIMENSIONS=${OPENAI_EMBEDDING_DIMENSIONS:-1024}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash-lite}
-      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-sentence_transformers}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-mpnet-base-v2}
-      - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-cpu}
-      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-CPU}
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
-      - OPENAI_EMBEDDING_DIMENSIONS=${OPENAI_EMBEDDING_DIMENSIONS:-}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-large}
       - QUERY_PARSER_MODEL=${QUERY_PARSER_MODEL:-}
       - QUERY_PARSER_TIMEOUT=${QUERY_PARSER_TIMEOUT:-10}
       - QUERY_PARSER_STRICT=${QUERY_PARSER_STRICT:-false}
       - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
       - QDRANT_COLLECTIONS=${QDRANT_COLLECTIONS:-law_article,legal_case,legal_relation}
       - QDRANT_API_KEY=${QDRANT_API_KEY:-}
-      - QDRANT_VECTOR_NAME_MAP=${QDRANT_VECTOR_NAME_MAP:-}
+      - QDRANT_VECTOR_NAME_MAP=${QDRANT_VECTOR_NAME_MAP:-law_article=body}
       - OPENSEARCH_URL=${OPENSEARCH_URL:-http://opensearch:9200}
-      - OPENSEARCH_INDEX=${OPENSEARCH_INDEX:-las_legal_docs}
+      - OPENSEARCH_INDEX=${OPENSEARCH_INDEX:-law_article,legal_case,legal_relation}
       - OPENSEARCH_USERNAME=${OPENSEARCH_USERNAME:-}
       - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
       - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
-      - LLM_CHAT_COMPLETIONS_URL=${LLM_CHAT_COMPLETIONS_URL:-}
-      - LLM_MODEL=${LLM_MODEL:-}
-      - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-2048}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-}
       - DATABASE_URL=${DATABASE_URL:-postgresql://user:password@postgres:5432/las}
 
   law-updater:
@@ -68,7 +63,6 @@ services:
     environment:
       - LAW_OC=${LAW_OC:-}
       - LAW_API_BASE_URL=${LAW_API_BASE_URL:-}
-      - EMBEDDING_PROVIDER=${LAW_UPDATER_EMBEDDING_PROVIDER:-openai}
       - EMBEDDING_MODEL=${LAW_UPDATER_EMBEDDING_MODEL:-text-embedding-3-large}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${LAW_UPDATER_OPENAI_BASE_URL:-}

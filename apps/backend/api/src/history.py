@@ -2,9 +2,49 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import psycopg2.extensions
+
+_SOURCE_COLUMNS_SQL = "source_id, doc_type, law_name, article_no, rank, score, snippet, text"
+
+
+def _source_row_to_dict(src: tuple[Any, ...]) -> dict[str, Any]:
+    """qa_sources SELECT row를 API 응답 dict로 변환한다."""
+    return {
+        "source_id": src[0],
+        "doc_type": src[1],
+        "law_name": src[2],
+        "article_no": src[3],
+        "rank": src[4],
+        "score": src[5],
+        "snippet": src[6],
+        "text": src[7],
+    }
+
+
+def _parse_iso_datetime(value: str, *, field_name: str, is_end_bound: bool) -> datetime:
+    """ISO 문자열을 datetime으로 변환한다.
+
+    - YYYY-MM-DD 입력:
+      - date_from: 해당 일 00:00:00
+      - date_to  : 다음 날 00:00:00 (exclusive upper bound)
+    - datetime 입력: 그대로 사용
+    """
+    raw = value.strip()
+    if not raw:
+        raise ValueError(f"{field_name} 값이 비어 있습니다.")
+    try:
+        if "T" in raw:
+            dt = datetime.fromisoformat(raw)
+            return dt
+        d = date.fromisoformat(raw)
+        if is_end_bound:
+            return datetime.combine(d + timedelta(days=1), datetime.min.time())
+        return datetime.combine(d, datetime.min.time())
+    except ValueError as exc:
+        raise ValueError(f"{field_name}는 ISO 형식이어야 합니다. 예: 2026-01-01") from exc
 
 
 def save_qa(
@@ -16,39 +56,49 @@ def save_qa(
     retrieved_docs: list[dict[str, Any]],
     session_id: str | None = None,
 ) -> str:
-    """qa_history + qa_sources 저장 후 qa_id(UUID) 반환."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO qa_history (session_id, question, answer, law_context_status)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id
-            """,
-            (session_id or None, question, answer, law_context_status),
-        )
-        qa_id: str = cur.fetchone()[0]
+    """qa_history + qa_sources 저장 후 qa_id(UUID) 반환.
 
-        if retrieved_docs:
-            cur.executemany(
+    savepoint를 사용해 내부 INSERT 중 일부가 실패해도 부분 저장이 남지 않게 한다.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SAVEPOINT save_qa_sp")
+        try:
+            cur.execute(
                 """
-                INSERT INTO qa_sources (qa_id, source_id, doc_type, law_name, article_no, rank, score, snippet, text)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO qa_history (session_id, question, answer, law_context_status)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
                 """,
-                [
-                    (
-                        qa_id,
-                        doc.get("source_id"),
-                        doc.get("doc_type"),
-                        doc.get("law_name"),
-                        doc.get("article_no") or None,
-                        doc.get("rank"),
-                        doc.get("score"),
-                        doc.get("snippet") or None,
-                        doc.get("text") or None,
-                    )
-                    for doc in retrieved_docs
-                ],
+                (session_id or None, question, answer, law_context_status),
             )
+            qa_id: str = cur.fetchone()[0]
+
+            if retrieved_docs:
+                cur.executemany(
+                    """
+                    INSERT INTO qa_sources (qa_id, source_id, doc_type, law_name, article_no, rank, score, snippet, text)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    [
+                        (
+                            qa_id,
+                            doc.get("source_id"),
+                            doc.get("doc_type"),
+                            doc.get("law_name"),
+                            doc.get("article_no") or None,
+                            doc.get("rank"),
+                            doc.get("score"),
+                            doc.get("snippet") or None,
+                            doc.get("text") or None,
+                        )
+                        for doc in retrieved_docs
+                    ],
+                )
+        except Exception:
+            cur.execute("ROLLBACK TO SAVEPOINT save_qa_sp")
+            cur.execute("RELEASE SAVEPOINT save_qa_sp")
+            raise
+        cur.execute("RELEASE SAVEPOINT save_qa_sp")
 
     return str(qa_id)
 
@@ -74,35 +124,44 @@ def get_history(
         conditions.append("h.session_id = %s")
         params.append(session_id)
     if date_from:
+        dt_from = _parse_iso_datetime(date_from, field_name="date_from", is_end_bound=False)
         conditions.append("h.created_at >= %s")
-        params.append(date_from)
+        params.append(dt_from)
     if date_to:
+        dt_to = _parse_iso_datetime(date_to, field_name="date_to", is_end_bound=True)
         conditions.append("h.created_at < %s")
-        params.append(date_to)
+        params.append(dt_to)
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT COUNT(*) FROM qa_history h {where}",
-            params,
-        )
-        total: int = cur.fetchone()[0]
-
-        cur.execute(
             f"""
-            SELECT h.id, h.session_id, h.question, h.answer,
-                   h.law_context_status, h.created_at
-            FROM qa_history h
-            {where}
-            ORDER BY h.created_at DESC
-            LIMIT %s OFFSET %s
+            WITH filtered AS (
+                SELECT h.id, h.session_id, h.question, h.answer, h.law_context_status, h.created_at
+                FROM qa_history h
+                {where}
+            ),
+            total AS (
+                SELECT COUNT(*)::int AS total_count FROM filtered
+            )
+            SELECT p.id, p.session_id, p.question, p.answer, p.law_context_status, p.created_at,
+                   t.total_count
+            FROM total t
+            LEFT JOIN LATERAL (
+                SELECT *
+                FROM filtered
+                ORDER BY created_at DESC
+                LIMIT %s OFFSET %s
+            ) p ON TRUE
             """,
             params + [limit, offset],
         )
         rows = cur.fetchall()
 
-        qa_ids = [str(row[0]) for row in rows]
+        total: int = int(rows[0][6]) if rows else 0
+        paged_rows = [row for row in rows if row[0] is not None]
+        qa_ids = [str(row[0]) for row in paged_rows]
         sources_by_qa: dict[str, list[dict[str, Any]]] = {qid: [] for qid in qa_ids}
 
         if qa_ids:
@@ -118,16 +177,8 @@ def get_history(
             for src in cur.fetchall():
                 qa_id_str = str(src[0])
                 if qa_id_str in sources_by_qa:
-                    sources_by_qa[qa_id_str].append({
-                        "source_id": src[1],
-                        "doc_type": src[2],
-                        "law_name": src[3],
-                        "article_no": src[4],
-                        "rank": src[5],
-                        "score": src[6],
-                        "snippet": src[7],
-                        "text": src[8],
-                    })
+                    sources_by_qa[qa_id_str].append(_source_row_to_dict(src[1:]))
+    
 
     items = [
         {
@@ -139,7 +190,7 @@ def get_history(
             "created_at": row[5].isoformat(),
             "sources": sources_by_qa[str(row[0])],
         }
-        for row in rows
+        for row in paged_rows
     ]
 
     return {"items": items, "total": total}
@@ -182,22 +233,24 @@ def save_feedback(
 ) -> str:
     """feedback 저장 후 feedback id(UUID) 반환. qa_id가 없으면 ValueError."""
     with conn.cursor() as cur:
-        cur.execute("SELECT 1 FROM qa_history WHERE id = %s", (qa_id,))
-        if cur.fetchone() is None:
-            raise ValueError(f"qa_id {qa_id} not found")
         cur.execute(
             """
             INSERT INTO feedback (qa_id, thumbs_up, comment)
-            VALUES (%s, %s, %s)
+            SELECT h.id, %s, %s
+            FROM qa_history h
+            WHERE h.id = %s
             ON CONFLICT (qa_id) DO UPDATE
                 SET thumbs_up = EXCLUDED.thumbs_up,
                     comment   = EXCLUDED.comment,
                     created_at = now()
             RETURNING id
             """,
-            (qa_id, thumbs_up, comment),
+            (thumbs_up, comment, qa_id),
         )
-        return str(cur.fetchone()[0])
+        row = cur.fetchone()
+        if row is None:
+            raise ValueError(f"qa_id {qa_id} not found")
+        return str(row[0])
 
 
 def get_history_item(
@@ -219,27 +272,15 @@ def get_history_item(
             return None
 
         cur.execute(
-            """
-            SELECT source_id, doc_type, law_name, article_no, rank, score, snippet, text
+            f"""
+            SELECT {_SOURCE_COLUMNS_SQL}
             FROM qa_sources
             WHERE qa_id = %s
             ORDER BY rank
             """,
             (qa_id,),
         )
-        sources = [
-            {
-                "source_id": src[0],
-                "doc_type": src[1],
-                "law_name": src[2],
-                "article_no": src[3],
-                "rank": src[4],
-                "score": src[5],
-                "snippet": src[6],
-                "text": src[7],
-            }
-            for src in cur.fetchall()
-        ]
+        sources = [_source_row_to_dict(src) for src in cur.fetchall()]
 
     return {
         "id": str(row[0]),

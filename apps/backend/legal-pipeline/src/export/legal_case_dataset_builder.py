@@ -10,6 +10,34 @@ from src.common.io_utils import _iter_jsonl, _read_json
 from src.parser.legal_case_parser import parse_case_payload
 
 
+CHUNKING_CONFIG: dict[str, dict[str, int]] = {
+    "prec": {"max_chars": 1400, "overlap": 180},
+    "detc": {"max_chars": 1600, "overlap": 200},
+    "expc": {"max_chars": 1100, "overlap": 120},
+    "decc": {"max_chars": 1400, "overlap": 180},
+}
+
+# header: 짧고 핵심적인 요약/참조 필드 → 첫 청크에 preamble과 함께 유지
+# body:   장문 본문 필드 → overlap 청킹 적용
+FIELD_GROUPS: dict[str, dict[str, list[str]]] = {
+    "prec": {
+        "header": ["판시사항", "판결요지", "참조조문", "참조판례"],
+        "body":   ["판례내용"],
+    },
+    "detc": {
+        "header": ["판시사항", "결정요지", "심판대상조문", "참조조문", "참조판례"],
+        "body":   ["전문"],
+    },
+    "expc": {
+        "header": ["질의요지", "회답"],
+        "body":   ["이유"],
+    },
+    "decc": {
+        "header": ["청구취지", "주문", "재결요지"],
+        "body":   ["이유"],
+    },
+}
+
 
 def _normalize_space(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
@@ -220,6 +248,8 @@ def _build_case_text(parsed: dict[str, Any], row: dict[str, Any]) -> str:
         lines.append(f"관련 법령 검색 hit: {', '.join(source_law_names)}")
 
     body_text = str(parsed.get("body_text") or "").strip()
+    if str(parsed.get("body_type") or "").strip() == "image_only":
+        lines.append("[이미지 형식 재결문]")
     if body_text:
         lines.append(body_text)
 
@@ -239,23 +269,70 @@ def _build_case_blocks(parsed: dict[str, Any], row: dict[str, Any]) -> list[str]
         preamble_lines.append(f"결정/선고일: {parsed['decision_date']}")
     if source_law_names:
         preamble_lines.append(f"관련 법령 검색 hit: {', '.join(source_law_names)}")
+    if str(parsed.get("body_type") or "").strip() == "image_only":
+        preamble_lines.append("[이미지 형식 재결문]")
 
-    blocks = ["\n".join(line for line in preamble_lines if line).strip()]
+    preamble = "\n".join(line for line in preamble_lines if line).strip()
 
     body_sections = parsed.get("body_sections") or []
-    if isinstance(body_sections, list) and body_sections:
+    if not (isinstance(body_sections, list) and body_sections):
+        full_text = _build_case_text(parsed, row)
+        return [full_text] if full_text else []
+
+    field_group = FIELD_GROUPS.get(target)
+    if not field_group:
+        # 알 수 없는 target: 기존 방식 (preamble + 개별 섹션 블록)
+        blocks = [preamble] if preamble else []
         for section in body_sections:
             if not isinstance(section, dict):
                 continue
             label = str(section.get("label") or "").strip()
             text = _normalize_structure(str(section.get("text") or ""))
-            if not text:
-                continue
-            blocks.append(f"{label}\n{text}" if label else text)
+            if text:
+                blocks.append(f"{label}\n{text}" if label else text)
         return [block for block in blocks if block]
 
-    full_text = _build_case_text(parsed, row)
-    return [full_text] if full_text else []
+    header_labels = set(field_group["header"])
+    body_labels = set(field_group["body"])
+
+    # preamble을 header_parts의 첫 요소로 포함하여 첫 청크에 보장
+    header_parts: list[str] = [preamble] if preamble else []
+    body_blocks: list[str] = []
+    extra_blocks: list[str] = []
+
+    for section in body_sections:
+        if not isinstance(section, dict):
+            continue
+        label = str(section.get("label") or "").strip()
+        text = _normalize_structure(str(section.get("text") or ""))
+        if not text:
+            continue
+        formatted = f"{label}\n{text}" if label else text
+        if label in header_labels:
+            header_parts.append(formatted)
+        elif label in body_labels:
+            body_blocks.append(formatted)
+        else:
+            extra_blocks.append(formatted)
+
+    # header 실질 내용 유무 판단 (preamble만 있으면 "없음"으로 간주)
+    has_real_header = len(header_parts) > (1 if preamble else 0)
+
+    if has_real_header:
+        # 정상: preamble + header sections → 첫 블록 (기존 동작 유지)
+        first_block = "\n\n".join(header_parts)
+        blocks = [first_block] + extra_blocks + body_blocks
+    else:
+        # header 없음: preamble 단독 짧은 첫 청크 방지
+        # preamble을 첫 content 블록(extra → body 순서) 앞에 합침
+        all_content = extra_blocks + body_blocks
+        if all_content and preamble:
+            all_content[0] = f"{preamble}\n\n{all_content[0]}"
+        elif preamble:
+            all_content = [preamble]
+        blocks = all_content
+
+    return [block for block in blocks if block]
 
 
 
@@ -280,7 +357,23 @@ def build_legal_case_records(
         parsed = parse_case_payload(target, payload or {}, fallback=row)
         blocks = _build_case_blocks(parsed, row)
         full_text = "\n\n".join(blocks).strip()
-        chunks = _chunk_blocks(blocks, max_chars=max_chars, overlap=overlap)
+        cfg = CHUNKING_CONFIG.get(target, {"max_chars": max_chars, "overlap": overlap})
+        # header/body 독립 청킹 조건: 실제 header 섹션이 존재하는 경우만 적용
+        # len(blocks) > 1 만으로는 부족 — header 없는 다중 블록을 잘못 처리할 수 있음
+        field_group = FIELD_GROUPS.get(target)
+        has_real_header = field_group is not None and any(
+            str(s.get("label") or "").strip() in field_group["header"]
+            for s in (parsed.get("body_sections") or [])
+            if isinstance(s, dict) and str(s.get("text") or "").strip()
+        )
+        if has_real_header and len(blocks) > 1:
+            # 첫 블록(preamble+header)과 본문 블록을 독립 청킹하여 합산 방지
+            # 첫 블록 초과 시 overlap=0으로 분할 (헤더 중복 방지)
+            first_chunks = _chunk_blocks(blocks[:1], max_chars=cfg["max_chars"], overlap=0)
+            body_chunks = _chunk_blocks(blocks[1:], max_chars=cfg["max_chars"], overlap=cfg["overlap"])
+            chunks = first_chunks + body_chunks
+        else:
+            chunks = _chunk_blocks(blocks, max_chars=cfg["max_chars"], overlap=cfg["overlap"])
         if not chunks and full_text:
             chunks = [full_text]
         if not chunks:

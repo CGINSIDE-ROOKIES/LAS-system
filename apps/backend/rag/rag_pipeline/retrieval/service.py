@@ -21,20 +21,21 @@ class RetrievalConfig:
     opensearch_api_key: str | None = None
     opensearch_username: str | None = None
     opensearch_password: str | None = None
+    # BM25 match 대상 필드명(인덱스 매핑에 맞춰 변경 가능)
+    opensearch_search_text_field: str = "search_text"
     embedding_model: str = DEFAULT_EMBEDDING_MODEL
-    embedding_provider: str = "sentence_transformers"
     embedding_api_key: str | None = None
     embedding_api_base_url: str = DEFAULT_OPENAI_API_BASE_URL
     embedding_dimensions: int | None = None
 
     # 파이프라인 파라미터
     top_k: int = 5
+    # fuse/보강 정책을 위해 top_k보다 넉넉히 수집하는 후보 수
     candidate_k: int = 30
     rrf_k: int = 60
-    timeout: int = 120
+    timeout: int = 60
     auto_law_boost: bool = True
     law_boost_score: float = 0.003
     min_law_contexts: int = 1
     max_content_chars: int = 1200
     max_total_chars: int = 6000
-

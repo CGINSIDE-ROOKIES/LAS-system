@@ -86,18 +86,16 @@ OPENSEARCH_PASSWORD=...
 
 ### 임베딩
 
-```env
-# sentence-transformers (기본값, 로컬 모델)
-EMBEDDING_PROVIDER=sentence_transformers
-EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-mpnet-base-v2
+임베딩은 OpenAI-compatible API 경로만 사용한다.
 
-# OpenAI 사용 시
-# EMBEDDING_PROVIDER=openai
-# EMBEDDING_MODEL=text-embedding-3-large
-# OPENAI_API_KEY=...
+```env
+EMBEDDING_MODEL=text-embedding-3-large
+OPENAI_API_KEY=...
+# OPENAI_BASE_URL=https://api.openai.com/v1
+# OPENAI_EMBEDDING_DIMENSIONS=
 ```
 
-> OpenAI로 전환 시 Qdrant에 저장된 벡터와 차원이 맞아야 한다 (1024 dim).
+`OPENAI_EMBEDDING_DIMENSIONS`를 지정하는 경우 Qdrant에 저장된 벡터 차원과 반드시 일치해야 한다.
 
 ### LLM (generation CLI 사용 시)
 
