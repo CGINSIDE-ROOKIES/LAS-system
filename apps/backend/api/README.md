@@ -37,10 +37,11 @@ QDRANT_COLLECTIONS=law_article,legal_case,legal_relation
 OPENSEARCH_URL=http://<서버IP>:9200
 OPENSEARCH_INDEX=las_legal_docs
 
-# 임베딩
-EMBEDDING_PROVIDER=sentence_transformers
-EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-mpnet-base-v2
-# OpenAI 사용 시: EMBEDDING_PROVIDER=openai, EMBEDDING_MODEL=text-embedding-3-large, OPENAI_API_KEY=...
+# 임베딩 (API only)
+EMBEDDING_MODEL=text-embedding-3-large
+OPENAI_API_KEY=...
+# OPENAI_BASE_URL=https://api.openai.com/v1
+# OPENAI_EMBEDDING_DIMENSIONS=
 
 # LLM
 LLM_PROVIDER=gemini

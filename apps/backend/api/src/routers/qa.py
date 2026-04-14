@@ -324,14 +324,6 @@ def ask_stream(
         answer_parts: list[str] = []
         meta = None
         try:
-            if pipeline.is_embedding_cold_start():
-                logger.info("ask_stream cold start: embedding model initialization required")
-                status_payload = {
-                    "type": "status",
-                    "code": "EMBEDDING_COLD_START",
-                    "message": "초기 요청이라 임베딩 모델을 준비 중입니다. 첫 응답은 30~90초 정도 걸릴 수 있습니다.",
-                }
-                yield f"data: {json.dumps(status_payload, ensure_ascii=False)}\n\n"
             meta, chunks = pipeline.stream(
                 request.question,
                 system_prompt=build_system_prompt(request.answer_detail),
