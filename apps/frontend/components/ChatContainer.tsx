@@ -47,6 +47,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
 
   const abortRef = useRef<AbortController | null>(null);
   const followUpContextRef = useRef<FollowUpContext | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
@@ -98,6 +99,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   }, []);
 
   useEffect(() => {
+    messagesRef.current = messages;
     if (messages.length === 0) return;
     try {
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
@@ -107,8 +109,21 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   }, [messages]);
 
   const streamAnswer = useCallback(async (userQuestion: string) => {
-    const prevCtx = followUpContextRef.current;
-    followUpContextRef.current = null;
+    let prevCtx: FollowUpContext | null = null;
+    if (followUpContextRef.current) {
+      prevCtx = followUpContextRef.current;
+      followUpContextRef.current = null;
+    } else {
+      const msgs = messagesRef.current;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (m.role === "assistant" && m.answerData?.summary && !m.isFollowUpContext) {
+          const prevUser = msgs.slice(0, i).reverse().find((u) => u.role === "user" && !u.isFollowUpContext);
+          if (prevUser) prevCtx = { question: prevUser.content, answer: m.answerData.summary };
+          break;
+        }
+      }
+    }
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -224,7 +239,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
                     statusMessage: undefined,
                     qa_id: event.qa_id ?? undefined,
                     answerData: {
-                      summary: m.content,
+                      summary: m.content.replace(/\n?\[ANSWERABLE:[^\]]+\]\s*$/i, "").trimEnd(),
                       citations: parsedCitations,
                       references: [],
                       isIrrelevant: event.law_context_status === "irrelevant",

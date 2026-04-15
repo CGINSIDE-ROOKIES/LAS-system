@@ -388,8 +388,8 @@ const History = () => {
                                       )}
 
                                       <div className="flex flex-wrap items-center gap-2">
-                                        {citations.slice(0, 2).map((c) => (
-                                          <Badge key={c} variant="outline" className="text-xs">
+                                        {citations.slice(0, 2).map((c, idx) => (
+                                          <Badge key={`${c}-${idx}`} variant="outline" className="text-xs">
                                             {c}
                                           </Badge>
                                         ))}

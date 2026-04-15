@@ -8,9 +8,23 @@
 
 import json
 import logging
+import re
 import time
 
 logger = logging.getLogger(__name__)
+
+_ANSWERABLE_RE = re.compile(r'\n?\[ANSWERABLE:(yes|no)\]\s*$', re.IGNORECASE)
+
+
+def _strip_answerable_flag(answer: str) -> tuple[str, bool]:
+    """답변 끝의 [ANSWERABLE:yes/no] 플래그를 파싱해 제거한다.
+
+    플래그가 없으면 (answer, True) 반환 (하위 호환).
+    """
+    m = _ANSWERABLE_RE.search(answer)
+    if m:
+        return answer[:m.start()].rstrip(), m.group(1).lower() == "yes"
+    return answer, True
 
 import psycopg2.extensions
 from fastapi import APIRouter, Depends, Query
@@ -59,9 +73,14 @@ def _resolve_query_filters(
       1) UI에서 전달한 request.law_filter
       2) QueryParser가 추출한 parsed.law_names
     """
+    parse_query = (
+        f"[이전 질문] {request.previous_question}\n[현재 질문] {request.question}"
+        if request.previous_question
+        else request.question
+    )
     span = start_span(trace, "query_parse", input={"question": request.question})
     try:
-        parsed = parser.parse(request.question)
+        parsed = parser.parse(parse_query)
     except Exception:
         end_span(span, level="ERROR")
         raise
@@ -260,22 +279,23 @@ def ask(
         previous_question=request.previous_question,
         previous_answer=request.previous_answer,
     )
+    answer, can_answer = _strip_answerable_flag(result.answer)
     qa_id: str | None = None
-    if result.answer.strip():
+    if answer.strip() and can_answer:
         try:
             qa_id = save_qa(
                 conn,
                 question=request.question,
-                answer=result.answer,
+                answer=answer,
                 law_context_status=result.law_context_status,
                 retrieved_docs=result.retrieved_docs,
                 session_id=request.session_id,
             )
         except Exception:
             logger.exception("DB save failed in ask")
-    logger.info("ask 완료: %.2fs | law_context_status=%s", time.perf_counter() - t0, result.law_context_status)
+    logger.info("ask 완료: %.2fs | law_context_status=%s | can_answer=%s", time.perf_counter() - t0, result.law_context_status, can_answer)
     return AskResponse(
-        answer=result.answer,
+        answer=answer,
         retrieved_docs=[RetrievedDoc(**doc) for doc in result.retrieved_docs],
         law_context_status=result.law_context_status,
         qa_id=qa_id,
@@ -333,10 +353,10 @@ def ask_stream(
                 answer_parts.append(chunk)
                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
 
-            logger.info("ask_stream 완료: %.2fs | law_context_status=%s", time.perf_counter() - t0, meta.law_context_status)
-            answer = "".join(answer_parts)
+            answer, can_answer = _strip_answerable_flag("".join(answer_parts))
+            logger.info("ask_stream 완료: %.2fs | law_context_status=%s | can_answer=%s", time.perf_counter() - t0, meta.law_context_status, can_answer)
             qa_id = None
-            if answer.strip():
+            if answer.strip() and can_answer:
                 try:
                     qa_id = save_qa(
                         conn,
