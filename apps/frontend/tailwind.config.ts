@@ -93,11 +93,16 @@ const config = {
           "0%, 80%, 100%": { opacity: "0.3", transform: "scale(0.8)" },
           "40%": { opacity: "1", transform: "scale(1)" },
         },
+        "cursor-blink": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "pulse-dot": "pulse-dot 1.4s infinite ease-in-out",
+        "cursor-blink": "cursor-blink 1s step-end infinite",
       },
     },
   },

@@ -248,7 +248,7 @@ const History = () => {
                         placeholder="질문 또는 답변 검색..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-9"
+                        className="pl-9 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-primary/60 focus-visible:[box-shadow:0_0_0_3px_hsl(var(--primary)/0.08),0_0_10px_hsl(var(--primary)/0.12)]"
                       />
                     </div>
 

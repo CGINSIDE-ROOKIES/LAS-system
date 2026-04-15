@@ -1,5 +1,35 @@
+import { useState, useRef, useEffect } from "react";
 import { User, Bot } from "lucide-react";
 import { AnswerCard } from "./AnswerCard";
+
+/** 받은 텍스트를 한 글자씩 드립해서 타이핑 효과를 만드는 컴포넌트 */
+function TypewriterText({ text }: { text: string }) {
+  const [displayed, setDisplayed] = useState("");
+  const indexRef = useRef(0);
+
+  useEffect(() => {
+    // 이미 따라잡은 경우 아무것도 안 함
+    if (indexRef.current >= text.length) return;
+
+    const id = setInterval(() => {
+      const remaining = text.length - indexRef.current;
+      if (remaining <= 0) { clearInterval(id); return; }
+      // 백로그가 많으면 step 올려서 스트림에 따라잡기
+      const step = remaining > 80 ? 4 : remaining > 20 ? 2 : 1;
+      indexRef.current = Math.min(indexRef.current + step, text.length);
+      setDisplayed(text.slice(0, indexRef.current));
+    }, 16);
+
+    return () => clearInterval(id);
+  }, [text]);
+
+  return (
+    <>
+      {displayed}
+      <span className="animate-cursor-blink ml-px font-light text-primary">|</span>
+    </>
+  );
+}
 
 export interface ChatMessage {
   id: string;
@@ -56,7 +86,9 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               <p className="mt-2 text-sm text-muted-foreground">{message.statusMessage}</p>
             )}
             {message.content && (
-              <p className="mt-2 text-sm text-foreground">{message.content}</p>
+              <p className="mt-2 text-sm text-foreground whitespace-pre-line">
+                <TypewriterText text={message.content} />
+              </p>
             )}
           </div>
         ) : message.answerData ? (
