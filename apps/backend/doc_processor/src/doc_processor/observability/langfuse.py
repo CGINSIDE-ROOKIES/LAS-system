@@ -229,7 +229,7 @@ def traced_structure_analysis_node(name: str):
     def decorator(fn):
         @wraps(fn)
         def wrapper(state, *args, **kwargs):
-            config = getattr(state, "phase1_config", None)
+            config = getattr(state, "parser_config", None)
             log_info(config, "[%s] start", name)
             result = fn(state, *args, **kwargs)
             goto = getattr(result, "goto", None)
@@ -241,4 +241,4 @@ def traced_structure_analysis_node(name: str):
     return decorator
 
 
-traced_phase1_node = traced_structure_analysis_node
+traced_parser_node = traced_structure_analysis_node

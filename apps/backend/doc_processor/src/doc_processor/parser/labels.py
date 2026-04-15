@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field
 from document_processor import DocIR
 
 from ..prompts import load_prompt
-from ..state import Phase1Config
-from ..types import ParagraphAnalysis, ParagraphCategory, Phase1Analysis, SplitSuggestion, WorkflowMeta
+from ..state import ParserConfig
+from ..types import ParagraphAnalysis, ParagraphCategory, ParserAnalysis, SplitSuggestion, WorkflowMeta
 from .llm_utils import invoke_structured_model
 from .rules import APPENDIX_MARKER_RE, FOOTER_RE, HEADER_KEYWORD_RE, INPUT_RE
 from .selectors import paragraph_position
@@ -37,7 +37,7 @@ _CLAUSE_CONTEXT_CATEGORIES = {
 }
 
 
-def label_paragraphs(analysis: Phase1Analysis) -> Phase1Analysis:
+def label_paragraphs(analysis: ParserAnalysis) -> ParserAnalysis:
     first_clause_index = next(
         (index for index, paragraph in enumerate(analysis.paragraphs) if paragraph.clause_id is not None),
         None,
@@ -59,8 +59,8 @@ def label_paragraphs(analysis: Phase1Analysis) -> Phase1Analysis:
 
 def review_ambiguous_labels_with_llm(
     doc: DocIR,
-    analysis: Phase1Analysis,
-    config: Phase1Config,
+    analysis: ParserAnalysis,
+    config: ParserConfig,
 ) -> dict[str, LabelReviewOutput]:
     if not config.label_review_enabled or not analysis.ambiguous_label_unit_ids:
         return {}
@@ -74,11 +74,11 @@ def review_ambiguous_labels_with_llm(
 
 def review_single_ambiguous_label_with_llm(
     doc: DocIR,
-    analysis: Phase1Analysis,
+    analysis: ParserAnalysis,
     unit_id: str,
-    config: Phase1Config,
+    config: ParserConfig,
 ) -> LabelReviewOutput:
-    prompt = load_prompt("phase1/paragraph_labeler", profile=config.prompt_profile)
+    prompt = load_prompt("parser/paragraph_labeler", profile=config.prompt_profile)
     paragraph_map = {paragraph.unit_id: paragraph for paragraph in analysis.paragraphs}
     paragraph = paragraph_map[unit_id]
     index = analysis.paragraphs.index(paragraph)
@@ -113,7 +113,7 @@ def review_single_ambiguous_label_with_llm(
     )
 
 
-def apply_label_reviews(analysis: Phase1Analysis, reviews: dict[str, LabelReviewOutput]) -> Phase1Analysis:
+def apply_label_reviews(analysis: ParserAnalysis, reviews: dict[str, LabelReviewOutput]) -> ParserAnalysis:
     if not reviews:
         return analysis
 

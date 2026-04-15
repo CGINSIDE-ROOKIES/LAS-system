@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 
 from document_processor import DocIR
 
-from ..types import ClauseEntry, ParagraphAnalysis, ParagraphCategory, Phase1Analysis, SubclauseEntry, TextSpan, WorkflowMeta
+from ..types import ClauseEntry, ParagraphAnalysis, ParagraphCategory, ParserAnalysis, SubclauseEntry, TextSpan, WorkflowMeta
 from .rules import (
     NumberingMatch,
     SUBCLAUSE_RULE_PRIORITY,
@@ -119,11 +119,11 @@ def _trimmed_end(text: str, end: int) -> int:
     return end
 
 
-def parse_document_structure(doc: DocIR) -> Phase1Analysis:
+def parse_document_structure(doc: DocIR) -> ParserAnalysis:
     paragraphs = build_paragraph_analyses(doc)
     non_empty = non_empty_paragraphs(paragraphs)
     clause_rule_name = detect_clause_rule(paragraph.text for paragraph in non_empty)
-    analysis = Phase1Analysis(
+    analysis = ParserAnalysis(
         clause_rule_name=clause_rule_name,
         paragraphs=paragraphs,
     )

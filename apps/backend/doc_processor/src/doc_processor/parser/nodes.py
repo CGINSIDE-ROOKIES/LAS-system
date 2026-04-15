@@ -10,9 +10,9 @@ from document_processor import DocIR
 from ..logging_utils import log_info
 from ..observability import traced_structure_analysis_node
 from ..state import WorkflowState
-from ..types import Phase1Analysis, Phase1DocumentMeta, Phase1Result, RelevanceDecision, RelevanceMode, WorkflowDelta, WorkflowMeta
+from ..types import ParserAnalysis, ParserDocumentMeta, ParserResult, RelevanceDecision, RelevanceMode, WorkflowDelta, WorkflowMeta
 from .boundaries import BoundaryReviewOutput, apply_boundary_reviews, detect_boundary_suspects, review_boundary_suspects_with_llm
-from .converters import attach_phase1_metadata_to_doc
+from .converters import attach_parser_metadata_to_doc
 from .labels import LabelReviewOutput, apply_label_reviews, label_paragraphs, review_single_ambiguous_label_with_llm
 from .parser import build_clause_entries_from_analysis, parse_document_structure
 from .relevance import needs_llm_relevance_review, review_relevance_with_llm, score_relevance
@@ -27,18 +27,18 @@ def _dispatch_review_tasks(
     *,
     review_kind: str,
     unit_ids: list[str],
-    analysis: Phase1Analysis | None = None,
+    analysis: ParserAnalysis | None = None,
 ) -> Command[str | Send]:
     log_info(
-        state.phase1_config,
+        state.parser_config,
         "[structure_analysis.llm_analysis] dispatching %s %s workers (max_concurrency=%s)",
         len(unit_ids),
         review_kind,
-        state.phase1_config.max_concurrent_workers,
+        state.parser_config.max_concurrent_workers,
     )
     return Command(
         update={
-            "phase1_analysis": analysis or state.phase1_analysis,
+            "parser_analysis": analysis or state.parser_analysis,
             "llm_review_stage": review_kind,
         },
         goto=[
@@ -46,8 +46,8 @@ def _dispatch_review_tasks(
                 "llm_analysis_worker",
                 {
                     "working_doc": state.working_doc,
-                    "phase1_analysis": analysis or state.phase1_analysis,
-                    "phase1_config": state.phase1_config,
+                    "parser_analysis": analysis or state.parser_analysis,
+                    "parser_config": state.parser_config,
                     "active_review_unit_id": unit_id,
                     "active_review_kind": review_kind,
                 },
@@ -77,7 +77,7 @@ def screen_relevance(state: WorkflowState) -> Command[str]:
     if state.working_doc is None:
         raise ValueError("Document must be loaded before relevance screening.")
 
-    config = state.phase1_config
+    config = state.parser_config
     if config.relevance_mode == RelevanceMode.DISABLED:
         decision = RelevanceDecision(
             mode=config.relevance_mode,
@@ -93,18 +93,18 @@ def screen_relevance(state: WorkflowState) -> Command[str]:
             except Exception as exc:  # pragma: no cover - external model failures are environment-dependent
                 decision.reason = f"{decision.reason} LLM fallback skipped: {exc}"
 
-    analysis = state.phase1_analysis.model_copy(deep=True) if state.phase1_analysis is not None else Phase1Analysis()
+    analysis = state.parser_analysis.model_copy(deep=True) if state.parser_analysis is not None else ParserAnalysis()
     analysis.relevance = decision
-    updates = {"phase1_analysis": analysis}
+    updates = {"parser_analysis": analysis}
 
     if not decision.is_relevant:
-        result = Phase1Result(
+        result = ParserResult(
             accepted=False,
             reason=decision.reason,
             relevance=decision,
             notes=["Document rejected during relevance screening."],
         )
-        updates["phase1_result"] = result
+        updates["parser_result"] = result
         return Command(update=updates, goto="finalize_llm")
 
     return Command(update=updates, goto="regex_analysis")
@@ -116,19 +116,19 @@ def regex_analysis(state: WorkflowState) -> Command[str]:
         raise ValueError("Document must be loaded before regex analysis.")
 
     analysis = parse_document_structure(state.working_doc)
-    if state.phase1_analysis and state.phase1_analysis.relevance is not None:
-        analysis.relevance = state.phase1_analysis.relevance
+    if state.parser_analysis and state.parser_analysis.relevance is not None:
+        analysis.relevance = state.parser_analysis.relevance
 
     if analysis.clause_rule_name is None:
         analysis.notes.append("No clause numbering rule found.")
-        result = Phase1Result(
+        result = ParserResult(
             accepted=True,
             reason="No clause numbering rule found; document kept but left structurally unsegmented.",
             relevance=analysis.relevance,
             notes=list(analysis.notes),
         )
         return Command(
-            update={"phase1_analysis": analysis, "phase1_result": result},
+            update={"parser_analysis": analysis, "parser_result": result},
             goto="finalize_llm",
         )
 
@@ -137,33 +137,33 @@ def regex_analysis(state: WorkflowState) -> Command[str]:
         + (f" and subclause rule '{analysis.subclause_rule_name}'." if analysis.subclause_rule_name else ".")
     )
     analysis = detect_boundary_suspects(analysis)
-    return Command(update={"phase1_analysis": analysis}, goto="llm_analysis")
+    return Command(update={"parser_analysis": analysis}, goto="llm_analysis")
 
 
 @traced_structure_analysis_node("structure_analysis.llm_analysis")
 def llm_analysis(state: WorkflowState) -> Command[str | Send]:
-    if state.phase1_analysis is None:
-        raise ValueError("phase1_analysis is required before LLM analysis.")
+    if state.parser_analysis is None:
+        raise ValueError("parser_analysis is required before LLM analysis.")
 
-    analysis = state.phase1_analysis
+    analysis = state.parser_analysis
     stage = state.llm_review_stage
 
     if stage is None:
         suspect_ids = list(analysis.boundary_suspect_unit_ids)
-        if suspect_ids and state.phase1_config.boundary_review_enabled:
+        if suspect_ids and state.parser_config.boundary_review_enabled:
             log_info(
-                state.phase1_config,
+                state.parser_config,
                 "[structure_analysis.llm_analysis] dispatching boundary batch review (%s suspects)",
                 len(suspect_ids),
             )
             return Command(
-                update={"phase1_analysis": analysis, "llm_review_stage": "boundary"},
+                update={"parser_analysis": analysis, "llm_review_stage": "boundary"},
                 goto="boundary_llm_batch",
             )
 
         analysis = label_paragraphs(analysis)
         ambiguous_ids = list(analysis.ambiguous_label_unit_ids)
-        if ambiguous_ids and state.phase1_config.label_review_enabled:
+        if ambiguous_ids and state.parser_config.label_review_enabled:
             return _dispatch_review_tasks(
                 state,
                 review_kind="label",
@@ -171,7 +171,7 @@ def llm_analysis(state: WorkflowState) -> Command[str | Send]:
                 analysis=analysis,
             )
         return Command(
-            update={"phase1_analysis": analysis, "llm_review_stage": None},
+            update={"parser_analysis": analysis, "llm_review_stage": None},
             goto="finalize_llm",
         )
 
@@ -183,7 +183,7 @@ def llm_analysis(state: WorkflowState) -> Command[str | Send]:
         analysis = apply_boundary_reviews(analysis, reviews)
         analysis = label_paragraphs(analysis)
         ambiguous_ids = list(analysis.ambiguous_label_unit_ids)
-        if ambiguous_ids and state.phase1_config.label_review_enabled:
+        if ambiguous_ids and state.parser_config.label_review_enabled:
             return _dispatch_review_tasks(
                 state,
                 review_kind="label",
@@ -191,7 +191,7 @@ def llm_analysis(state: WorkflowState) -> Command[str | Send]:
                 analysis=analysis,
             )
         return Command(
-            update={"phase1_analysis": analysis, "llm_review_stage": None},
+            update={"parser_analysis": analysis, "llm_review_stage": None},
             goto="finalize_llm",
         )
 
@@ -202,7 +202,7 @@ def llm_analysis(state: WorkflowState) -> Command[str | Send]:
         }
         analysis = apply_label_reviews(analysis, reviews)
         return Command(
-            update={"phase1_analysis": analysis, "llm_review_stage": None},
+            update={"parser_analysis": analysis, "llm_review_stage": None},
             goto="finalize_llm",
         )
 
@@ -212,18 +212,18 @@ def llm_analysis(state: WorkflowState) -> Command[str | Send]:
 @traced_structure_analysis_node("structure_analysis.llm_analysis.boundary_batch")
 def boundary_llm_batch(state: WorkflowState) -> Command[str]:
     state = _coerce_state(state)
-    if state.working_doc is None or state.phase1_analysis is None:
+    if state.working_doc is None or state.parser_analysis is None:
         raise ValueError("Boundary batch review requires document and analysis.")
 
     try:
         reviews = review_boundary_suspects_with_llm(
             state.working_doc,
-            state.phase1_analysis,
-            state.phase1_config,
+            state.parser_analysis,
+            state.parser_config,
         )
     except Exception as exc:  # pragma: no cover
         log_info(
-            state.phase1_config,
+            state.parser_config,
             "[structure_analysis.llm_analysis.boundary_batch] failed",
         )
         return Command(
@@ -232,7 +232,7 @@ def boundary_llm_batch(state: WorkflowState) -> Command[str]:
         )
 
     log_info(
-        state.phase1_config,
+        state.parser_config,
         "[structure_analysis.llm_analysis.boundary_batch] complete (%s reviews)",
         len(reviews),
     )
@@ -250,7 +250,7 @@ def boundary_llm_batch(state: WorkflowState) -> Command[str]:
 @traced_structure_analysis_node("structure_analysis.llm_analysis.worker")
 def llm_analysis_worker(state: WorkflowState) -> Command[str]:
     state = _coerce_state(state)
-    if state.working_doc is None or state.phase1_analysis is None or state.active_review_unit_id is None:
+    if state.working_doc is None or state.parser_analysis is None or state.active_review_unit_id is None:
         raise ValueError("Review worker requires document, analysis, and active_review_unit_id.")
     if state.active_review_kind is None:
         raise ValueError("Review worker requires active_review_kind.")
@@ -262,16 +262,16 @@ def llm_analysis_worker(state: WorkflowState) -> Command[str]:
         if review_kind == "label":
             review = review_single_ambiguous_label_with_llm(
                 state.working_doc,
-                state.phase1_analysis,
+                state.parser_analysis,
                 unit_id,
-                state.phase1_config,
+                state.parser_config,
             )
             update_key = "label_review_results"
         else:
             raise ValueError(f"Unsupported parallel review kind: {review_kind}")
     except Exception as exc:  # pragma: no cover
         log_info(
-            state.phase1_config,
+            state.parser_config,
             "[structure_analysis.llm_analysis.worker] kind=%s unit=%s failed",
             review_kind,
             unit_id,
@@ -279,7 +279,7 @@ def llm_analysis_worker(state: WorkflowState) -> Command[str]:
         return Command(update={"errors": [f"{review_kind.capitalize()} LLM review failed for {unit_id}: {exc}"]})
 
     log_info(
-        state.phase1_config,
+        state.parser_config,
         "[structure_analysis.llm_analysis.worker] kind=%s unit=%s complete",
         review_kind,
         unit_id,
@@ -298,12 +298,12 @@ def finalize_llm(state: WorkflowState) -> Command[str]:
     if state.working_doc is None:
         raise ValueError("Document must be loaded before finalization.")
 
-    if state.phase1_result is not None and not state.phase1_result.accepted:
+    if state.parser_result is not None and not state.parser_result.accepted:
         finalized_doc = state.working_doc.model_copy(deep=True)
         finalized_doc.meta = WorkflowMeta(
-            phase1_doc=Phase1DocumentMeta(
-                relevance=state.phase1_result.relevance,
-                notes=list(state.phase1_result.notes),
+            parser_doc=ParserDocumentMeta(
+                relevance=state.parser_result.relevance,
+                notes=list(state.parser_result.notes),
             )
         )
         return Command(
@@ -311,18 +311,18 @@ def finalize_llm(state: WorkflowState) -> Command[str]:
                 "working_doc": finalized_doc,
                 "current_version": state.current_version + 1,
                 "history": state.history
-                + [WorkflowDelta(version=state.current_version + 1, stage="phase1", reason=state.phase1_result.reason)],
+                + [WorkflowDelta(version=state.current_version + 1, stage="parser", reason=state.parser_result.reason)],
             },
             goto=END,
         )
 
-    analysis = state.phase1_analysis or Phase1Analysis()
+    analysis = state.parser_analysis or ParserAnalysis()
     analysis.clause_entries = build_clause_entries_from_analysis(analysis.paragraphs)
-    finalized_doc = attach_phase1_metadata_to_doc(state.working_doc, analysis)
+    finalized_doc = attach_parser_metadata_to_doc(state.working_doc, analysis)
     subclause_count = sum(len(entry.subclauses) for entry in analysis.clause_entries)
 
-    if state.phase1_result is not None and state.phase1_result.accepted:
-        result = state.phase1_result.model_copy(deep=True)
+    if state.parser_result is not None and state.parser_result.accepted:
+        result = state.parser_result.model_copy(deep=True)
         result.relevance = analysis.relevance
         result.clause_rule_name = analysis.clause_rule_name
         result.subclause_rule_name = analysis.subclause_rule_name
@@ -332,9 +332,9 @@ def finalize_llm(state: WorkflowState) -> Command[str]:
         result.ambiguous_label_unit_ids = list(analysis.ambiguous_label_unit_ids)
         result.notes = list(analysis.notes)
     else:
-        result = Phase1Result(
+        result = ParserResult(
             accepted=True,
-            reason="Phase 1 clause parsing completed.",
+            reason="Parser clause parsing completed.",
             relevance=analysis.relevance,
             clause_rule_name=analysis.clause_rule_name,
             subclause_rule_name=analysis.subclause_rule_name,
@@ -348,10 +348,10 @@ def finalize_llm(state: WorkflowState) -> Command[str]:
     return Command(
         update={
             "working_doc": finalized_doc,
-            "phase1_result": result,
+            "parser_result": result,
             "current_version": state.current_version + 1,
             "history": state.history
-            + [WorkflowDelta(version=state.current_version + 1, stage="phase1", reason=result.reason)],
+            + [WorkflowDelta(version=state.current_version + 1, stage="parser", reason=result.reason)],
         },
         goto=END,
     )

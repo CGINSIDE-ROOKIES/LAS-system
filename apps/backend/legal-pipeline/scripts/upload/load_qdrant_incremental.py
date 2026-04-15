@@ -38,25 +38,33 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Apply incremental Qdrant patch")
     parser.add_argument("--patch-dir", type=Path, required=True, help="handoff incremental patch directory")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--collection", action="append", default=None, help="특정 컬렉션만 적용. 반복 지정 가능")
     args = parser.parse_args()
 
     patch_dir = args.patch_dir
     manifest = _load_manifest(patch_dir)
     delete_manifest = json.loads((patch_dir / "delete_manifest.json").read_text(encoding="utf-8"))
     client = None if args.dry_run else get_client()
+    selected_collections = set(args.collection or [])
 
     print("=" * 60)
     print("Qdrant incremental patch")
     print(f"  patch_dir: {patch_dir}")
     print(f"  dry_run: {args.dry_run}")
+    if selected_collections:
+        print(f"  collections: {', '.join(sorted(selected_collections))}")
     print("=" * 60)
 
     for collection_name, items in sorted(delete_manifest.get("collections", {}).items()):
+        if selected_collections and collection_name not in selected_collections:
+            continue
         _delete_points(client, collection_name, items, args.dry_run)
 
     for collection in manifest.get("collections", []):
         collection_name = str(collection.get("collection_name") or "").strip()
         if not collection_name:
+            continue
+        if selected_collections and collection_name not in selected_collections:
             continue
         if collection.get("skipped"):
             print(f"  skip upsert: {collection_name}")
