@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 
 from document_processor import DocIR
 
-from ..types import ClauseEntry, ParagraphAnalysis, ParagraphCategory, ParserAnalysis, SubclauseEntry, TextSpan, WorkflowMeta
+from ..parser_types import ClauseEntry, ParagraphAnalysis, ParagraphCategory, ParserAnalysis, SubclauseEntry, TextSpan, WorkflowMeta
 from .rules import (
     NumberingMatch,
     SUBCLAUSE_RULE_PRIORITY,

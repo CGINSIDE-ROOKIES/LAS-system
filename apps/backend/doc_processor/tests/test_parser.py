@@ -10,7 +10,7 @@ from doc_processor.parser.boundaries import detect_boundary_suspects, review_bou
 from doc_processor.parser.converters import clause_entry_to_targets, resolve_clause_entry
 from doc_processor.parser.graph import build_parser_graph
 from doc_processor.parser.parser import parse_document_structure
-from doc_processor.types import ParagraphCategory, RelevanceMode
+from doc_processor.parser_types import ParagraphCategory, RelevanceMode
 
 
 ROOT = Path(__file__).resolve().parents[1]

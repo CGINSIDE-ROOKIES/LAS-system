@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from ..env import ensure_local_env_loaded
 from ..logging_utils import log_info
 from ..state import WorkflowState
-from ..types import ParserAnalysis, ParserResult
+from ..parser_types import ParserAnalysis, ParserResult
 
 _CURRENT_INVOKE_CONFIG: ContextVar[dict[str, Any] | None] = ContextVar(
     "doc_processor_langfuse_invoke_config",

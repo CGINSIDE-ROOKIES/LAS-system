@@ -162,7 +162,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "document-processor", directory = "../../../../document-processor" },
+    { name = "document-processor", editable = "../../../../document-processor" },
     { name = "langchain", specifier = ">=1.0.0" },
     { name = "langchain-google-genai", specifier = ">=4.2.1" },
     { name = "langchain-openai", specifier = ">=1.1.12" },
@@ -174,7 +174,7 @@ requires-dist = [
 [[package]]
 name = "document-processor"
 version = "0.1.0"
-source = { directory = "../../../../document-processor" }
+source = { editable = "../../../../document-processor" }
 dependencies = [
     { name = "jpype1" },
     { name = "pydantic" },

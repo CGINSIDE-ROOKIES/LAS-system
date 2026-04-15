@@ -19,16 +19,14 @@ class AnnotationTests(unittest.TestCase):
         annotations = [
             Annotation(
                 target_unit_id="s1.p1",
-                start=6,
-                end=11,
+                selected_text="World",
                 label="Clause focus",
                 color="#FFEE88",
                 note="Important phrase",
             ),
             Annotation(
                 target_unit_id="s1.p2.r1.tbl1.tr1.tc1.p1.r1",
-                start=0,
-                end=4,
+                selected_text="Cell",
                 label="Cell review",
                 color="#99EEFF",
             ),
@@ -46,7 +44,7 @@ class AnnotationTests(unittest.TestCase):
         self.assertIn("World", html)
         self.assertIn("Cell", html)
 
-    def test_resolve_annotations_rejects_out_of_bounds_ranges(self) -> None:
+    def test_resolve_annotations_rejects_missing_selected_text(self) -> None:
         doc = DocIR.from_mapping({"s1.p1.r1": "Hello"})
 
         with self.assertRaises(AnnotationValidationError):
@@ -55,9 +53,23 @@ class AnnotationTests(unittest.TestCase):
                 [
                     Annotation(
                         target_unit_id="s1.p1.r1",
-                        start=0,
-                        end=10,
-                        label="Too long",
+                        selected_text="World",
+                        label="Missing",
+                    )
+                ],
+            )
+
+    def test_resolve_annotations_requires_occurrence_for_ambiguous_text(self) -> None:
+        doc = DocIR.from_mapping({"s1.p1.r1": "Hello Hello"})
+
+        with self.assertRaises(AnnotationValidationError):
+            resolve_annotations(
+                doc,
+                [
+                    Annotation(
+                        target_unit_id="s1.p1.r1",
+                        selected_text="Hello",
+                        label="Ambiguous",
                     )
                 ],
             )

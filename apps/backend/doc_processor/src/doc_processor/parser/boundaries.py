@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 from document_processor import DocIR
 
 from ..prompts import load_prompt
 from ..state import ParserConfig
-from ..types import ParagraphAnalysis, ParagraphCategory, ParserAnalysis, SplitSuggestion, WorkflowMeta
+from ..parser_types import ParagraphAnalysis, ParagraphCategory, ParserAnalysis, SplitSuggestion, WorkflowMeta
 from .llm_utils import invoke_structured_model
 from .parser import build_clause_entries_from_analysis
 from .rules import APPENDIX_MARKER_RE, FOOTER_RE, HEADER_KEYWORD_RE, INPUT_RE
@@ -15,7 +17,7 @@ from .selectors import paragraph_lookup, paragraph_position
 
 class BoundaryReviewOutput(BaseModel):
     unit_id: str
-    action: str
+    action: Literal["keep", "detach", "split"]
     reason: str
     anchor_text: str | None = None
     occurrence: int = 1

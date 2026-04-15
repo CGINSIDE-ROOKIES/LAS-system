@@ -4,7 +4,7 @@ from copy import deepcopy
 
 from document_processor import DocIR, ParagraphIR
 
-from ..types import (
+from ..parser_types import (
     ClauseEntry,
     DocTargetRef,
     ParagraphCategory,

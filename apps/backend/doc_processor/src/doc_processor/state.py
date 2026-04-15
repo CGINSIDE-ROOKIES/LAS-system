@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from document_processor import DocIR
 
-from .types import ParserAnalysis, ParserResult, RelevanceMode, WorkflowDelta, WorkflowMeta
+from .parser_types import ParserAnalysis, ParserResult, RelevanceMode, WorkflowDelta, WorkflowMeta
 
 
 class ParserConfig(BaseModel):

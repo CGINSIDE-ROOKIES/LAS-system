@@ -179,3 +179,23 @@ class WorkflowDelta(BaseModel):
     version: int
     stage: str
     reason: str
+
+
+__all__ = [
+    "ClauseEntry",
+    "DocTargetRef",
+    "NumberingLevel",
+    "ParagraphAnalysis",
+    "ParagraphCategory",
+    "ParserAnalysis",
+    "ParserDocumentMeta",
+    "ParserNodeMeta",
+    "ParserResult",
+    "RelevanceDecision",
+    "RelevanceMode",
+    "SplitSuggestion",
+    "SubclauseEntry",
+    "TextSpan",
+    "WorkflowDelta",
+    "WorkflowMeta",
+]

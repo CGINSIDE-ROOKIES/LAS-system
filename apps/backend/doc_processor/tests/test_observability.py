@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from doc_processor.main import run_parser
 from doc_processor.observability.langfuse import _sanitize_langfuse_payload
 from doc_processor.parser.llm_utils import invoke_structured_model
-from doc_processor.types import ClauseEntry, ParagraphAnalysis, ParagraphCategory, ParserAnalysis
+from doc_processor.parser_types import ClauseEntry, ParagraphAnalysis, ParagraphCategory, ParserAnalysis
 from doc_processor.state import ParserConfig, WorkflowState
 
 
