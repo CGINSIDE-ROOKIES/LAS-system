@@ -5,6 +5,7 @@ from src.common.io_utils import _write_jsonl
 from scripts.embed_qdrant_3collections import (
     _build_meta,
     _build_retrieval_policy,
+    _resolve_target_collections,
     _scan_collection,
     write_embedding_manifest,
 )
@@ -169,3 +170,15 @@ def test_write_embedding_manifest_uses_collection_dim(tmp_path):
 
     assert payload["model_name"] == "text-embedding-3-large"
     assert payload["embedding_dim"] == 1024
+
+
+def test_resolve_target_collections_defaults_to_primary_collections():
+    assert _resolve_target_collections(None) == ("law_article", "legal_case")
+
+
+def test_resolve_target_collections_supports_opt_in_legal_relation():
+    assert _resolve_target_collections(["legal_relation"]) == ("legal_relation",)
+    assert _resolve_target_collections(["legal_relation", "legal_case", "legal_relation"]) == (
+        "legal_relation",
+        "legal_case",
+    )
