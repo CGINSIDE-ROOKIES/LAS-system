@@ -344,6 +344,8 @@ def build_legal_case_records(
     verified_law_case_relations: list[dict] | None = None,
 ) -> list[dict[str, Any]]:
     # canonical_case_id → [(law_name, law_uid), ...] — 검증된 관계만 메타/텍스트에 반영
+    # None → legacy mode, [] → verified mode with 0 results (빈 리스트도 "검증 완료, 결과 없음"으로 처리)
+    use_verified = verified_law_case_relations is not None
     verified_lookup: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for rel in (verified_law_case_relations or []):
         if rel.get("relation_model") == "law_to_case":
@@ -372,7 +374,7 @@ def build_legal_case_records(
         parsed = parse_case_payload(target, payload or {}, fallback=row)
 
         # preamble 텍스트에 검증된 법령명만 포함되도록 row_for_build 생성
-        if verified_lookup and canonical_case_id:
+        if use_verified and canonical_case_id:
             verified = verified_lookup.get(canonical_case_id, [])
             row_for_build = {**row, "source_law_names": [n for n, _ in verified]}
         else:
@@ -407,17 +409,34 @@ def build_legal_case_records(
         if not canonical_case_id:
             continue
 
-        # 검증된 law_to_case 관계만 메타에 반영 (verified_lookup 없으면 기존 동작 유지)
-        if verified_lookup:
+        # 검증된 law_to_case 관계만 메타에 반영 (verified_law_case_relations=None이면 기존 동작 유지)
+        if use_verified:
             verified = verified_lookup.get(canonical_case_id, [])
             related_law_names = [n for n, _ in verified]
             source_law_uids = [u for _, u in verified if u]
+            # P2: root_law_names를 verified family로 한정 (multi-root merge 오염 방지)
+            # strict equality 대신 양방향 prefix 매칭 — verified가 child law일 때 parent root 보존,
+            # verified가 parent일 때 child root 보존. 완전 무관한 법령(최저임금법 등)만 제거
+            if verified:
+                verified_names = {n for n, _ in verified}
+                root_law_names = [
+                    r for r in (row.get("root_law_names") or [])
+                    if any(
+                        v == r or v.startswith(r + " ") or r.startswith(v + " ")
+                        for v in verified_names
+                    )
+                ]
+            else:
+                root_law_names = []
         else:
             related_law_names = list(row.get("source_law_names") or [])
             source_law_uids = list(row.get("source_law_uids") or [])
-        root_law_names = list(row.get("root_law_names") or [])
+            root_law_names = list(row.get("root_law_names") or [])
         first_related_law_name = related_law_names[0] if related_law_names else None
-        first_root_law_name = root_law_names[0] if root_law_names else row.get("root_law_name")
+        # verified mode에서 row.get("root_law_name") fallback 방지 — 오염된 값 유입 차단
+        first_root_law_name = root_law_names[0] if root_law_names else (
+            first_related_law_name if use_verified else row.get("root_law_name")
+        )
         first_source_law_uid = source_law_uids[0] if source_law_uids else None
         root_law_uid = first_source_law_uid if first_root_law_name == first_related_law_name else build_strict_law_uid(None, None)
 
