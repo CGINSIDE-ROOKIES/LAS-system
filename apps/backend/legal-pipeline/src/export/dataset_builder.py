@@ -1109,6 +1109,7 @@ def build_related_doc_records(
     raw_related_base_dir: str | Path = "data/raw/02_related_legal_docs",
     max_chars: int = 1200,
     overlap: int = 150,
+    verified_law_case_relations: list[dict] | None = None,
 ) -> list[dict[str, Any]]:
     from src.export.legal_case_dataset_builder import build_legal_case_records
 
@@ -1116,6 +1117,7 @@ def build_related_doc_records(
         raw_related_base_dir=raw_related_base_dir,
         max_chars=max_chars,
         overlap=overlap,
+        verified_law_case_relations=verified_law_case_relations,
     )
     if records:
         return records
@@ -1199,16 +1201,19 @@ def build_and_write_datasets(
         include_non_searchable_law_parts=include_non_searchable_law_parts,
         include_appendix_as_law_rows=False,
     )
-    related_records = build_related_doc_records(
-        raw_related_base_dir=raw_related_base_dir,
-        max_chars=max_chars,
-        overlap=overlap,
-    )
+    # relation_records를 먼저 빌드하여 검증된 law_to_case를 legal_case 메타/텍스트에 반영
     relation_records = build_relation_records(
         raw_related_base_dir=raw_related_base_dir,
         expanded_base_dir=expanded_base_dir,
         normalized_base_dir=normalized_base_dir,
         include_law_to_law_relations=include_law_to_law_relations,
+    )
+    law_case_rows = [r for r in relation_records if r.get("relation_model") == "law_to_case"]
+    related_records = build_related_doc_records(
+        raw_related_base_dir=raw_related_base_dir,
+        max_chars=max_chars,
+        overlap=overlap,
+        verified_law_case_relations=law_case_rows,
     )
     case_reference_audit_records = build_case_reference_audit_records(
         raw_related_base_dir=raw_related_base_dir,
