@@ -71,3 +71,47 @@ def test_build_incremental_dataset_patch_deletes_old_point_when_point_id_changes
         "case_chunk::case::prec::1::1",
     }
     assert any(row["_point_id"].startswith("case::prec::1::ctx::") for row in deletes)
+
+
+def test_build_incremental_dataset_patch_keeps_distinct_relation_point_ids(tmp_path):
+    previous_relation_rows = [
+        {
+            "id": "case_relation::case::detc::124722::case::detc::137400",
+            "canonical_id": "case::detc::124722",
+            "canonical_case_id": "case::detc::124722",
+            "relation_model": "case_to_case",
+            "target_canonical_case_id": "case::detc::137400",
+            "text": "relation a",
+        },
+        {
+            "id": "case_relation::case::detc::124722::case::detc::151075",
+            "canonical_id": "case::detc::124722",
+            "canonical_case_id": "case::detc::124722",
+            "relation_model": "case_to_case",
+            "target_canonical_case_id": "case::detc::151075",
+            "text": "relation b",
+        },
+    ]
+
+    manifest = build_incremental_dataset_patch(
+        previous_corpus_rows=[],
+        current_corpus_rows=[],
+        previous_relation_rows=[],
+        current_relation_rows=previous_relation_rows,
+        patch_dir=tmp_path / "patch",
+        delta_batch_id="20260414",
+        updated_at="2026-04-14T12:00:00Z",
+    )
+
+    assert manifest["legal_relations_upsert_count"] == 2
+
+    upserts = [
+        json.loads(line)
+        for line in (tmp_path / "patch" / "legal_relations.upsert.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert {row["_point_id"] for row in upserts} == {
+        "case_relation::case::detc::124722::case::detc::137400",
+        "case_relation::case::detc::124722::case::detc::151075",
+    }

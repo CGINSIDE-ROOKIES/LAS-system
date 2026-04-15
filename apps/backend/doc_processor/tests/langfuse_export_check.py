@@ -7,7 +7,7 @@ import time
 import traceback
 from pathlib import Path
 
-from doc_processor import Phase1Config, run_phase1
+from doc_processor import ParserConfig, run_parser
 from doc_processor.env import ensure_local_env_loaded
 from doc_processor.observability import flush_langfuse, langfuse_callback_context
 from doc_processor.observability.langfuse import langfuse_enabled
@@ -26,7 +26,7 @@ RELEVANT_ENV_KEYS = (
     "LANGFUSE_SAMPLE_RATE",
 )
 
-PHASE1_PROFILES = {
+PARSER_PROFILES = {
     "minimal": {
         "relevance_mode": RelevanceMode.DISABLED,
         "boundary_review_enabled": False,
@@ -54,7 +54,7 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _default_phase1_target() -> Path:
+def _default_parser_target() -> Path:
     candidate = _repo_root() / "tests" / "doc_samples" / "표준계약서모음(hwp-hwpx)" / "05. 대중문화예술인 표준전속계약서(1).hwp"
     if candidate.exists():
         return candidate
@@ -68,7 +68,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=("direct", "callback", "phase1", "all"),
+        choices=("direct", "callback", "parser", "all"),
         default="all",
         help="Which export path to exercise.",
     )
@@ -87,14 +87,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--target",
         type=Path,
-        default=_default_phase1_target(),
-        help="Target document for --mode phase1 or --mode all.",
+        default=_default_parser_target(),
+        help="Target document for --mode parser or --mode all.",
     )
     parser.add_argument(
-        "--phase1-profile",
-        choices=tuple(PHASE1_PROFILES),
+        "--parser-profile",
+        choices=tuple(PARSER_PROFILES),
         default="minimal",
-        help="Phase1 config profile for --mode phase1 or --mode all.",
+        help="Parser config profile for --mode parser or --mode all.",
     )
     parser.add_argument(
         "--langfuse-timeout",
@@ -145,8 +145,8 @@ def _print_env_summary() -> None:
         print(f"  {key}={display}")
 
 
-def _base_config() -> Phase1Config:
-    return Phase1Config(
+def _base_config() -> ParserConfig:
+    return ParserConfig(
         langfuse_enabled=True,
         langfuse_flush_at_end=False,
         console_logging_enabled=True,
@@ -154,7 +154,7 @@ def _base_config() -> Phase1Config:
     )
 
 
-def _check_langfuse_ready(config: Phase1Config) -> bool:
+def _check_langfuse_ready(config: ParserConfig) -> bool:
     try:
         return langfuse_enabled(config)
     except Exception as exc:
@@ -162,14 +162,14 @@ def _check_langfuse_ready(config: Phase1Config) -> bool:
         return False
 
 
-def _flush(config: Phase1Config, *, label: str) -> None:
+def _flush(config: ParserConfig, *, label: str) -> None:
     started = time.perf_counter()
     flush_langfuse(config)
     elapsed = time.perf_counter() - started
     print(f"[{label}] flush complete in {elapsed:.2f}s")
 
 
-def _run_direct_mode(config: Phase1Config, *, repeat: int) -> None:
+def _run_direct_mode(config: ParserConfig, *, repeat: int) -> None:
     from langfuse import get_client
 
     client = get_client()
@@ -185,7 +185,7 @@ def _run_direct_mode(config: Phase1Config, *, repeat: int) -> None:
     _flush(config, label="direct")
 
 
-def _run_callback_mode(config: Phase1Config, *, repeat: int, payload_size: int) -> None:
+def _run_callback_mode(config: ParserConfig, *, repeat: int, payload_size: int) -> None:
     from langchain_core.runnables import RunnableLambda
 
     payload = "x" * max(payload_size, 1)
@@ -212,25 +212,25 @@ def _run_callback_mode(config: Phase1Config, *, repeat: int, payload_size: int) 
     _flush(config, label="callback")
 
 
-def _run_phase1_mode(config: Phase1Config, *, target: Path, phase1_profile: str) -> None:
-    profile_updates = PHASE1_PROFILES[phase1_profile]
-    phase1_config = config.model_copy(update=profile_updates)
+def _run_parser_mode(config: ParserConfig, *, target: Path, parser_profile: str) -> None:
+    profile_updates = PARSER_PROFILES[parser_profile]
+    parser_config = config.model_copy(update=profile_updates)
     print(
-        f"[phase1] running parser graph against {target} "
-        f"with profile={phase1_profile} "
-        f"boundary_review_enabled={phase1_config.boundary_review_enabled} "
-        f"label_review_enabled={phase1_config.label_review_enabled} "
-        f"max_concurrent_workers={phase1_config.max_concurrent_workers}"
+        f"[parser] running parser graph against {target} "
+        f"with profile={parser_profile} "
+        f"boundary_review_enabled={parser_config.boundary_review_enabled} "
+        f"label_review_enabled={parser_config.label_review_enabled} "
+        f"max_concurrent_workers={parser_config.max_concurrent_workers}"
     )
     started = time.perf_counter()
-    result = run_phase1(target, config=phase1_config)
+    result = run_parser(target, config=parser_config)
     elapsed = time.perf_counter() - started
     print(
-        "[phase1] run complete in "
-        f"{elapsed:.2f}s accepted={result.phase1_result.accepted if result.phase1_result else None} "
-        f"clauses={result.phase1_result.clause_count if result.phase1_result else None}"
+        "[parser] run complete in "
+        f"{elapsed:.2f}s accepted={result.parser_result.accepted if result.parser_result else None} "
+        f"clauses={result.parser_result.clause_count if result.parser_result else None}"
     )
-    _flush(phase1_config, label="phase1")
+    _flush(parser_config, label="parser")
 
 
 def main() -> int:
@@ -242,7 +242,7 @@ def main() -> int:
     if not _check_langfuse_ready(config):
         return 2
 
-    modes = ("direct", "callback", "phase1") if args.mode == "all" else (args.mode,)
+    modes = ("direct", "callback", "parser") if args.mode == "all" else (args.mode,)
     failures: list[str] = []
 
     for mode in modes:
@@ -251,8 +251,8 @@ def main() -> int:
                 _run_direct_mode(config, repeat=args.repeat)
             elif mode == "callback":
                 _run_callback_mode(config, repeat=args.repeat, payload_size=args.payload_size)
-            elif mode == "phase1":
-                _run_phase1_mode(config, target=args.target, phase1_profile=args.phase1_profile)
+            elif mode == "parser":
+                _run_parser_mode(config, target=args.target, parser_profile=args.parser_profile)
             else:  # pragma: no cover
                 raise ValueError(f"Unsupported mode: {mode}")
         except Exception as exc:
