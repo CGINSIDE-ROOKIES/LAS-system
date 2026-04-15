@@ -27,7 +27,8 @@ NORMALIZE_EMBEDDINGS = EMBEDDING_SETTINGS.normalize_embeddings
 EMBEDDING_DTYPE = EMBEDDING_SETTINGS.dtype
 DEFAULT_BATCH_SIZE = 128
 CASE_DOC_TYPES = {"prec", "detc", "decc", "expc"}
-COLLECTIONS = ("law_article", "legal_case")
+DEFAULT_COLLECTIONS = ("law_article", "legal_case")
+SUPPORTED_COLLECTIONS = ("law_article", "legal_case", "legal_relation")
 APPENDIX_VECTOR_PLACEHOLDER = "[NO_APPENDIX_LINKED]"
 LAW_ARTICLE_VECTOR_NAMES = ("body", "appendix")
 
@@ -661,9 +662,22 @@ def write_embedding_manifest(
     return manifest_path
 
 
+def _resolve_target_collections(selected: Sequence[str] | None) -> tuple[str, ...]:
+    if not selected:
+        return DEFAULT_COLLECTIONS
+
+    targets: list[str] = []
+    for name in selected:
+        if name not in SUPPORTED_COLLECTIONS:
+            raise ValueError(f"Unsupported collection: {name}")
+        if name not in targets:
+            targets.append(name)
+    return tuple(targets)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Embed Qdrant handoff files for law_article and legal_case."
+        description="Embed selected Qdrant handoff files."
     )
     parser.add_argument(
         "--dataset-dir",
@@ -689,6 +703,16 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_BATCH_SIZE,
         help="Embedding encode batch size.",
     )
+    parser.add_argument(
+        "--collection",
+        action="append",
+        choices=SUPPORTED_COLLECTIONS,
+        default=None,
+        help=(
+            "Target collection to embed. Repeat to select multiple. "
+            "Default: law_article + legal_case"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -699,26 +723,30 @@ def main() -> None:
     emb_dir: Path = args.emb_dir
     handoff_dir: Path = args.handoff_dir
     batch_size: int = args.batch_size
+    target_collections = _resolve_target_collections(args.collection)
 
     if not dataset_dir.exists():
         raise FileNotFoundError(f"dataset_dir not found: {dataset_dir}")
 
     print(f"[embed] model={MODEL_NAME}")
+    print(f"[embed] collections={', '.join(target_collections)}")
 
     model = create_embedding_backend(EMBEDDING_SETTINGS)
 
     try:
         collection_manifests: list[dict] = []
-        collection_manifests.append(
-            embed_law_article(
-                model=model,
-                dataset_dir=dataset_dir,
-                emb_dir=emb_dir,
-                handoff_dir=handoff_dir,
-                batch_size=batch_size,
-            )
-        )
-        for collection_name in ("legal_case",):
+        for collection_name in target_collections:
+            if collection_name == "law_article":
+                collection_manifests.append(
+                    embed_law_article(
+                        model=model,
+                        dataset_dir=dataset_dir,
+                        emb_dir=emb_dir,
+                        handoff_dir=handoff_dir,
+                        batch_size=batch_size,
+                    )
+                )
+                continue
             collection_manifests.append(
                 embed_simple_collection(
                     model=model,
