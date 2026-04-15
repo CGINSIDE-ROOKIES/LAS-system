@@ -6,9 +6,9 @@ import hashlib
 import json
 import re
 import socket
-import urllib.error
-import urllib.request
 from typing import Any
+
+import urllib3
 
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
 DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1"
@@ -88,6 +88,24 @@ def _sha1_hex(data: bytes) -> str:
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
 
+# 커넥션 풀 — 프로세스 단위 싱글톤으로 TCP 연결을 재사용한다.
+# num_pools: 호스트별 풀 수 (Qdrant + OpenSearch + OpenAI 등)
+# maxsize: 풀당 최대 열린 커넥션 수 (병렬 검색 스레드 수와 맞춤)
+_http_pool = urllib3.PoolManager(
+    num_pools=8,
+    maxsize=8,
+    # stale connection 재시도: 풀에서 꺼낸 연결이 서버 측에서 닫혀있을 때 1회 재연결
+    retries=urllib3.Retry(
+        total=1,
+        connect=1,
+        read=1,           # stale connection으로 RemoteDisconnected 시 재시도
+        redirect=False,
+        raise_on_status=False,
+        allowed_methods=None,  # POST 포함 모든 메서드 재시도 허용
+    ),
+)
+
+
 def http_json(
     method: str,
     url: str,
@@ -97,38 +115,40 @@ def http_json(
 ) -> dict[str, Any]:
     """JSON payload를 전송하고 응답 JSON을 반환하는 범용 HTTP 클라이언트.
 
-    외부 라이브러리(requests 등) 없이 표준 라이브러리만 사용한다.
-    현재 retrieval 레이어는 동기 아키텍처이므로 이 함수도 동기 블로킹 I/O로 동작한다.
+    urllib3 PoolManager로 커넥션을 재사용해 TCP 핸드쉐이크 오버헤드를 줄인다.
 
     Raises:
         RetrievalError: HTTP 오류(4xx/5xx) 또는 네트워크 오류 발생 시.
     """
-    req = urllib.request.Request(
-        url=url,
-        method=method,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-    )
-    for k, v in headers.items():
-        req.add_header(k, v)
-
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-            return json.loads(raw) if raw.strip() else {}
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
+        resp = _http_pool.request(
+            method,
+            url,
+            body=body,
+            headers=headers,
+            timeout=urllib3.Timeout(total=float(timeout)),
+        )
+    except urllib3.exceptions.TimeoutError as exc:
+        raise UpstreamTimeoutError(f"Timeout {method} {url}: {exc}") from exc
+    except urllib3.exceptions.MaxRetryError as exc:
+        inner = getattr(exc, "reason", exc)
+        if isinstance(inner, urllib3.exceptions.TimeoutError):
+            raise UpstreamTimeoutError(f"Timeout {method} {url}: {exc}") from exc
+        raise UpstreamNetworkError(f"Network error {method} {url}: {exc}") from exc
+    except urllib3.exceptions.HTTPError as exc:
+        raise UpstreamNetworkError(f"Network error {method} {url}: {exc}") from exc
+
+    if resp.status >= 400:
+        body_str = resp.data.decode("utf-8", errors="replace")
         raise UpstreamHTTPError(
             method=method,
             url=url,
-            status_code=int(exc.code),
-            body=body,
-        ) from exc
-    except urllib.error.URLError as exc:
-        if _is_timeout_like(getattr(exc, "reason", None)) or _is_timeout_like(exc):
-            raise UpstreamTimeoutError(f"Timeout {method} {url}: {exc}") from exc
-        raise UpstreamNetworkError(f"Network error {method} {url}: {exc}") from exc
-    except TimeoutError as exc:
-        raise UpstreamTimeoutError(f"Timeout {method} {url}: {exc}") from exc
+            status_code=resp.status,
+            body=body_str,
+        )
+    raw = resp.data.decode("utf-8")
+    return json.loads(raw) if raw.strip() else {}
 
 
 # ── 임베딩 ────────────────────────────────────────────────────────────────────
