@@ -15,7 +15,8 @@ from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
-from ..observability.tracing import end_span, start_generation_span, start_span, start_trace, update_trace
+from ..observability.langfuse_client import score_trace
+from ..observability.tracing import end_span, get_trace_id, start_generation_span, start_span, start_trace, update_trace
 from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, embed_query
 from ..retrieval.context import build_llm_context_rows, build_llm_context_text, truncate_on_semantic_boundary
 from ..retrieval.fusion import fuse_rrf, fuse_rrf_multi
@@ -24,12 +25,20 @@ from ..retrieval.qdrant import search_qdrant_with_vector
 from ..retrieval.ranking import (
     LAW_CONTEXT_CASE_ONLY,
     LAW_CONTEXT_MISSING,
+    LAW_CONTEXT_OK,
     LAW_CONTEXT_SUPPLEMENTED,
     apply_law_boost,
     select_rows_with_law_policy,
 )
 from ..retrieval.service import RetrievalConfig
 from .service import GenerationConfig, GenerationService
+
+_LAW_CONTEXT_SCORES: dict[str, float] = {
+    LAW_CONTEXT_OK: 1.0,
+    LAW_CONTEXT_SUPPLEMENTED: 0.7,
+    LAW_CONTEXT_CASE_ONLY: 0.5,
+    LAW_CONTEXT_MISSING: 0.0,
+}
 
 _NO_RESULT_ANSWER = (
     "관련 법령·판례 문서를 찾지 못했습니다. "
@@ -309,7 +318,7 @@ class RagPipeline:
             rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
             rrf_rows = apply_law_boost(
                 rrf_rows,
-                question=question,
+                intent=intent,
                 enabled=rcfg.auto_law_boost,
                 law_boost_score=rcfg.law_boost_score,
             )
@@ -335,9 +344,15 @@ class RagPipeline:
             end_span(ranking_span, output={"error": str(exc)}, level="ERROR")
             end_span(retrieval_span, level="ERROR")
             raise
+        law_count = sum(1 for r in llm_rows if str(r.get("doc_type", "") or "") == "law")
         end_span(
             ranking_span,
-            output={"selected_docs": len(llm_rows), "law_context_status": law_context_status},
+            output={
+                "selected_docs": len(llm_rows),
+                "law_count": law_count,
+                "non_law_count": len(llm_rows) - law_count,
+                "law_context_status": law_context_status,
+            },
             level="DEFAULT",
         )
 
@@ -347,13 +362,19 @@ class RagPipeline:
             max_total_chars=rcfg.max_total_chars,
         )
         context_text = build_llm_context_text(question, contexts, law_context_added)
+        context_chars = len(context_text)
         logger.info(
-            "retrieval 완료: %.2fs | docs=%d | law_context_status=%s",
-            time.perf_counter() - t0, len(llm_rows), law_context_status,
+            "retrieval 완료: %.2fs | docs=%d | law_count=%d | context_chars=%d | law_context_status=%s",
+            time.perf_counter() - t0, len(llm_rows), law_count, context_chars, law_context_status,
         )
         end_span(
             retrieval_span,
-            output={"docs": len(llm_rows), "law_context_status": law_context_status},
+            output={
+                "docs": len(llm_rows),
+                "law_count": law_count,
+                "context_chars": context_chars,
+                "law_context_status": law_context_status,
+            },
             level="DEFAULT",
         )
         return llm_rows, context_text, law_context_status, law_context_added
@@ -446,6 +467,12 @@ class RagPipeline:
                 output={"answer": gen_result.answer, "law_context_status": law_context_status},
                 level="DEFAULT",
             )
+            score_trace(
+                get_trace_id(trace) or "",
+                name="law_context_quality",
+                value=_LAW_CONTEXT_SCORES.get(law_context_status, 0.0),
+                comment=law_context_status,
+            )
             return result
         except Exception:
             update_trace(trace, level="ERROR")
@@ -521,6 +548,12 @@ class RagPipeline:
                 trace,
                 output={"answer": answer, "law_context_status": law_context_status},
                 level="DEFAULT",
+            )
+            score_trace(
+                get_trace_id(trace) or "",
+                name="law_context_quality",
+                value=_LAW_CONTEXT_SCORES.get(law_context_status, 0.0),
+                comment=law_context_status,
             )
         except Exception:
             end_span(gen_span, level="ERROR")
