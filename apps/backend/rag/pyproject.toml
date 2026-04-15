@@ -11,6 +11,7 @@ dependencies = [
 
 [project.optional-dependencies]
 eval = [
+    "google-genai>=1.0",
     "openai>=1.0",
     "ragas>=0.2",
 ]
