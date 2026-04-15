@@ -29,7 +29,10 @@ _SYSTEM_PROMPT = """\
 - law_names: 질문에 법령명이 명시된 경우만 추출. 추론하거나 유추하지 말 것. 없으면 []
 - article_no: 조문번호 (예: "제17조", 없으면 "")
 - intent: "normative" | "case_law" | "mixed" | null (법률 무관이면 null)
-- is_legal: 법률 관련 질문이면 true, 아니면 false
+- is_legal: 다음 중 하나라도 해당하면 true, 모두 해당 없으면 false
+  · [현재 질문]이 법률 관련인 경우
+  · [이전 질문]이 있고, [현재 질문]이 그 맥락에서 의미 있는 후속 질문인 경우
+  (날씨·음식·일상 등 법률 및 이전 대화와 무관한 질문은 false)
 
 인식 가능한 법령 목록:
 {law_list}
