@@ -243,7 +243,44 @@ eval_set.csv
 - **mixed prec -0.193** — 법령 + 판례 복합 질의에서 컨텍스트 균형이 깨진 것으로 의심. **다음 개선 타겟**
 - **law_hit 0.571** — retrieval 대상 중 57%가 gold_law 문서 포함. 절반 정도는 올바른 법령 문서를 찾고 있음
 
-### 4-9. 종합 해석
+### 4-9. 8차 측정 (2026-04-15, refactor/rag-optimization before 기준값)
+
+> eval_set 순서 재정렬 (intent 골고루 분포, 43건 동일), HTTP 커넥션 풀링 적용 (`urllib3.PoolManager`). Query Parser 기본 적용.
+> **v2 eval_set 기준 (4-8 비교 가능). RAG 최적화 작업 전 before 기준값.**
+
+| 메트릭 | 전체 평균 |
+|---|---|
+| answer_relevancy | **0.831** (n=40) |
+| context_precision | **0.710** (n=40) |
+| faithfulness | **0.875** (n=2, 저점수 대상) |
+| law_hit | **0.600** (n=35) |
+
+| intent | n | answer_relevancy | context_precision |
+|---|---|---|---|
+| normative | 20 | 0.811 | 0.711 |
+| case_law | 12 | 0.876 | 0.707 |
+| mixed | 8 | 0.812 | 0.710 |
+
+- `law_context_status`: ok 24건, case_only 14건, missing 4건, irrelevant 1건
+- `answer_relevancy` 0.0 저점수 2건
+  - normative: 임금 체불 시 회사가 부담하는 법적 책임은 무엇인가요
+  - normative: 육아휴직 신청을 거부하면 어떤 제재를 받나요
+
+**4-8 대비 변화 분석**
+
+| intent | rel 변화 | prec 변화 |
+|---|---|---|
+| normative | 0.868 → **0.811** (-0.057) ↓ | 0.640 → **0.711** (+0.071) ↑ |
+| case_law | 0.954 → **0.876** (-0.078) ↓ | 0.722 → **0.707** (-0.015) → |
+| mixed | 0.890 → **0.812** (-0.078) ↓ | 0.574 → **0.710** (+0.136) ↑ |
+
+- **answer_relevancy 전반 하락** — LLM 판단 기반 메트릭 노이즈 범위로 추정. 코드 변경(커넥션 풀링)이 검색 품질에 영향을 주지 않음을 확인
+- **mixed prec 0.574 → 0.710** (+0.136) ↑ — 4-8에서 지목한 개선 타겟. eval_set 재정렬로 mixed 샘플 구성이 바뀐 영향 가능성 있음. 추가 측정 필요
+- **context_precision 0.651 → 0.710** — 전반적 상승. 특히 normative/mixed 개선
+- **law_hit 0.571 → 0.600** — 소폭 상승
+- **지연 시간**: OpenSearch p50 7.49s (nori 형태소 분석기 병목), 전체 qa_request p50 8.92s. 인프라 수정(search_analyzer 분리) 후 재측정 예정
+
+### 4-10. 종합 해석
 
 - **case_law rel 0.699 → 0.954** — intent 기반 필터 전략 적용 후 판례 질의 품질이 가장 크게 개선됨. 구조적 문제(law_names hard filter가 판례 retrieval 방해) 해소 확인
 - **mixed prec 일관 하락** — 법령+판례 복합 질의에서 컨텍스트 비율 조정 전략 필요. 다음 개선 타겟

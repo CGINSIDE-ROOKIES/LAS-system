@@ -66,14 +66,13 @@ def _resolve_query_filters(
         end_span(span, level="ERROR")
         raise
     logger.info(
-        "query_parser: law_names=%r article_no=%r intent=%r is_legal=%r parser_fallback=%r",
-        parsed.law_names, parsed.article_no, parsed.intent, parsed.is_legal, parsed.parser_fallback,
+        "query_parser: law_names=%r intent=%r is_legal=%r parser_fallback=%r",
+        parsed.law_names, parsed.intent, parsed.is_legal, parsed.parser_fallback,
     )
     end_span(
         span,
         output={
             "law_names": parsed.law_names,
-            "article_no": parsed.article_no,
             "intent": parsed.intent,
             "is_legal": parsed.is_legal,
             "parser_fallback": parsed.parser_fallback,

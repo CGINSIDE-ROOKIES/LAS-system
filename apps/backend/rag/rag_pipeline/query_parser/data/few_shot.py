@@ -15,30 +15,30 @@ FEW_SHOT_EXAMPLES: list[tuple[str, str]] = [
     # ── normative: 법령명 명시 ────────────────────────────────────────────────
     (
         "하도급거래 공정화에 관한 법률상 대금 지급 기한을 어기면 어떤 불이익이 있나요",
-        '{"law_names": ["하도급거래 공정화에 관한 법률"], "article_no": "제13조", "intent": "normative", "is_legal": true}',
+        '{"law_names": ["하도급거래 공정화에 관한 법률"], "intent": "normative", "is_legal": true}',
     ),
     # ── normative: 법령명 미명시 → [] ────────────────────────────────────────
     (
         "연장근로 허용 한도가 어떻게 되나요",
-        '{"law_names": [], "article_no": "", "intent": "normative", "is_legal": true}',
+        '{"law_names": [], "intent": "normative", "is_legal": true}',
     ),
     (
         "직원 해고 시 사전 통보 기간은 어떻게 되나요",
-        '{"law_names": [], "article_no": "", "intent": "normative", "is_legal": true}',
+        '{"law_names": [], "intent": "normative", "is_legal": true}',
     ),
     # ── case_law ─────────────────────────────────────────────────────────────
     (
         "프리랜서로 계약한 인력이 근로자로 인정될 수 있나요",
-        '{"law_names": [], "article_no": "", "intent": "case_law", "is_legal": true}',
+        '{"law_names": [], "intent": "case_law", "is_legal": true}',
     ),
     # ── mixed ────────────────────────────────────────────────────────────────
     (
         "근로기준법상 연장근로 수당 관련 판례가 있나요",
-        '{"law_names": ["근로기준법"], "article_no": "", "intent": "mixed", "is_legal": true}',
+        '{"law_names": ["근로기준법"], "intent": "mixed", "is_legal": true}',
     ),
     # ── irrelevant ───────────────────────────────────────────────────────────
     (
         "오늘 점심 뭐 먹을까요",
-        '{"law_names": [], "article_no": "", "intent": null, "is_legal": false}',
+        '{"law_names": [], "intent": null, "is_legal": false}',
     ),
 ]
