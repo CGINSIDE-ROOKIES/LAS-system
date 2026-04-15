@@ -23,8 +23,8 @@
 - `02_related_legal_docs`: 관련 ~례 후보 수집 + canonical case detail hydrate
 - `03_expanded_related_docs`: 법령↔사례 relation 생성
 - `dataset`: 최종 JSONL 생성
-- `emb/handoff`: 현재 `law_article`, `legal_case` 임베딩 및 적재용 handoff 생성
-- `legal_relation`: dataset/OpenSearch 레이어에는 유지하고 Qdrant 임베딩 대상에서는 제외
+- `emb/handoff`: 기본적으로 `law_article`, `legal_case` 임베딩 및 적재용 handoff 생성
+- `legal_relation`: dataset/OpenSearch에는 유지하고, 필요 시 컬렉션 선택형으로 Qdrant 임베딩/적재 가능
 ---
 
 ## 2. 실행
@@ -32,10 +32,8 @@
 ### 2-1. 요구사항
 
 - Python `==3.13.*`
-- Python `==3.13.*`
 - `uv` 사용 권장
 - `.env` 파일에 `LAW_OC=<국가법령정보 API 키>` 필요
-- 임베딩 생성 시 `OPENAI_API_KEY` 필요
 - 임베딩 생성 시 `OPENAI_API_KEY` 필요
 
 ### 2-2. 설치(프로젝트 루트 기준)
@@ -89,12 +87,11 @@ uv run apps/backend/legal-pipeline/scripts/run_current_law_collection.py --max-r
 현재 정책:
 
 - dataset는 계속 `law_article`, `legal_case`, `legal_relation` 3종을 생성
-- Qdrant용 새 임베딩 생성은 현재 `law_article`, `legal_case`만 대상
-- `legal_relation`은 현재 OpenSearch only 정책으로 유지
-- `legal_relation`은 source/import JSONL은 계속 생성하지만 `.npy` 임베딩은 만들지 않는다
-- 현재 기준 manifest는 OpenAI `text-embedding-3-large`, `1024`차원, `law_article 1982`, `legal_case 73690`이다
+- Qdrant 기본 full 임베딩 생성은 현재 `law_article`, `legal_case`만 대상
+- `legal_relation`은 기본 retrieval 정책상 OpenSearch 중심이지만, 필요 시 `--collection legal_relation`으로 별도 임베딩/적재할 수 있다
+- `qdrant_embedding_manifest.json`은 마지막 임베딩 실행 컬렉션만 기록한다
+- 현재 기준 dataset/handoff 규모는 `law_article 1,982`, `legal_case 73,690`, `legal_relation 18,461`이다
 
-임베딩 backend는 OpenAI-compatible API만 사용한다.
 임베딩 backend는 OpenAI-compatible API만 사용한다.
 
 ```bash
@@ -103,22 +100,25 @@ export OPENAI_API_KEY="<YOUR_OPENAI_API_KEY>"
 # 선택 사항: 기본 차원 대신 축소할 때만 지정
 # export OPENAI_BASE_URL="https://api.openai.com/v1"
 # export OPENAI_EMBEDDING_DIMENSIONS="1024"
-# 선택 사항: 기본 차원 대신 축소할 때만 지정
-# export OPENAI_BASE_URL="https://api.openai.com/v1"
-# export OPENAI_EMBEDDING_DIMENSIONS="1024"
 ```
 
 ### 3-2. Qdrant 임베딩 실행
 
-현재 full embedding 대상:
+현재 기본 full embedding 대상:
 
 - `law_article`
 - `legal_case`
 
-`legal_relation`은 dataset/OpenSearch 산출물에는 남고, 현재는 OpenSearch only로 유지한다. Qdrant 새 임베딩 생성 대상에서는 제외한다.
+`legal_relation`은 dataset/OpenSearch 산출물에는 남고, 기본 full 임베딩 대상에서는 제외한다. 다만 필요 시 별도 실행할 수 있다.
 
 ```bash
 uv run apps/backend/legal-pipeline/scripts/embed_qdrant_3collections.py
+```
+
+`legal_relation`만 별도로 임베딩하려면:
+
+```bash
+uv run apps/backend/legal-pipeline/scripts/embed_qdrant_3collections.py --collection legal_relation
 ```
 
 옵션 예시:
@@ -137,6 +137,7 @@ uv run apps/backend/legal-pipeline/scripts/embed_qdrant_3collections.py \
   - `law_article.body.npy`
   - `law_article.appendix.npy`
   - `legal_case.npy`
+  - `legal_relation.npy` (선택 실행 시)
   - 각 collection별 `*.meta.jsonl`, `*.manifest.json`
 - `data/handoff/qdrant_3collections/source/`
   - source JSONL
@@ -146,8 +147,8 @@ uv run apps/backend/legal-pipeline/scripts/embed_qdrant_3collections.py \
 
 참고:
 
-- 현재 스크립트는 `legal_relation` 임베딩을 만들지 않는다.
-- `legal_relation`은 현재 OpenSearch 적재 대상으로 유지한다.
+- `qdrant_embedding_manifest.json`은 마지막 임베딩 실행 컬렉션만 기록한다.
+- `legal_relation`은 기본 full 임베딩 대상은 아니지만, 선택 실행 시 `.npy`와 import JSONL을 생성한다.
 
 ### 3-4. 현재 운영 기준 명령 순서
 
@@ -160,6 +161,15 @@ uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/
 uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/upload/load_qdrant.py
 uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/upload/index_opensearch.py
 uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/upload/load_opensearch.py
+```
+
+`legal_relation`만 따로 재생성/재적재할 때:
+
+```bash
+uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/embed_qdrant_3collections.py --collection legal_relation
+uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/upload/indexing.py --collection legal_relation --recreate
+uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/upload/load_qdrant.py --collection legal_relation
+uv run --project apps/backend/legal-pipeline python apps/backend/legal-pipeline/scripts/upload/load_opensearch.py --collection legal_relation --recreate-index
 ```
 
 ### 3-5. OpenSearch 인덱스 생성 / 전체 적재
@@ -310,9 +320,11 @@ data/
 │   │   ├── source/
 │   │   │   ├── law_article.jsonl
 │   │   │   ├── legal_case.jsonl
+│   │   │   ├── legal_relation.jsonl            # when selected
 │   │   ├── import/
 │   │   │   ├── law_article_for_import.jsonl
 │   │   │   ├── legal_case_for_import.jsonl
+│   │   │   ├── legal_relation_for_import.jsonl # when selected
 │   │   └── qdrant_embedding_manifest.json
 │   ├── opensearch_bulk/
 │   │   ├── law_article.bulk.ndjson
