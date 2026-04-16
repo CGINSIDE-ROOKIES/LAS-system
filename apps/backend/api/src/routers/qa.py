@@ -33,8 +33,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from src.db import get_db
-from src.dependencies import get_query_parser, get_rag_pipeline
+from src.dependencies import get_generation_service, get_query_parser, get_rag_pipeline
 from rag_pipeline.generation.pipeline import RagPipeline
+from rag_pipeline.generation.service import GenerationService
 from rag_pipeline.observability.tracing import end_span, start_span, start_trace, update_trace
 from rag_pipeline.query_parser import QueryParser
 from src.history import delete_history_item, delete_history_items, get_history, get_history_item, save_feedback, save_qa
@@ -394,3 +395,62 @@ def ask_stream(
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no"},
     )
+
+
+_SUGGESTIONS_SYSTEM = (
+    "당신은 노동법·하도급법 전문 법률 Q&A 어시스턴트입니다. "
+    "사용자의 질문과 답변을 바탕으로 사용자가 이어서 물어볼 만한 후속 질문 3개를 생성합니다. "
+    "반드시 JSON 배열 형식으로만 반환하세요. 예: [\"질문1\", \"질문2\", \"질문3\"]"
+)
+
+
+def _build_suggestions_prompt(question: str, answer: str, intent: str | None) -> str:
+    intent_hint = f"\n질문 유형: {intent}" if intent else ""
+    return (
+        f"질문: {question}{intent_hint}\n\n"
+        f"답변:\n{answer}\n\n"
+        "위 대화를 바탕으로 사용자가 이어서 궁금해할 후속 질문 3개를 JSON 배열로 반환하세요."
+    )
+
+
+def _parse_suggestions(raw: str) -> list[str]:
+    """LLM 응답에서 후속 질문 목록을 파싱한다. 파싱 실패 시 빈 리스트 반환."""
+    cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
+    match = re.search(r"\[.*\]", cleaned, re.DOTALL)
+    if not match:
+        return []
+    try:
+        result = json.loads(match.group())
+        if isinstance(result, list):
+            return [str(s).strip() for s in result if isinstance(s, str) and str(s).strip()][:3]
+    except json.JSONDecodeError:
+        pass
+    return []
+
+
+class SuggestionsRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    answer: str = Field(min_length=1, max_length=8000)
+    intent: str | None = None
+
+
+class SuggestionsResponse(BaseModel):
+    suggestions: list[str]
+
+
+@router.post("/suggestions", response_model=SuggestionsResponse)
+def get_suggestions(
+    request: SuggestionsRequest,
+    gen_service: GenerationService = Depends(get_generation_service),
+) -> SuggestionsResponse:
+    """질문·답변을 바탕으로 후속 추천 질문 3개를 생성합니다."""
+    try:
+        result = gen_service.generate(
+            _build_suggestions_prompt(request.question, request.answer, request.intent),
+            system_prompt=_SUGGESTIONS_SYSTEM,
+        )
+        suggestions = _parse_suggestions(result.answer)
+    except Exception:
+        logger.exception("suggestions 생성 실패")
+        suggestions = []
+    return SuggestionsResponse(suggestions=suggestions)
