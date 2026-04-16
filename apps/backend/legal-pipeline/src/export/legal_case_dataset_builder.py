@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -245,7 +246,7 @@ def _build_case_text(parsed: dict[str, Any], row: dict[str, Any]) -> str:
     if parsed.get("decision_date"):
         lines.append(f"결정/선고일: {parsed['decision_date']}")
     if source_law_names:
-        lines.append(f"관련 법령 검색 hit: {', '.join(source_law_names)}")
+        lines.append(f"참조 법령: {', '.join(source_law_names)}")
 
     body_text = str(parsed.get("body_text") or "").strip()
     if str(parsed.get("body_type") or "").strip() == "image_only":
@@ -268,7 +269,7 @@ def _build_case_blocks(parsed: dict[str, Any], row: dict[str, Any]) -> list[str]
     if parsed.get("decision_date"):
         preamble_lines.append(f"결정/선고일: {parsed['decision_date']}")
     if source_law_names:
-        preamble_lines.append(f"관련 법령 검색 hit: {', '.join(source_law_names)}")
+        preamble_lines.append(f"참조 법령: {', '.join(source_law_names)}")
     if str(parsed.get("body_type") or "").strip() == "image_only":
         preamble_lines.append("[이미지 형식 재결문]")
 
@@ -340,7 +341,20 @@ def build_legal_case_records(
     raw_related_base_dir: str | Path = "data/raw/02_related_legal_docs",
     max_chars: int = 1200,
     overlap: int = 150,
+    verified_law_case_relations: list[dict] | None = None,
 ) -> list[dict[str, Any]]:
+    # canonical_case_id → [(law_name, law_uid), ...] — 검증된 관계만 메타/텍스트에 반영
+    # None → legacy mode, [] → verified mode with 0 results (빈 리스트도 "검증 완료, 결과 없음"으로 처리)
+    use_verified = verified_law_case_relations is not None
+    verified_lookup: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for rel in (verified_law_case_relations or []):
+        if rel.get("relation_model") == "law_to_case":
+            cid = rel.get("canonical_case_id")
+            name = rel.get("law_name") or rel.get("source_law_name")
+            uid = rel.get("source_law_uid") or rel.get("root_law_uid") or ""
+            if cid and name:
+                verified_lookup[cid].append((name, uid))
+
     base_dir = Path(raw_related_base_dir)
     canonical_rows = _merge_canonical_rows(list(_iter_canonical_case_rows(base_dir)))
     if not canonical_rows:
@@ -353,9 +367,20 @@ def build_legal_case_records(
         if not target:
             continue
 
+        # canonical_case_id를 먼저 추출해서 verified_lookup 적용에 사용
+        canonical_case_id = str(row.get("canonical_case_id") or "").strip()
+
         payload = _load_detail_payload(row)
         parsed = parse_case_payload(target, payload or {}, fallback=row)
-        blocks = _build_case_blocks(parsed, row)
+
+        # preamble 텍스트에 검증된 법령명만 포함되도록 row_for_build 생성
+        if use_verified and canonical_case_id:
+            verified = verified_lookup.get(canonical_case_id, [])
+            row_for_build = {**row, "source_law_names": [n for n, _ in verified]}
+        else:
+            row_for_build = row
+
+        blocks = _build_case_blocks(parsed, row_for_build)
         full_text = "\n\n".join(blocks).strip()
         cfg = CHUNKING_CONFIG.get(target, {"max_chars": max_chars, "overlap": overlap})
         # header/body 독립 청킹 조건: 실제 header 섹션이 존재하는 경우만 적용
@@ -379,15 +404,39 @@ def build_legal_case_records(
         if not chunks:
             continue
 
-        canonical_case_id = str(row.get("canonical_case_id") or parsed.get("canonical_case_id") or "").strip()
+        if not canonical_case_id:
+            canonical_case_id = str(parsed.get("canonical_case_id") or "").strip()
         if not canonical_case_id:
             continue
 
-        related_law_names = list(row.get("source_law_names") or [])
-        root_law_names = list(row.get("root_law_names") or [])
-        source_law_uids = list(row.get("source_law_uids") or [])
+        # 검증된 law_to_case 관계만 메타에 반영 (verified_law_case_relations=None이면 기존 동작 유지)
+        if use_verified:
+            verified = verified_lookup.get(canonical_case_id, [])
+            related_law_names = [n for n, _ in verified]
+            source_law_uids = [u for _, u in verified if u]
+            # P2: root_law_names를 verified family로 한정 (multi-root merge 오염 방지)
+            # strict equality 대신 양방향 prefix 매칭 — verified가 child law일 때 parent root 보존,
+            # verified가 parent일 때 child root 보존. 완전 무관한 법령(최저임금법 등)만 제거
+            if verified:
+                verified_names = {n for n, _ in verified}
+                root_law_names = [
+                    r for r in (row.get("root_law_names") or [])
+                    if any(
+                        v == r or v.startswith(r + " ") or r.startswith(v + " ")
+                        for v in verified_names
+                    )
+                ]
+            else:
+                root_law_names = []
+        else:
+            related_law_names = list(row.get("source_law_names") or [])
+            source_law_uids = list(row.get("source_law_uids") or [])
+            root_law_names = list(row.get("root_law_names") or [])
         first_related_law_name = related_law_names[0] if related_law_names else None
-        first_root_law_name = root_law_names[0] if root_law_names else row.get("root_law_name")
+        # verified mode에서 row.get("root_law_name") fallback 방지 — 오염된 값 유입 차단
+        first_root_law_name = root_law_names[0] if root_law_names else (
+            first_related_law_name if use_verified else row.get("root_law_name")
+        )
         first_source_law_uid = source_law_uids[0] if source_law_uids else None
         root_law_uid = first_source_law_uid if first_root_law_name == first_related_law_name else build_strict_law_uid(None, None)
 
