@@ -1,0 +1,6 @@
+FROM opensearchproject/opensearch:latest
+
+ARG CACHEBUST=1
+RUN /usr/share/opensearch/bin/opensearch-plugin install --batch workload-management analysis-nori
+
+# docker build --tag=opensearch-nori -f Dockerfile.opensearch-nori --build-arg CACHEBUST=$(date +%s) --progress=plain .
