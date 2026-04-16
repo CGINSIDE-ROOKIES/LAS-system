@@ -1,6 +1,7 @@
 services:
   opensearch:
-    image: 'opensearchproject/opensearch:3'
+    image: 'opensearch-nori:latest'  # Dockerfile.opensearch-nori로 빌드한 이미지 fetch
+    pull_policy: never  # Coolify 등 CI에서 docker.io에 fetch 시도 방지 - 자주 그럼
     container_name: legal-pipeline-opensearch
     restart: unless-stopped
     environment:
@@ -21,12 +22,6 @@ services:
       - '9600:9600'
     volumes:
       - '/home/cg-rookies/docker-volumes/opensearch_storage:/usr/share/opensearch/data'
-      - '/home/cg-rookies/docker-volumes/opensearch_plugins:/usr/share/opensearch/plugins'
-    entrypoint:
-      - /bin/bash
-      - '-c'
-    command:
-      - 'test -d /usr/share/opensearch/plugins/analysis-nori || /usr/share/opensearch/bin/opensearch-plugin install --batch analysis-nori; exec /usr/share/opensearch/opensearch-docker-entrypoint.sh opensearch'
     healthcheck:
       test:
         - CMD-SHELL
