@@ -37,5 +37,6 @@ class RetrievalConfig:
     auto_law_boost: bool = True
     law_boost_score: float = 0.003
     min_law_contexts: int = 1
+    normative_law_ratio: float = 0.6  # normative 슬롯 기반 검색 시 law_article 슬롯 비율
     max_content_chars: int = 1200
     max_total_chars: int = 6000
