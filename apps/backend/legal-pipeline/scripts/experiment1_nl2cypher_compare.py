@@ -222,7 +222,7 @@ def run_method_b(tc: TestCase, neo4j_client: Any, api_key: str) -> RunResult:
             model=model,
             api_key=api_key,
             timeout=15,
-            max_tokens=1024,
+            max_tokens=2048,
             temperature=0.0,
             system_prompt=_SYSTEM_PROMPT_B,
         )
@@ -333,6 +333,9 @@ def run_method_c(tc: TestCase, neo4j_client: Any, api_key: str) -> RunResult:
     model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
+    import logging as _logging
+    _logger_c = _logging.getLogger(__name__)
+
     _TOOL_CALL_RE = re.compile(
         r"\*{0,2}[Aa]ction\*{0,2}[:\s]+run_cypher.*?\*{0,2}[Ii]nput\*{0,2}[:\s]+(\{.*?\})",
         re.DOTALL | re.IGNORECASE,
@@ -369,6 +372,8 @@ Final Answer: (최종 답변)
             if usage:
                 input_tokens += usage.get("prompt_tokens", 0) or usage.get("promptTokenCount", 0)
                 output_tokens += usage.get("completion_tokens", 0) or usage.get("candidatesTokenCount", 0)
+
+            _logger_c.warning("C raw_text [step=%d] query=%r | %r", _step, tc.query[:40], raw_text[:300])
 
             if _FINAL_RE.search(raw_text):
                 break
