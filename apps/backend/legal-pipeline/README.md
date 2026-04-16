@@ -198,7 +198,12 @@ export OPENSEARCH_INDEX_LEGAL_CASE="legal_case"
 export OPENSEARCH_INDEX_LEGAL_RELATION="legal_relation"
 ```
 
-`OPENSEARCH_ENABLE_NORI_POS_FILTER` 는 기본 비활성화다. 로컬이나 일부 OpenSearch 배포에서 `nori_part_of_speech` 필터를 지원하지 않을 수 있으므로, 별도 확인 전에는 비워 두는 것을 권장한다.
+`OPENSEARCH_ENABLE_NORI_POS_FILTER` 는 기본 비활성화다. nori 품사(POS) 필터(`nori_part_of_speech` stoptags) 적용 여부를 제어한다.
+
+- **운영 서버**: `Dockerfile.opensearch-nori`로 nori plugin 설치 완료시. `OPENSEARCH_ENABLE_NORI_POS_FILTER=true` 설정 권장.
+- **로컬**: nori plugin 없으면 코드가 자동으로 standard tokenizer로 fallback하므로 별도 설정 불필요.
+
+기본 nori tokenizer(`nori_tokenizer`)는 POS 필터 여부와 무관하게 항상 사용되며, plugin이 없는 환경에서는 standard tokenizer로 자동 fallback된다.
 
 필요 환경변수 예시:
 
