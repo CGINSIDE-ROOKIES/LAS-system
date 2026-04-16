@@ -280,11 +280,80 @@ eval_set.csv
 - **law_hit 0.571 → 0.600** — 소폭 상승
 - **지연 시간**: OpenSearch p50 7.49s (nori 형태소 분석기 병목), 전체 qa_request p50 8.92s. 인프라 수정(search_analyzer 분리) 후 재측정 예정
 
-### 4-10. 종합 해석
+### 4-10. 9차 측정 (2026-04-16, normative 슬롯 기반 검색 전환)
+
+> normative intent 슬롯 기반 검색 적용: law_article Qdrant 결과를 `top_k * normative_law_ratio(0.6)` 슬롯에 직접 배정, 나머지를 case 슬롯으로 분리. `apply_law_boost`, `select_rows_with_law_policy` normative 경로 제거.
+> **v2 eval_set 기준 (4-9 비교 가능).**
+
+| 메트릭 | 전체 평균 |
+|---|---|
+| answer_relevancy | **0.869** (n=43) |
+| context_precision | **0.669** (n=43) |
+| law_hit | **0.600** (n=35) |
+
+| intent | n | answer_relevancy | context_precision |
+|---|---|---|---|
+| normative | 22 | 0.875 | 0.678 |
+| case_law | 13 | 0.891 | 0.697 |
+| mixed | 8 | 0.817 | 0.598 |
+
+- `law_context_status`: ok 28건, case_only 15건 (**missing 0건** — 8차 4건에서 완전 해소)
+- `answer_relevancy` 0.0 저점수: 없음
+
+**4-9 대비 변화 분석**
+
+| intent | rel 변화 | prec 변화 | 비고 |
+|---|---|---|---|
+| normative | 0.811 → **0.875** (+0.064) ↑ | 0.711 → **0.678** (-0.033) ↓ | 이전 excluded 4건 포함 (n=20→22) |
+| case_law | 0.876 → **0.891** (+0.015) ↑ | 0.707 → **0.697** (-0.010) → | |
+| mixed | 0.812 → **0.817** (+0.005) → | 0.710 → **0.598** (-0.112) ↓ | 코드 변경 없음, 노이즈 범위 추정 |
+
+- **normative missing 4건 → 0건** — 슬롯 기반으로 law_article이 항상 상위에 배정되어 missing 상태 완전 해소
+- **normative rel +0.064** — 법령이 처음부터 상위에 오르면서 답변 품질 향상
+- **normative prec -0.033**: 8차는 missing 4건을 RAGAS 평가에서 제외한 n=20 기준, 9차는 해당 쿼리 포함 n=22 기준. 더 어려운 쿼리가 포함된 영향으로 추정되며 단순 비교 불가
+- **mixed prec -0.112**: 코드 변경 없음. n=8 소표본 노이즈 범위로 추정
+- **law_hit 0.600 유지**: 슬롯 기반 전환으로 보강(supplemented) 없이도 이전 수준 유지
+
+### 4-11. 10차 측정 (2026-04-16, OPENSEARCH_INDEX 리스트 파싱 적용)
+
+> `OPENSEARCH_INDEX` 환경변수를 쉼표 구분 문자열에서 `list[str]`로 파싱, 인덱스명 개별 URL 인코딩 적용 (F7 수정). normative 슬롯 기반 검색은 9차와 동일하게 유지.
+> **v2 eval_set 기준 (4-10 비교 가능).**
+
+| 메트릭 | 전체 평균 |
+|---|---|
+| answer_relevancy | **0.886** (n=43) |
+| context_precision | **0.698** (n=43) |
+| law_hit | **0.600** (n=35) |
+
+| intent | n | answer_relevancy | context_precision |
+|---|---|---|---|
+| normative | 22 | 0.879 | 0.627 |
+| case_law | 13 | 0.931 | 0.780 |
+| mixed | 8 | 0.835 | 0.757 |
+
+- `law_context_status`: ok 28건, case_only 15건 (missing 0건 유지)
+- `answer_relevancy` 0.0 저점수: 없음
+
+**4-10 대비 변화 분석**
+
+| intent | rel 변화 | prec 변화 | 비고 |
+|---|---|---|---|
+| normative | 0.875 → **0.879** (+0.004) → | 0.678 → **0.627** (-0.051) ↓ | 추가 분석 필요 |
+| case_law | 0.891 → **0.931** (+0.040) ↑ | 0.697 → **0.780** (+0.083) ↑ | |
+| mixed | 0.817 → **0.835** (+0.018) → | 0.598 → **0.757** (+0.159) ↑ | |
+
+- **전체 prec 0.669 → 0.698** (+0.029) — OPENSEARCH_INDEX 리스트 파싱으로 멀티 인덱스 검색이 정상 동작한 효과로 추정
+- **case_law prec +0.083, mixed prec +0.159** — BM25 인덱스 경로 수정으로 판례·복합 질의에서 관련 문서 순위 개선
+- **normative prec -0.051**: 전체 prec는 상승했으나 normative만 하락. law_article 슬롯 비율(normative_law_ratio=0.6) 또는 BM25 normative 쿼리 품질 추가 검토 필요. n=22 소표본 노이즈 가능성도 있음
+- **law_hit 0.600 유지**: 인덱스 수정 이후에도 gold_law 포함율 변화 없음 — retrieval recall은 안정적
+
+---
+
+### 4-12. 종합 해석
 
 - **case_law rel 0.699 → 0.954** — intent 기반 필터 전략 적용 후 판례 질의 품질이 가장 크게 개선됨. 구조적 문제(law_names hard filter가 판례 retrieval 방해) 해소 확인
+- **normative missing 완전 해소** — 슬롯 기반 검색 전환(9차)으로 missing 4건 → 0건. normative rel 0.811 → 0.875. normative prec 비교는 평가 대상 n이 달라(20→22) 단순 비교 불가
 - **mixed prec 일관 하락** — 법령+판례 복합 질의에서 컨텍스트 비율 조정 전략 필요. 다음 개선 타겟
-- **normative는 안정적** — OpenAI 임베딩 전환 이후 어휘 불일치 문제 완화 유지. prec 소폭 하락은 필터 전략 변경 영향으로 추정
 - **law_hit은 retrieval recall 보조 지표** — LLM 판단 없는 결정론적 수치. RAGAS 메트릭과 함께 추세 모니터링
 - LLM 판단 기반 메트릭 특성상 실행마다 노이즈 존재. 단일 수치보다 추세로 판단 필요
 
@@ -304,6 +373,7 @@ eval_set.csv
 
 | 개선 방향 | 기대 효과 측정 방법 |
 |---|---|
+| ~~normative 슬롯 기반 검색~~ ✅ | normative missing 해소, rel 향상 확인 (9차) |
 | mixed 컨텍스트 비율 조정 | mixed context_precision 회복 여부 |
 | 동의어 사전 (기재사항 → 명시사항 등) | normative context_precision 변화 |
 | HyDE 도입 | context_precision + answer_relevancy 변화 |

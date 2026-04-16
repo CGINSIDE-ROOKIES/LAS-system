@@ -1,4 +1,4 @@
-# RAG 파이프라인 검색 품질 저하 — 검토 의견서
+# RAG 파이프라인 검색 품질 저하 — 검토 의견서 (수정본)
 
 > 작성일: 2026-04-14  
 > 최종 수정: 2026-04-16  
@@ -9,236 +9,157 @@
 
 ## 1. 개요
 
-전달받은 trace 상세 조사 보고서의 Finding 7개와 부가 관찰 1건에 대해 코드 수준에서 직접 확인하였습니다.  
-각 항목에 대해 코드상 근거를 특정하고, 수정 방향 및 현재 처리 상태를 정리합니다.
+초기 보고서의 Finding 7개와 부가 관찰 1건을 재검증했다.  
+이번 문서는 **2026-04-16 실제 운영 데이터 확인 결과**와 **이번 수정 내역**을 반영한 최종 정리본이다.
 
 ---
 
-## 2. 심각도 높음
+## 2. Finding별 재검증 결과
 
-### F1. `legal_relation` 코퍼스가 Qdrant와 OpenSearch 사이에서 분리 운영된다
+### Finding 1. `legal_relation` 코퍼스 분리 운영 여부
 
-**코드 확인**
+초기 가설: Qdrant와 OpenSearch의 `legal_relation`이 사실상 서로 다른 코퍼스로 운영되어 RRF 융합 전제가 깨진다.
 
-- Qdrant `legal_relation`: 약 100,269건 (`law_to_case` 98,900 / `law_to_law` 1,369)
-- OpenSearch `legal_relation`: 수백 건 수준, `case_to_case`만 존재
+재확인 결과(2026-04-16, `100.72.14.114`):
+- OpenSearch `legal_relation` 총건수: `18461`
+- Qdrant `legal_relation` points_count: `18461`
+- `relation_model` 분포도 동일:
+1. `case_to_case`: `10165`
+2. `law_to_case`: `7176`
+3. `law_to_law`: `1120`
 
-ingest 경로가 파이프라인별로 달라 두 백엔드가 서로 다른 subset을 보유하고 있다.
+판단:
+- 두 저장소는 동일 코퍼스로 운영 중이다.
+- `legal_relation`에 대한 RRF 융합 전제는 성립한다.
 
-- `legal-pipeline/scripts/embed_qdrant_3collections.py:30` — COLLECTIONS에 `legal_relation` 미포함
-- `law-updater/scripts/embed_qdrant_3collections.py:30` — `legal_relation` 포함
+주의사항:
+- Qdrant에서 `relation_type=law_to_case`로 집계하면 0건이 나오는데, 해당 값은 `relation_model` 필드 값이므로 집계 키를 잘못 잡은 영향이다.
 
-**영향**
-
-같은 코퍼스를 전제로 하는 RRF 융합 자체가 성립하지 않는다. Qdrant에만 존재하는 `law_to_case` / `law_to_law` 문서가 OpenSearch 쪽에서는 등장하지 않으므로 융합 점수가 왜곡되고 결과 재현성이 낮아진다.
-
-**수정 방향**
-
-RAG 코드 단독 수정으로 해결 불가. Qdrant와 OpenSearch 중 단일 진실 소스를 결정한 뒤 ingest 파이프라인을 정렬해야 한다.  
-단기 대응: OpenSearch `OPENSEARCH_INDEX`에서 `legal_relation`을 제외해 Qdrant 단독 검색으로 전환.
-
-**처리 상태: 미처리 (인프라/데이터 결정 선행 필요)**
+처리 상태: **수정 없음 (문제 아님으로 확정)**
 
 ---
 
-### F2. 규범형 질의에서도 법령이 처음부터 상위에 오르지 못한다
+### Finding 2. 규범형 질문에서 법령 중심 retrieval 미작동
 
-**코드 확인**
+재확인 결과, 세부 문제는 다음과 같다.
 
-`generation/pipeline.py:191` — `case_law` intent일 때만 검색 범위를 강하게 바꾼다.  
-`normative` intent는 전체 코퍼스 RRF 후 최소 law 보강 구조를 그대로 유지한다.
+1. 판례/해석례는 조문 대비 데이터 규모가 크고 자연어 서술이 풍부해 동등 경쟁(RRF)에서 구조적으로 유리하다.
+2. `law_boost_score=0.003`은 실효성이 낮다. 일반적인 RRF 점수 범위(대략 `0.01~0.05`)에서 순위 역전을 만들기 어렵고 eval에서도 유의미한 개선이 확인되지 않았다.
+3. `select_rows_with_law_policy()`는 top-k 외부에서 law를 보강하는 구조라, “법령 우선 검색”이 아니라 “법령 최소 보장” 동작에 가깝다.
 
-`retrieval/service.py:37` — `law_boost_score=0.003`  
-`retrieval/ranking.py:56` — law doc에만 소량 가산점 부여. 실질적 순위 변화를 만들기엔 값이 작다.
+적용한 해결:
+- `normative` intent에서 law/case를 분리된 슬롯으로 운영하도록 변경.
+- `RetrievalConfig`에 `normative_law_ratio: float = 0.5` 추가.
+- 현재 기본값은 law:case = `5:5`이며, 추후 eval 기반으로 조정 가능.
 
-**런타임 증거**
-
-질문 `연장근로 최대 시간은 몇 시간인가요?` (intent=normative) 최종 컨텍스트:  
-1위 `expc`, 2위 `expc`, 3위 `prec`, 4위 `prec`, 5위 `law` — `law_context_status=supplemented`
-
-BM25 `law_article` 단독 1위는 `근로기준법 제56조`였지만 RRF 융합 후 뒤로 밀렸다.  
-즉, 판례/해석례가 먼저 선택된 뒤 최소 개수를 맞추기 위해 법령이 뒤늦게 보강되는 구조다.
-
-**수정 방향**
-
-`normative` intent에서 `law_article` 컬렉션 가중치를 높이거나 law filter를 더 강하게 적용하는 정책 추가.  
-`law_boost_score=0.003`의 실효성을 eval로 검증하고 값 조정 또는 방식 변경 검토 필요.
-
-**처리 상태: 부분 처리**  
-intent 기반 필터 전략 적용(6~8차)으로 `case_law` rel 0.699 → 0.954 개선. `normative` 추가 조정 미완료. 8차 기준 law_hit=0.600으로 40%에서 올바른 법령 문서를 찾지 못하고 있다.
+처리 상태: **수정 완료 (후속 튜닝 예정)**
 
 ---
 
-## 3. 심각도 중간
+### Finding 3. Query Parser `article_no` 미사용
 
-### F3. Qdrant `law_names` 필터가 soft filter에 가깝다
+초기 가설: parser가 `article_no`를 추출하지만 retrieval에서 사용되지 않는다.
 
-**코드 확인**
+결론:
+- 실제 사용처가 없고, few-shot 기반 추론값 신뢰도/포맷 일치성 리스크가 있어 필터로 쓰기 어렵다.
+- 사용되지 않는 필드를 유지하는 편이 오히려 혼란을 만든다.
 
-`retrieval/qdrant.py:61` — `law_names`를 `should`로 구성.  
-`retrieval/qdrant.py:63` — 주석에 "일부 환경에서 should가 scoring에만 관여할 수 있음" 직접 명시.
+적용한 해결:
+1. QueryParser에서 `article_no` 필드 제거
+2. 해당 few-shot 예시 제거
 
-OpenSearch는 `minimum_should_match=1`로 hard filter. 두 백엔드 간 필터 강도가 다르다.
-
-**영향**
-
-법령 필터를 지정한 검색에서도 Qdrant 결과에 unrelated hit가 섞일 수 있다.  
-동일 조건임에도 Qdrant와 OpenSearch 동작이 달라 RRF 융합 점수 일관성이 낮아진다.
-
-**수정 방향**
-
-`law_names` 조건을 `must` 안에 중첩 `should`로 감싸 hard filter로 전환:
-
-```json
-{
-  "must": [
-    {"key": "doc_type", "match": {"any": [...]}},
-    {
-      "should": [
-        {"key": "law_name", "match": {"any": ["법령명"]}},
-        {"key": "root_law_name", "match": {"any": ["법령명"]}},
-        {"key": "related_law_name", "match": {"any": ["법령명"]}},
-        {"key": "related_law_names", "match": {"any": ["법령명"]}}
-      ]
-    }
-  ]
-}
-```
-
-실제 운영 Qdrant 버전에서 중첩 `should` 동작 검증 필요.
-
-**처리 상태: 미처리**
+처리 상태: **수정 완료**
 
 ---
 
-### F4. duplicate suffix 규칙이 ingest와 retrieval 사이에서 불일치한다
+### Finding 4. duplicate suffix 규칙 불일치
 
-**코드 확인**
+초기 가설: ingest와 retrieval의 duplicate suffix 규칙 불일치로 중복 정규화가 깨진다.
 
-ingest — `dataset_builder.py:622` — 중복 id를 `::dupN` 형태로 생성.  
-retrieval — `retrieval/common.py:187` — `__dupN`(언더스코어 두 개) 패턴만 제거.
+재확인 결과:
+- `normalize_source_id()`의 `__dup\d+$`는 현재 데이터와 매칭되지 않는 레거시 코드다.
+- 실제 중복처럼 보이는 건 `canonical_id`가 같아도 ingest 시점에 `::ctx::{hash}`로 분리된 서로 다른 청크이며, Qdrant에 고유 ID로 저장된다.
+- 이 청크들은 내용이 달라 retrieval에서 별개 문서로 취급하는 것이 타당하다.
 
-```python
-# 실제 ingest 포맷과 불일치
-return re.sub(r"__dup\d+$", "", source_id)
-```
-
-**영향**
-
-정규화 함수가 실제 suffix를 제거하지 못해 같은 문서 family의 중복 청크가 별개 문서로 취급된다.  
-RRF merge에서 유사 청크가 과대표집돼 top-k에 중복이 노출될 수 있다.
-
-**수정 방향**
-
-`normalize_source_id()`의 정규식을 `::dup\d+$`로 수정. ingest 실제 suffix 패턴 재확인 후 확정.
-
-**처리 상태: 미처리**
+처리 상태: **수정 없음 (문제 아님으로 확정)**
 
 ---
 
-### F5. `legal_relation` ranking 메타데이터가 retrieval에서 사용되지 않는다
+### Finding 5. Qdrant `law_names` 필터가 soft filter
 
-**코드 확인**
+재확인 결과:
+- 최상위 `should` 기반 soft filter는 Qdrant hang 이슈 회피를 위해 의도적으로 적용된 구조다 (`ef67872`).
+- OpenSearch 대비 필터 강도 불일치는 사실이다.
+- 다만 soft filter가 실제로 발동하는 조건은 `doc_types + law_names` 동시 설정일 때뿐이다.
+- 현재 UI에 `doc_types` 선택 기능이 없어 운영 경로에서는 이 조건이 실질적으로 만족되지 않는다.
 
-ingest 단계에서 relation row에 다음 메타데이터가 부여된다.
-
-- `default_score_multiplier`
-- `relation_model_priority`
-- `retrieval_role`
-
-근거: `legal-pipeline/scripts/embed_qdrant_3collections.py:34`, `:292`
-
-retrieval은 이를 전혀 참조하지 않는다. Qdrant + BM25 RRF, `law_boost(+0.003)`, law context 최소 개수 보강만 수행한다.
-
-근거: `generation/pipeline.py:302`, `retrieval/ranking.py:56`
-
-**영향**
-
-supporting/trace 용도로 설계된 relation 문서가 primary evidence(법령 조문, 판례)와 동등하게 경쟁해 top-k 슬롯을 차지한다.
-
-**수정 방향**
-
-`retrieval_role` 또는 `relation_model_priority` 기준으로 supporting 역할 문서 score에 multiplier를 적용하거나 top-k 내 개수를 제한한다.
-
-**처리 상태: 보류**  
-8차 eval 기준 context_precision이 0.707~0.711로 intent 전반 수렴 중이며 현재 병목으로 확인되지 않음. F1(코퍼스 분리) 해소 후 relation 문서 비중 변화를 재측정한 뒤 재검토.
+처리 상태: **수정 없음 (현 운영 영향 낮음, 구조적 차이는 인지)**
 
 ---
 
-## 4. 심각도 낮음
+### Finding 6. `legal_relation` ranking 메타데이터 미사용
 
-### F6. `law_article.appendix` dense vector가 RAG 경로에서 사용되지 않는다
+재확인 결과:
+- `default_score_multiplier`, `relation_model_priority`, `retrieval_role`는 ingest 시점에 주입되지만 retrieval 파이프라인에 연결되지 않은 미완성 설계 상태다.
+- 원래 의도는 `QUERY_RETRIEVAL_PROFILES`(쿼리 유형별 컬렉션/관계문서 가중치 차등) 연동이다.
+- 운영 eval 9차(2026-04-16)에서는 `legal_relation` 문서가 top-k에 1건도 없어, 현재 미적용으로 인한 순위 왜곡도 관측되지 않았다.
 
-**코드 확인**
+판단:
+- 이번 범위에서 즉시 수정 우선순위는 낮다.
+- 다만 intent 기반 슬롯 분리 방향과 설계 맥락은 일치하므로, 향후 `legal_relation`이 실제 top-k에 진입하기 시작하면 프로필 연동을 재검토한다.
 
-Qdrant `law_article`은 named vector 2개를 보유한다.
-- `body`: 조문 본문
-- `appendix`: 부칙/별표/첨부
-
-근거: `legal-pipeline/scripts/upload/indexing.py:46`
-
-RAG 런타임은 컬렉션당 vector name 하나만 사용한다.
-
-`generation/pipeline.py:231` — `vector_name=(rcfg.qdrant_vector_name_map or {}).get(collection)`  
-기본값: `law_article=body`
-
-**영향**
-
-별표·부칙 기반 질문(최저임금 적용 제외 기준, 산재보험 급여표 등)에서 dense recall 저하.  
-`appendix` 내용은 BM25 fallback에만 의존한다.
-
-**수정 방향**
-
-`appendix` vector를 별도 검색 경로로 추가하거나 `body`와 weighted sum으로 결합하는 방식 검토.  
-`appendix` 질의 비중 파악 선행 필요.
-
-**처리 상태: 미처리 (우선순위 낮음)**
+처리 상태: **보류 (협의 필요)**
 
 ---
 
-### F7. `OPENSEARCH_INDEX`가 단일 문자열로 multi-index path를 처리한다
+### Finding 7. `law_article.appendix` dense vector 실사용성
 
-**코드 확인**
+데이터 재확인:
+1. `has_related_appendix=True`: `50건`
+2. `has_related_appendix=False`: `1932건`
+3. 전체 `1982건` 중 실질 appendix 대상은 약 `2.5%`
+4. appendix vector는 전체에 채워져 있으나 대부분 placeholder 성격
 
-`retrieval/service.py:25`, `generation/pipeline.py:248` — `OPENSEARCH_INDEX`를 단일 `index_name` 문자열로 처리.  
-런타임 환경변수: `OPENSEARCH_INDEX=law_article,legal_case,legal_relation`
+판단:
+- 영향 범위가 좁고, 관련 질의 비중도 낮다.
+- 현재는 BM25 키워드 경로로 대부분 커버 가능하며 eval 쿼리셋에도 appendix 타깃 질문이 없다.
 
-OpenSearch는 쉼표 구분 multi-index path를 허용하므로 동작 자체는 한다.
-
-**영향**
-
-코드상 "단일 인덱스 설정값"과 "복수 인덱스 path"가 혼용돼 유지보수 혼란 요소가 된다.
-
-**수정 방향**
-
-`OPENSEARCH_INDEX`를 리스트로 파싱해 명시적으로 multi-index를 지원하도록 수정.
-
-**처리 상태: 미처리 (우선순위 낮음)**
+처리 상태: **조치 불필요 (현 시점 우선순위 낮음)**
 
 ---
 
-## 5. 처리 현황 요약
+### 부가 관찰. `OPENSEARCH_INDEX` 단일 문자열/멀티 인덱스 혼용
 
-| # | 내용 | 심각도 | 처리 상태 |
-|---|------|--------|-----------|
-| F1 | `legal_relation` 코퍼스 Qdrant·OpenSearch 분리 | 높음 | 미처리 (인프라 결정 필요) |
-| F2 | 규범형 질의 법령 우선 retrieval 미작동 | 높음 | 부분 처리 (`case_law` 완료, `normative` 미완) |
-| — | `article_no` retrieval 미반영 | 높음 | **처리 완료** (제거, `ac90774`) |
-| F3 | Qdrant `law_names` soft filter | 중간 | 미처리 |
-| F4 | duplicate suffix ingest·retrieval 불일치 | 중간 | 미처리 |
-| F5 | `legal_relation` ranking 메타데이터 미활용 | 중간 | 보류 (F1 해소 후 재검토) |
-| F6 | `law_article.appendix` vector 미사용 | 낮음 | 미처리 |
-| F7 | `OPENSEARCH_INDEX` 단일 문자열 처리 | 낮음 | 미처리 |
+재확인 결과 세부 문제:
+1. 타입 혼란: `opensearch_index: str`인데 실제 사용은 `"a,b,c"`
+2. `urllib.parse.quote`가 쉼표를 `%2C`로 인코딩하며 우연히 동작
+
+판단:
+- 기능은 동작했지만 유지보수 혼란 요소가 맞다.
+
+적용한 해결:
+- multi-index path 사용 의도를 코드/타입 의미에 맞게 정리해 혼란 요소 제거.
+
+처리 상태: **수정 완료**
 
 ---
 
-## 6. 결론
+## 3. 처리 현황 요약
 
-`article_no` 제거 외에 처리 완료된 항목은 없다. F2는 `case_law` 영역만 부분 개선됐다.
+| 항목 | 결론 | 상태 |
+|---|---|---|
+| Finding 1 (`legal_relation` 분리 운영) | 실제로 동일 코퍼스 운영 확인, RRF 전제 유효 | 수정 없음 |
+| Finding 2 (규범형 법령 우선 미작동) | 동등 경쟁 구조 문제 확인, normative 슬롯 분리 도입 | 수정 완료 |
+| Finding 3 (`article_no` 미사용) | 미사용 필드/예시 제거가 타당 | 수정 완료 |
+| Finding 4 (duplicate suffix 불일치) | 레거시 패턴이며 실데이터 영향 없음 | 수정 없음 |
+| Finding 5 (Qdrant soft filter) | 구조적 차이는 사실이나 현 운영 영향 제한적 | 수정 없음 |
+| Finding 6 (`legal_relation` 메타 미사용) | 미완성 설계이나 현재 지표 영향 미관측 | 보류 |
+| Finding 7 (`appendix` dense 미사용) | 대상 비중 매우 낮아 우선순위 낮음 | 조치 불필요 |
+| 부가 관찰 (`OPENSEARCH_INDEX`) | 동작은 하나 타입/의미 혼란 존재 | 수정 완료 |
 
-8차 eval 기준으로 즉시 효과가 기대되는 순서:
+---
 
-1. **F4 — duplicate suffix 정규식 수정**: 변경 범위가 한 줄 수준이며 중복 청크 과대표집을 직접 차단한다.
-2. **F3 — Qdrant law_names hard filter 전환**: OpenSearch와 필터 일관성 확보, law filter precision 개선 기대.
-3. **F2 — normative retrieval 추가 조정**: law_hit 0.600 개선의 핵심 방향.
-4. **F1 — legal_relation 코퍼스 단일화**: 외부 협의 필요하나 RRF 융합 신뢰성 회복을 위한 근본 조치.
+## 4. 결론
+
+초기 보고서에서 가장 크게 제기됐던 `legal_relation` 코퍼스 분리 문제는 재검증 결과 사실이 아니며, 현재 `100.72.14.114` 기준 두 저장소는 동일 코퍼스로 운영 중이다.  
+실제 개선이 필요한 핵심은 규범형 질의에서의 법령 우선성 확보였고, 이번 작업에서 intent 기반 슬롯 분리(`normative_law_ratio`)로 구조적 보완을 적용했다.

@@ -161,7 +161,7 @@ class RagPipeline:
                     qdrant_vector_name_map=vector_name_map or None,
                     qdrant_api_key=os.getenv("QDRANT_API_KEY") or None,
                     opensearch_url=os.getenv("OPENSEARCH_URL", ""),
-                    opensearch_index=os.getenv("OPENSEARCH_INDEX", ""),
+                    opensearch_indices=[i.strip() for i in os.getenv("OPENSEARCH_INDEX", "").split(",") if i.strip()],
                     opensearch_api_key=os.getenv("OPENSEARCH_API_KEY") or None,
                     opensearch_username=os.getenv("OPENSEARCH_USERNAME") or None,
                     opensearch_password=os.getenv("OPENSEARCH_PASSWORD") or None,
@@ -256,7 +256,7 @@ class RagPipeline:
             return search_bm25(
                 question, candidate_k,
                 opensearch_url=rcfg.opensearch_url,
-                index_name=rcfg.opensearch_index,
+                index_name=rcfg.opensearch_indices,
                 timeout=rcfg.timeout,
                 api_key=rcfg.opensearch_api_key,
                 username=rcfg.opensearch_username,
@@ -275,7 +275,7 @@ class RagPipeline:
         )
         opensearch_span = start_span(
             retrieval_span, "opensearch",
-            input={"index": rcfg.opensearch_index, "candidate_k": candidate_k},
+            input={"index": rcfg.opensearch_indices, "candidate_k": candidate_k},
         )
         qdrant_futures = [
             self._executor.submit(_qdrant_task, col)

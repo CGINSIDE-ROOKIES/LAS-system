@@ -15,7 +15,7 @@ class RetrievalConfig:
     qdrant_url: str
     qdrant_collections: list[str]
     opensearch_url: str
-    opensearch_index: str
+    opensearch_indices: list[str]
     qdrant_vector_name_map: dict[str, str] | None = None  # 컬렉션별 named vector 매핑
     qdrant_api_key: str | None = None
     opensearch_api_key: str | None = None
