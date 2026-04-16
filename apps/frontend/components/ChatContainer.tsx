@@ -4,8 +4,9 @@ import { MessageBubble, ChatMessage } from "./MessageBubble";
 import { Button } from "@/components/ui/button";
 import { askStream } from "@/lib/api-client";
 import { QA_STREAM_TIMEOUT_MS, sseErrorMessage, streamTransportErrorMessage } from "@/lib/errors";
-import { SquarePen, Scale } from "lucide-react";
+import { SquarePen, Scale, ChevronLeft, ChevronRight } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
 
 const exampleQuestions = [
   "근로계약서 작성 시 필수 기재사항은?",
@@ -13,6 +14,97 @@ const exampleQuestions = [
   "하도급 계약에서 위법 소지가 있는 조항은?",
   "기간제 근로자 계약 시 주의사항은?",
 ];
+
+function ScrollableChips({
+  questions,
+  onSelect,
+  disabled = false,
+  className,
+}: {
+  questions: string[];
+  onSelect: (q: string) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const update = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setIsOverflowing(el.scrollWidth > el.clientWidth + 1);
+    setCanScrollLeft(el.scrollLeft > 1);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    el.addEventListener("scroll", update, { passive: true });
+    return () => { ro.disconnect(); el.removeEventListener("scroll", update); };
+  }, [update]);
+
+  const scrollTo = (dir: "left" | "right") => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir === "left" ? -(el.clientWidth * 0.6) : el.clientWidth * 0.6, behavior: "smooth" });
+  };
+
+  return (
+    <div className={cn("flex items-center", className)}>
+      <button
+        type="button"
+        onClick={() => scrollTo("left")}
+        tabIndex={canScrollLeft ? 0 : -1}
+        aria-hidden={!canScrollLeft}
+        className={cn(
+          "shrink-0 rounded-full p-1 text-muted-foreground transition-all hover:bg-accent hover:text-foreground",
+          !canScrollLeft && "invisible"
+        )}
+      >
+        <ChevronLeft className="h-4 w-4" />
+      </button>
+
+      <div
+        ref={scrollRef}
+        className={cn(
+          "flex flex-1 flex-nowrap gap-2 overflow-x-scroll py-1 [&::-webkit-scrollbar]:hidden [scrollbar-width:none]",
+          !isOverflowing && "justify-center"
+        )}
+      >
+        {questions.map((q) => (
+          <button
+            key={q}
+            type="button"
+            onClick={() => onSelect(q)}
+            disabled={disabled}
+            className="shrink-0 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-[0_0_10px_rgba(186,230,253,0.25),0_2px_6px_rgba(0,0,0,0.04)] transition-all hover:-translate-y-0.5 hover:shadow-[0_0_14px_rgba(186,230,253,0.4),0_4px_8px_rgba(0,0,0,0.05)] hover:border-primary hover:text-primary disabled:opacity-50"
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => scrollTo("right")}
+        tabIndex={canScrollRight ? 0 : -1}
+        aria-hidden={!canScrollRight}
+        className={cn(
+          "shrink-0 rounded-full p-1 text-muted-foreground transition-all hover:bg-accent hover:text-foreground",
+          !canScrollRight && "invisible"
+        )}
+      >
+        <ChevronRight className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
 
 export type Citation = {
   article: string;  // e.g. "근로기준법 제17조"
@@ -308,22 +400,16 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
             </div>
           </div>
 
-          {/* 추천 질문 칩 — 입력창과 독립된 너비 */}
+          {/* 추천 질문 칩 */}
           <div
-            className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 flex flex-wrap justify-center gap-2"
+            className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 w-full max-w-3xl"
             style={{ animationDelay: "440ms" }}
           >
-            {exampleQuestions.map((q) => (
-              <button
-                key={q}
-                type="button"
-                onClick={() => streamAnswer(q)}
-                disabled={isStreaming}
-                className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-[0_0_10px_rgba(186,230,253,0.25),0_2px_6px_rgba(0,0,0,0.04)] transition-all hover:-translate-y-0.5 hover:shadow-[0_0_14px_rgba(186,230,253,0.4),0_4px_8px_rgba(0,0,0,0.05)] hover:border-primary hover:text-primary disabled:opacity-50"
-              >
-                {q}
-              </button>
-            ))}
+            <ScrollableChips
+              questions={exampleQuestions}
+              onSelect={streamAnswer}
+              disabled={isStreaming}
+            />
           </div>
         </div>
       ) : (
@@ -340,18 +426,10 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
           {/* 선 → 칩 → 입력창 */}
           <div className="shrink-0 border-t border-border px-6 py-4 space-y-3">
             {!isStreaming && (
-              <div className="flex flex-wrap justify-center gap-2">
-                {exampleQuestions.map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    onClick={() => streamAnswer(q)}
-                    className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-[0_0_10px_rgba(186,230,253,0.25),0_2px_6px_rgba(0,0,0,0.04)] transition-all hover:-translate-y-0.5 hover:shadow-[0_0_14px_rgba(186,230,253,0.4),0_4px_8px_rgba(0,0,0,0.05)] hover:border-primary hover:text-primary"
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
+              <ScrollableChips
+                questions={exampleQuestions}
+                onSelect={streamAnswer}
+              />
             )}
             <div className="mx-auto w-full max-w-3xl">
               <QuestionInput onSubmit={streamAnswer} disabled={isStreaming} />
