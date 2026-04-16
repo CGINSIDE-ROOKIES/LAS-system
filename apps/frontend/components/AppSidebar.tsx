@@ -92,7 +92,7 @@ export function AppSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border px-4 py-4">
         {!collapsed && (
-          <div className="flex items-center gap-2">
+          <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
               <Scale className="h-4 w-4 text-primary-foreground" />
             </div>
@@ -100,14 +100,14 @@ export function AppSidebar() {
               <h2 className="text-sm font-semibold text-sidebar-foreground">AI 법무지원시스템</h2>
               <p className="text-xs text-muted-foreground">법령 기반 AI 법무 지원</p>
             </div>
-          </div>
+          </Link>
         )}
         {collapsed && (
-          <div className="flex items-center justify-center">
+          <Link href="/" className="flex items-center justify-center hover:opacity-80 transition-opacity">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
               <Scale className="h-4 w-4 text-primary-foreground" />
             </div>
-          </div>
+          </Link>
         )}
       </SidebarHeader>
 
