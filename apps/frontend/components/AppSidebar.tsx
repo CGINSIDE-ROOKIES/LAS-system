@@ -27,17 +27,37 @@ const menuItems = [
   { title: "설정", icon: Settings, path: "/settings" },
 ];
 
-const LAW_OPTIONS = [
-  "근로기준법",
-  "최저임금법",
-  "기간제 및 단시간근로자 보호 등에 관한 법률",
-  "파견근로자보호 등에 관한 법률",
-  "근로자퇴직급여 보장법",
-  "남녀고용평등과 일·가정 양립 지원에 관한 법률",
-  "산업재해보상보험법",
-  "하도급거래 공정화에 관한 법률",
-  "건설산업기본법",
+const LAW_GROUPS = [
+  {
+    label: "근로계약",
+    laws: [
+      "근로기준법",
+      "기간제 및 단시간근로자 보호 등에 관한 법률",
+      "파견근로자 보호 등에 관한 법률",
+      "최저임금법",
+      "남녀고용평등과 일·가정 양립 지원에 관한 법률",
+      "근로자퇴직급여 보장법",
+    ],
+  },
+  {
+    label: "하도급계약",
+    laws: [
+      "하도급거래 공정화에 관한 법률",
+      "건설산업기본법",
+    ],
+  },
 ];
+
+const LAW_OPTIONS = LAW_GROUPS.flatMap((g) => g.laws);
+
+/** 긴 법령명 약칭 — 툴팁으로 전체명 표시 */
+const LAW_ABBREV: Record<string, string> = {
+  "기간제 및 단시간근로자 보호 등에 관한 법률": "기간제법",
+  "파견근로자 보호 등에 관한 법률": "파견근로자법",
+  "근로자퇴직급여 보장법": "퇴직급여법",
+  "남녀고용평등과 일·가정 양립 지원에 관한 법률": "남녀고용평등법",
+  "하도급거래 공정화에 관한 법률": "하도급법",
+};
 
 export function AppSidebar() {
   const { state } = useSidebar();
@@ -72,7 +92,7 @@ export function AppSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border px-4 py-4">
         {!collapsed && (
-          <div className="flex items-center gap-2">
+          <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
               <Scale className="h-4 w-4 text-primary-foreground" />
             </div>
@@ -80,14 +100,14 @@ export function AppSidebar() {
               <h2 className="text-sm font-semibold text-sidebar-foreground">AI 법무지원시스템</h2>
               <p className="text-xs text-muted-foreground">법령 기반 AI 법무 지원</p>
             </div>
-          </div>
+          </Link>
         )}
         {collapsed && (
-          <div className="flex items-center justify-center">
+          <Link href="/" className="flex items-center justify-center hover:opacity-80 transition-opacity">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
               <Scale className="h-4 w-4 text-primary-foreground" />
             </div>
-          </div>
+          </Link>
         )}
       </SidebarHeader>
 
@@ -138,46 +158,73 @@ export function AppSidebar() {
             </TooltipContent>
           </Tooltip>
         ) : (
-          <div className="px-3 py-3 space-y-2">
-            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <Filter className="h-3 w-3" />
-              <span>법령 필터</span>
+          <div className="px-4 py-4 space-y-2.5">
+            {/* 헤더 */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Filter className="h-3 w-3 text-muted-foreground" />
+                <span className="text-xs font-semibold text-foreground/70">법령 필터</span>
+                {selectedLaws.length > 0 && (
+                  <span className="rounded-full bg-primary px-1.5 py-px text-[10px] font-bold text-primary-foreground">
+                    {selectedLaws.length}
+                  </span>
+                )}
+              </div>
               {selectedLaws.length > 0 && (
                 <button
                   type="button"
                   onClick={() => { setSelectedLaws([]); try { localStorage.removeItem(LAW_FILTER_KEY); } catch {} }}
-                  className="ml-auto text-[10px] text-muted-foreground hover:text-foreground underline"
+                  className="text-[10px] text-muted-foreground underline transition-colors hover:text-foreground"
                 >
                   전체 해제
                 </button>
               )}
             </div>
 
-            <div className="flex flex-wrap gap-1">
-              {LAW_OPTIONS.map((law) => {
-                const selected = selectedLaws.includes(law);
-                return (
-                  <button
-                    key={law}
-                    type="button"
-                    onClick={() => toggleLaw(law)}
-                    className={cn(
-                      "flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition-colors",
-                      selected
-                        ? "border-primary bg-primary/10 text-primary font-medium"
-                        : "border-border text-muted-foreground hover:border-primary hover:text-primary"
-                    )}
-                  >
-                    {law}
-                    {selected && <X className="h-2.5 w-2.5" />}
-                  </button>
-                );
-              })}
+            {/* 그룹별 칩 목록 */}
+            <div className="space-y-2.5">
+              {LAW_GROUPS.map((group) => (
+                <div key={group.label}>
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                    {group.label}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {group.laws.map((law) => {
+                      const selected = selectedLaws.includes(law);
+                      const label = LAW_ABBREV[law] ?? law;
+                      return (
+                        <Tooltip key={law}>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => toggleLaw(law)}
+                              className={cn(
+                                "flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-all",
+                                selected
+                                  ? "border-primary bg-primary/10 text-primary font-medium shadow-sm"
+                                  : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground hover:shadow-sm"
+                              )}
+                            >
+                              {label}
+                              {selected && <X className="h-2.5 w-2.5 shrink-0" />}
+                            </button>
+                          </TooltipTrigger>
+                          {LAW_ABBREV[law] && (
+                            <TooltipContent side="right" className="max-w-[200px] text-xs">
+                              {law}
+                            </TooltipContent>
+                          )}
+                        </Tooltip>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
 
-            {selectedLaws.length === 0 && (
-              <p className="text-[10px] text-muted-foreground/60">미선택 시 전체 법령 검색</p>
-            )}
+            <p className={cn("text-[10px] text-muted-foreground/50", selectedLaws.length > 0 && "invisible")}>
+              미선택 시 전체 법령 검색
+            </p>
           </div>
         )}
       </SidebarFooter>
