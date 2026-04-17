@@ -15,7 +15,7 @@ class RetrievalConfig:
     qdrant_url: str
     qdrant_collections: list[str]
     opensearch_url: str
-    opensearch_index: str
+    opensearch_indices: list[str]
     qdrant_vector_name_map: dict[str, str] | None = None  # 컬렉션별 named vector 매핑
     qdrant_api_key: str | None = None
     opensearch_api_key: str | None = None
@@ -37,5 +37,6 @@ class RetrievalConfig:
     auto_law_boost: bool = True
     law_boost_score: float = 0.003
     min_law_contexts: int = 1
+    normative_law_ratio: float = 0.6  # normative 슬롯 기반 검색 시 law_article 슬롯 비율
     max_content_chars: int = 1200
     max_total_chars: int = 6000

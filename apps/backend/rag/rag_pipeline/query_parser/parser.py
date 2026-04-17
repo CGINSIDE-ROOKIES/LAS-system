@@ -24,12 +24,11 @@ _SYSTEM_PROMPT = """\
 당신은 법률 질문 분석기입니다.
 반드시 아래 형식의 JSON만 출력하세요. 설명, 코드 블록(```), 마크다운 없이 {{ 로 시작하는 순수 JSON만 출력하세요.
 
-{{"law_names": [...], "article_no": "...", "intent": "...", "is_legal": true/false}}
+{{"law_names": [...], "intent": "...", "is_legal": true/false}}
 
 - law_names: 질문에 법령명이 명시된 경우만 추출. 추론하거나 유추하지 말 것. 없으면 []
-- article_no: 조문번호 (예: "제17조", 없으면 "")
 - intent: "normative" | "case_law" | "mixed" | "graph_lookup" | null (법률 무관이면 null)
-  → "graph_lookup": 법령 구조(하위법령/위임/참조 관계) 조회 질의
+  -> "graph_lookup": 법령 구조(하위법령/위임/참조 관계) 조회 질의
 - is_legal: 법률 관련 질문이면 true, 아니면 false
 
 인식 가능한 법령 목록:
@@ -38,8 +37,6 @@ _SYSTEM_PROMPT = """\
 
 _VALID_INTENTS = frozenset({"normative", "case_law", "mixed", "graph_lookup"})
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
-_ARTICLE_PREFIX_RE = re.compile(r"^\d")
-_ARTICLE_NO_RE = re.compile(r"^\s*제?\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*$")
 
 
 @dataclass
@@ -47,7 +44,6 @@ class QueryParseResult:
     """Query Parser 반환값."""
 
     law_names: list[str]
-    article_no: str
     intent: str | None  # "normative" | "case_law" | "mixed" | None
     is_legal: bool
     parser_fallback: bool = False
@@ -143,31 +139,10 @@ def _normalize_law_names(raw: object) -> list[str]:
     return result
 
 
-def _normalize_article_no(raw: object) -> str:
-    """조문번호 표기를 정규화한다 (예: '17조' → '제17조')."""
-    if not isinstance(raw, str):
-        return ""
-    raw = raw.strip()
-    if not raw:
-        return ""
-
-    m = _ARTICLE_NO_RE.match(raw)
-    if m:
-        article_no = m.group(1)
-        sub_no = m.group(2)
-        return f"제{article_no}조의{sub_no}" if sub_no else f"제{article_no}조"
-
-    if _ARTICLE_PREFIX_RE.match(raw):
-        # 최소 정규화 fallback: 숫자로 시작하면 제 접두어를 붙인다.
-        return f"제{raw}"
-    return raw
-
-
 def _parse_llm_output(text: str) -> QueryParseResult:
     data = _extract_json(text)
     return QueryParseResult(
         law_names=_normalize_law_names(data.get("law_names")),
-        article_no=_normalize_article_no(data.get("article_no")),
         intent=data.get("intent") if data.get("intent") in _VALID_INTENTS else None,
         is_legal=bool(data.get("is_legal", True)),
     )
@@ -206,7 +181,6 @@ class QueryParser:
                 self._api_key_missing_warned = True
             return QueryParseResult(
                 law_names=[],
-                article_no="",
                 intent=None,
                 is_legal=True,
                 parser_fallback=True,
@@ -228,8 +202,8 @@ class QueryParser:
             )
             result = _parse_llm_output(raw_text)
             logger.debug(
-                "query_parser: query=%r law_names=%r article_no=%r intent=%r is_legal=%r",
-                query[:80], result.law_names, result.article_no, result.intent, result.is_legal,
+                "query_parser: query=%r law_names=%r intent=%r is_legal=%r",
+                query[:80], result.law_names, result.intent, result.is_legal,
             )
             return result
 
@@ -242,7 +216,6 @@ class QueryParser:
             )
             return QueryParseResult(
                 law_names=[],
-                article_no="",
                 intent=None,
                 is_legal=True,
                 parser_fallback=True,
