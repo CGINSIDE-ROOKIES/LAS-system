@@ -15,7 +15,8 @@ from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
-from ..observability.tracing import end_span, start_generation_span, start_span, start_trace, update_trace
+from ..observability.langfuse_client import score_trace
+from ..observability.tracing import end_span, get_trace_id, start_generation_span, start_span, start_trace, update_trace
 from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, embed_query
 from ..retrieval.context import build_llm_context_rows, build_llm_context_text, truncate_on_semantic_boundary
 from ..retrieval.fusion import fuse_rrf, fuse_rrf_multi
@@ -24,12 +25,21 @@ from ..retrieval.qdrant import search_qdrant_with_vector
 from ..retrieval.ranking import (
     LAW_CONTEXT_CASE_ONLY,
     LAW_CONTEXT_MISSING,
+    LAW_CONTEXT_OK,
     LAW_CONTEXT_SUPPLEMENTED,
     apply_law_boost,
+    rank_rows,
     select_rows_with_law_policy,
 )
 from ..retrieval.service import RetrievalConfig
 from .service import GenerationConfig, GenerationService
+
+_LAW_CONTEXT_SCORES: dict[str, float] = {
+    LAW_CONTEXT_OK: 1.0,
+    LAW_CONTEXT_SUPPLEMENTED: 0.7,
+    LAW_CONTEXT_CASE_ONLY: 0.5,
+    LAW_CONTEXT_MISSING: 0.0,
+}
 
 _NO_RESULT_ANSWER = (
     "관련 법령·판례 문서를 찾지 못했습니다. "
@@ -151,7 +161,7 @@ class RagPipeline:
                     qdrant_vector_name_map=vector_name_map or None,
                     qdrant_api_key=os.getenv("QDRANT_API_KEY") or None,
                     opensearch_url=os.getenv("OPENSEARCH_URL", ""),
-                    opensearch_index=os.getenv("OPENSEARCH_INDEX", ""),
+                    opensearch_indices=[i.strip() for i in os.getenv("OPENSEARCH_INDEX", "").split(",") if i.strip()],
                     opensearch_api_key=os.getenv("OPENSEARCH_API_KEY") or None,
                     opensearch_username=os.getenv("OPENSEARCH_USERNAME") or None,
                     opensearch_password=os.getenv("OPENSEARCH_PASSWORD") or None,
@@ -246,7 +256,7 @@ class RagPipeline:
             return search_bm25(
                 question, candidate_k,
                 opensearch_url=rcfg.opensearch_url,
-                index_name=rcfg.opensearch_index,
+                index_name=rcfg.opensearch_indices,
                 timeout=rcfg.timeout,
                 api_key=rcfg.opensearch_api_key,
                 username=rcfg.opensearch_username,
@@ -265,7 +275,7 @@ class RagPipeline:
         )
         opensearch_span = start_span(
             retrieval_span, "opensearch",
-            input={"index": rcfg.opensearch_index, "candidate_k": candidate_k},
+            input={"index": rcfg.opensearch_indices, "candidate_k": candidate_k},
         )
         qdrant_futures = [
             self._executor.submit(_qdrant_task, col)
@@ -299,20 +309,44 @@ class RagPipeline:
             input={"rrf_k": rcfg.rrf_k, "candidate_k": candidate_k, "auto_law_boost": rcfg.auto_law_boost},
         )
         try:
-            qdrant_rows = fuse_rrf_multi(
-                collection_rows,
-                rrf_k=rcfg.rrf_k,
-                top_k=candidate_k,
-                backend_names=rcfg.qdrant_collections,
-            )
-            # candidate_k 전체를 융합해야 law 보강 시 top_k 바깥 문서를 참조할 수 있음
-            rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
-            rrf_rows = apply_law_boost(
-                rrf_rows,
-                question=question,
-                enabled=rcfg.auto_law_boost,
-                law_boost_score=rcfg.law_boost_score,
-            )
+            _is_normative_slot = intent == "normative" and "law_article" in rcfg.qdrant_collections
+            if _is_normative_slot:
+                # normative 슬롯 기반: law_article 슬롯 상위 고정 + case 슬롯 후순위
+                law_idx = rcfg.qdrant_collections.index("law_article")
+                law_article_rows = collection_rows[law_idx]
+                non_law_col_rows = [r for i, r in enumerate(collection_rows) if i != law_idx]
+                non_law_col_names = [c for i, c in enumerate(rcfg.qdrant_collections) if i != law_idx]
+
+                law_quota = max(1, round(rcfg.top_k * rcfg.normative_law_ratio))
+                case_quota = rcfg.top_k - law_quota
+                logger.info("normative slot: top_k=%d law_quota=%d case_quota=%d", rcfg.top_k, law_quota, case_quota)
+
+                law_slots = rank_rows(law_article_rows)[:law_quota]
+                case_merged = (
+                    fuse_rrf_multi(non_law_col_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k, backend_names=non_law_col_names)
+                    if non_law_col_rows else []
+                )
+                case_fused = fuse_rrf(case_merged, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
+                case_slots = [r for r in case_fused if str(r.get("doc_type", "") or "") != "law"][:case_quota]
+
+                rrf_rows = law_slots + case_slots
+                for i, row in enumerate(rrf_rows, start=1):
+                    row["rank"] = i
+            else:
+                qdrant_rows = fuse_rrf_multi(
+                    collection_rows,
+                    rrf_k=rcfg.rrf_k,
+                    top_k=candidate_k,
+                    backend_names=rcfg.qdrant_collections,
+                )
+                # candidate_k 전체를 융합해야 law 보강 시 top_k 바깥 문서를 참조할 수 있음
+                rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
+                rrf_rows = apply_law_boost(
+                    rrf_rows,
+                    intent=intent,
+                    enabled=rcfg.auto_law_boost,
+                    law_boost_score=rcfg.law_boost_score,
+                )
         except Exception as exc:
             end_span(fusion_span, output={"error": str(exc)}, level="ERROR")
             end_span(retrieval_span, level="ERROR")
@@ -325,19 +359,32 @@ class RagPipeline:
             input={"top_k": rcfg.top_k, "min_law_contexts": rcfg.min_law_contexts},
         )
         try:
-            llm_rows, law_context_status, law_context_added = select_rows_with_law_policy(
-                rrf_rows,
-                top_k=rcfg.top_k,
-                min_law_contexts=rcfg.min_law_contexts,
-                enforce_min_law_contexts=enforce,
-            )
+            if _is_normative_slot:
+                # 슬롯 할당으로 law 우선순위가 보장됨 — 보강 정책 불필요
+                llm_rows = rrf_rows
+                law_count_in = sum(1 for r in llm_rows if str(r.get("doc_type", "") or "") == "law")
+                law_context_status = LAW_CONTEXT_OK if law_count_in > 0 else LAW_CONTEXT_MISSING
+                law_context_added = law_count_in > 0
+            else:
+                llm_rows, law_context_status, law_context_added = select_rows_with_law_policy(
+                    rrf_rows,
+                    top_k=rcfg.top_k,
+                    min_law_contexts=rcfg.min_law_contexts,
+                    enforce_min_law_contexts=enforce,
+                )
         except Exception as exc:
             end_span(ranking_span, output={"error": str(exc)}, level="ERROR")
             end_span(retrieval_span, level="ERROR")
             raise
+        law_count = sum(1 for r in llm_rows if str(r.get("doc_type", "") or "") == "law")
         end_span(
             ranking_span,
-            output={"selected_docs": len(llm_rows), "law_context_status": law_context_status},
+            output={
+                "selected_docs": len(llm_rows),
+                "law_count": law_count,
+                "non_law_count": len(llm_rows) - law_count,
+                "law_context_status": law_context_status,
+            },
             level="DEFAULT",
         )
 
@@ -347,13 +394,19 @@ class RagPipeline:
             max_total_chars=rcfg.max_total_chars,
         )
         context_text = build_llm_context_text(question, contexts, law_context_added)
+        context_chars = len(context_text)
         logger.info(
-            "retrieval 완료: %.2fs | docs=%d | law_context_status=%s",
-            time.perf_counter() - t0, len(llm_rows), law_context_status,
+            "retrieval 완료: %.2fs | docs=%d | law_count=%d | context_chars=%d | law_context_status=%s",
+            time.perf_counter() - t0, len(llm_rows), law_count, context_chars, law_context_status,
         )
         end_span(
             retrieval_span,
-            output={"docs": len(llm_rows), "law_context_status": law_context_status},
+            output={
+                "docs": len(llm_rows),
+                "law_count": law_count,
+                "context_chars": context_chars,
+                "law_context_status": law_context_status,
+            },
             level="DEFAULT",
         )
         return llm_rows, context_text, law_context_status, law_context_added
@@ -446,6 +499,12 @@ class RagPipeline:
                 output={"answer": gen_result.answer, "law_context_status": law_context_status},
                 level="DEFAULT",
             )
+            score_trace(
+                get_trace_id(trace) or "",
+                name="law_context_quality",
+                value=_LAW_CONTEXT_SCORES.get(law_context_status, 0.0),
+                comment=law_context_status,
+            )
             return result
         except Exception:
             update_trace(trace, level="ERROR")
@@ -521,6 +580,12 @@ class RagPipeline:
                 trace,
                 output={"answer": answer, "law_context_status": law_context_status},
                 level="DEFAULT",
+            )
+            score_trace(
+                get_trace_id(trace) or "",
+                name="law_context_quality",
+                value=_LAW_CONTEXT_SCORES.get(law_context_status, 0.0),
+                comment=law_context_status,
             )
         except Exception:
             end_span(gen_span, level="ERROR")

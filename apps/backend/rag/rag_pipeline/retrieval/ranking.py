@@ -15,34 +15,6 @@ LAW_CONTEXT_SUPPLEMENTED = "supplemented"
 LAW_CONTEXT_CASE_ONLY = "case_only"
 
 
-# ── 규범형 질의 판별 ───────────────────────────────────────────────────────────
-
-# 강한 규범형 시그널: 단독으로 등장해도 규범 질의일 가능성이 높다.
-_NORMATIVE_STRONG_KEYWORDS = (
-    "기준", "요건", "의무", "절차", "서면", "신청", "작성",
-    "반드시", "준수", "신고", "제출", "산정", "기산",
-)
-
-# 약한 시그널: 일반 대화에도 자주 등장하므로 법률 문맥과 동시 등장 시에만 사용한다.
-_NORMATIVE_WEAK_KEYWORDS = ("해야", "가능", "조건")
-_LEGAL_CONTEXT_CUES = ("법", "조", "규정", "근로", "하도급", "사업주", "근로자")
-
-
-def is_normative_query(question: str) -> bool:
-    """기준·요건·의무 등 규범형 질의인지 판별한다.
-
-    오탐을 줄이기 위해:
-    - strong 키워드는 단독 매칭 허용
-    - weak 키워드는 법률 문맥 cue와 동시 매칭일 때만 허용
-    """
-    q = question.strip()
-    if not q:
-        return False
-    if any(k in q for k in _NORMATIVE_STRONG_KEYWORDS):
-        return True
-    return any(k in q for k in _NORMATIVE_WEAK_KEYWORDS) and any(c in q for c in _LEGAL_CONTEXT_CUES)
-
-
 def _score_sort_key(row: dict[str, object]) -> tuple[float, str]:
     """score 내림차순 + source_id 오름차순 정렬 키."""
     return (
@@ -56,12 +28,12 @@ def _score_sort_key(row: dict[str, object]) -> tuple[float, str]:
 def apply_law_boost(
     rows: list[dict[str, object]],
     *,
-    question: str,
+    intent: str | None,
     enabled: bool,
     law_boost_score: float,
 ) -> list[dict[str, object]]:
-    """규범형 질의일 때 law 문서 score에 가산점을 부여하고 재정렬한다."""
-    if not enabled or not rows or not is_normative_query(question):
+    """normative intent일 때 law 문서 score에 가산점을 부여하고 재정렬한다."""
+    if not enabled or not rows or intent != "normative":
         return rows
 
     boosted: list[dict[str, object]] = []
