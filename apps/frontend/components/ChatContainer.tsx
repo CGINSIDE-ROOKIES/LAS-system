@@ -2,28 +2,57 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { QuestionInput } from "./QuestionInput";
 import { MessageBubble, ChatMessage } from "./MessageBubble";
 import { Button } from "@/components/ui/button";
-import { askStream } from "@/lib/api-client";
+import { askStream, getSuggestions } from "@/lib/api-client";
 import { QA_STREAM_TIMEOUT_MS, sseErrorMessage, streamTransportErrorMessage } from "@/lib/errors";
 import { SquarePen, Scale, ChevronLeft, ChevronRight } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 
-const exampleQuestions = [
-  "근로계약서 작성 시 필수 기재사항은?",
-  "연장근로수당 지급 기준은?",
-  "하도급 계약에서 위법 소지가 있는 조항은?",
-  "기간제 근로자 계약 시 주의사항은?",
+const QUESTION_POOL = [
+  // 근로계약서 작성
+  "수습 기간 설정 시 법적 요건은?",
+  "경업금지 조항 넣을 수 있나요?",
+  "근로계약서에 반드시 명시할 사항은?",
+  // 해고·계약 종료 리스크
+  "해고 예고 없이 즉시 해고 가능한 경우는?",
+  "기간제 계약 갱신 거절 시 주의사항은?",
+  "수습 중 해고 시 법적 요건은?",
+  "징계해고 유효 요건은?",
+  // 근로시간·임금 설계
+  "연장근로 합의 방법과 한도는?",
+  "재량근로제 도입 요건은?",
+  "성과급을 퇴직금 산정에서 제외할 수 있나요?",
+  // 파견·도급 리스크
+  "도급과 파견 구분 기준은?",
+  "불법파견 판단 기준과 제재는?",
+  "파견 허용 업무 범위는?",
+  // 하도급 계약
+  "하도급 계약서 필수 기재사항은?",
+  "하도급 대금 감액 금지 예외는?",
+  "원사업자가 부담하는 연대책임 범위는?",
+  "기술자료 요구 시 위법 여부는?",
 ];
+
+function pickRandom<T>(arr: T[], n: number): T[] {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, n);
+}
 
 function ScrollableChips({
   questions,
   onSelect,
   disabled = false,
+  loading = false,
   className,
 }: {
   questions: string[];
   onSelect: (q: string) => void;
   disabled?: boolean;
+  loading?: boolean;
   className?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -55,6 +84,16 @@ function ScrollableChips({
     el.scrollBy({ left: dir === "left" ? -(el.clientWidth * 0.6) : el.clientWidth * 0.6, behavior: "smooth" });
   };
 
+  if (loading) {
+    return (
+      <div className={cn("flex items-center justify-center gap-2 py-1", className)}>
+        {["w-28", "w-32", "w-24", "w-28"].map((w, i) => (
+          <div key={i} className={cn("h-7 animate-pulse rounded-full bg-muted", w)} />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className={cn("flex items-center", className)}>
       <button
@@ -73,7 +112,7 @@ function ScrollableChips({
       <div
         ref={scrollRef}
         className={cn(
-          "flex flex-1 flex-nowrap gap-2 overflow-x-scroll py-1 [&::-webkit-scrollbar]:hidden [scrollbar-width:none]",
+          "flex flex-1 flex-nowrap gap-2 overflow-x-scroll px-1 py-1 [&::-webkit-scrollbar]:hidden [scrollbar-width:none]",
           !isOverflowing && "justify-center"
         )}
       >
@@ -117,6 +156,7 @@ interface ChatContainerProps {
 }
 
 const STORAGE_KEY = "las_chat_messages";
+const SUGGESTIONS_KEY = "las_chat_suggestions";
 
 function loadMessages(): ChatMessage[] {
   try {
@@ -143,11 +183,15 @@ type FollowUpContext = { question: string; answer: string };
 export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[] | null>(null);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [defaultQuestions] = useState(() => pickRandom(QUESTION_POOL, 4));
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const followUpContextRef = useRef<FollowUpContext | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
+  const suggestionsGenRef = useRef(0);
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
@@ -166,6 +210,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
         const ctx: FollowUpContext = JSON.parse(raw);
         sessionStorage.removeItem("las_followup_context");
         sessionStorage.removeItem(STORAGE_KEY);
+        sessionStorage.removeItem(SUGGESTIONS_KEY);
         followUpContextRef.current = ctx;
         setMessages([
           { id: "followup-prev-q", role: "user", content: ctx.question, isFollowUpContext: true },
@@ -192,13 +237,21 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
       const stored = loadMessages();
       if (stored.length === 0) return;
       setMessages(stored);
-      // 마지막 답변의 citations 복원 — answerData에 lawName까지 포함돼 저장됨
+      // 마지막 답변의 citations 복원
       const lastAnswer = [...stored].reverse().find(
         (m) => m.role === "assistant" && m.answerData?.citations?.length
       );
       if (lastAnswer?.answerData?.citations) {
         onCitationsChange?.(lastAnswer.answerData.citations as unknown as Citation[]);
       }
+      // suggestions 복원
+      try {
+        const rawSugs = sessionStorage.getItem(SUGGESTIONS_KEY);
+        if (rawSugs) {
+          const parsed = JSON.parse(rawSugs);
+          if (Array.isArray(parsed) && parsed.length > 0) setSuggestions(parsed);
+        }
+      } catch {}
     }
   }, []);
 
@@ -239,6 +292,11 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
     const timeoutId = setTimeout(() => controller.abort("timeout"), QA_STREAM_TIMEOUT_MS);
     const t0 = performance.now();
 
+    setSuggestions(null);
+    setSuggestionsLoading(false);
+    const sugGen = ++suggestionsGenRef.current;
+    let accumulatedContent = "";
+
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       role: "user",
@@ -268,6 +326,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
         }),
       }, controller.signal)) {
         if (event.type === "chunk") {
+          accumulatedContent += event.content;
           setMessages((prev) =>
             prev.map((m) =>
               m.id === aiId
@@ -337,6 +396,9 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
           );
           onCitationsChange?.(parsedCitations);
 
+          const answerText = accumulatedContent
+            .replace(/\n?\[ANSWERABLE:[^\]]+\]\s*$/i, "").trimEnd();
+
           setMessages((prev) =>
             prev.map((m) =>
               m.id === aiId
@@ -358,6 +420,25 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
                 : m
             )
           );
+
+          const isIrrelevant = event.law_context_status === "irrelevant";
+          const isUnanswerable = /\[ANSWERABLE:no\]/i.test(accumulatedContent);
+          if (isIrrelevant || isUnanswerable) return;
+
+          setSuggestionsLoading(true);
+          getSuggestions({ question: userQuestion, answer: answerText })
+            .then((sugs) => {
+              if (suggestionsGenRef.current !== sugGen) return;
+              const next = sugs.length > 0 ? sugs : null;
+              setSuggestions(next);
+              try {
+                if (next) sessionStorage.setItem(SUGGESTIONS_KEY, JSON.stringify(next));
+                else sessionStorage.removeItem(SUGGESTIONS_KEY);
+              } catch {}
+            })
+            .finally(() => {
+              if (suggestionsGenRef.current === sugGen) setSuggestionsLoading(false);
+            });
         } else if (event.type === "error") {
           console.error("[LAS:QA] SSE 에러:", event.code, event.error);
           setMessages((prev) =>
@@ -398,6 +479,9 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
     setMessages([]);
     sessionStorage.removeItem(STORAGE_KEY);
     onCitationsChange?.([]);
+    setSuggestions(null);
+    setSuggestionsLoading(false);
+    sessionStorage.removeItem(SUGGESTIONS_KEY);
   }, [onCitationsChange]);
 
   const hasMessages = messages.length > 0;
@@ -464,9 +548,10 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
             style={{ animationDelay: "440ms" }}
           >
             <ScrollableChips
-              questions={exampleQuestions}
+              questions={suggestions ?? defaultQuestions}
               onSelect={streamAnswer}
               disabled={isStreaming}
+              loading={suggestionsLoading}
             />
           </div>
         </div>
@@ -488,10 +573,11 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
 
           {/* 선 → 칩 → 입력창 */}
           <div className="shrink-0 border-t border-border px-6 py-4 space-y-3">
-            {!isStreaming && (
+            {(!isStreaming || suggestionsLoading) && (
               <ScrollableChips
-                questions={exampleQuestions}
+                questions={suggestions ?? defaultQuestions}
                 onSelect={streamAnswer}
+                loading={suggestionsLoading}
               />
             )}
             <div className="mx-auto w-full max-w-3xl">

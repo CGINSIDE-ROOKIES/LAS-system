@@ -398,8 +398,11 @@ def ask_stream(
 
 _SUGGESTIONS_SYSTEM = (
     "당신은 노동법·하도급법 전문 법률 Q&A 어시스턴트입니다. "
-    "사용자의 질문과 답변을 바탕으로 사용자가 이어서 물어볼 만한 후속 질문 3개를 생성합니다. "
-    "반드시 JSON 배열 형식으로만 반환하세요. 예: [\"질문1\", \"질문2\", \"질문3\"]"
+    "사용자의 질문과 답변을 바탕으로 후속 질문 4개를 생성합니다. "
+    "반드시 아래 규칙을 따르세요:\n"
+    "1. 답변에서 실제로 언급된 개념·조건·예외 범위 안에서만 질문을 만드세요. 답변에 없는 내용은 추천하지 마세요.\n"
+    "2. 각 질문은 20자 이내로 간결하게 작성하세요.\n"
+    "3. 반드시 JSON 배열 형식으로만 반환하세요. 예: [\"질문1\", \"질문2\", \"질문3\", \"질문4\"]"
 )
 
 
@@ -408,7 +411,7 @@ def _build_suggestions_prompt(question: str, answer: str, intent: str | None) ->
     return (
         f"질문: {question}{intent_hint}\n\n"
         f"답변:\n{answer}\n\n"
-        "위 대화를 바탕으로 사용자가 이어서 궁금해할 후속 질문 3개를 JSON 배열로 반환하세요."
+        "위 대화를 바탕으로 사용자가 이어서 궁금해할 후속 질문 4개를 JSON 배열로 반환하세요."
     )
 
 
@@ -421,7 +424,7 @@ def _parse_suggestions(raw: str) -> list[str]:
     try:
         result = json.loads(match.group())
         if isinstance(result, list):
-            return [str(s).strip() for s in result if isinstance(s, str) and str(s).strip()][:3]
+            return [str(s).strip() for s in result if isinstance(s, str) and str(s).strip()][:4]
     except json.JSONDecodeError:
         pass
     return []
