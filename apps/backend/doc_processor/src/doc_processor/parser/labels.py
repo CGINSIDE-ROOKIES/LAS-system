@@ -1,30 +1,32 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from document_processor import DocIR
 
 from ..prompts import load_prompt
 from ..state import ParserConfig
-from ..types import ParagraphAnalysis, ParagraphCategory, ParserAnalysis, SplitSuggestion, WorkflowMeta
+from ..parser_types import ParagraphAnalysis, ParagraphCategory, ParserAnalysis, SplitSuggestion, WorkflowMeta
 from .llm_utils import invoke_structured_model
 from .rules import APPENDIX_MARKER_RE, FOOTER_RE, HEADER_KEYWORD_RE, INPUT_RE
 from .selectors import paragraph_position
 
 
 class LabelSplitOp(BaseModel):
-    op: str
+    op: Literal["split_unit"]
     anchor_text: str
     occurrence: int = 1
-    left_label: str
-    right_label: str
+    left_label: ParagraphCategory
+    right_label: ParagraphCategory
 
 
 class LabelReviewOutput(BaseModel):
     unit_id: str
-    status: str
-    label: str
-    candidate_labels: list[str] = Field(default_factory=list)
+    status: Literal["ok", "split_suggested"] = "ok"
+    label: ParagraphCategory
+    candidate_labels: list[ParagraphCategory] = Field(default_factory=list)
     reason: str
     ops: list[LabelSplitOp] = Field(default_factory=list)
 
@@ -123,32 +125,16 @@ def apply_label_reviews(analysis: ParserAnalysis, reviews: dict[str, LabelReview
         if paragraph is None:
             continue
         paragraph.notes.append(f"Label LLM review: {review.reason}")
-        try:
-            paragraph.category = ParagraphCategory(review.label)
-        except ValueError:
-            paragraph.notes.append(f"Unrecognized LLM label '{review.label}', keeping deterministic label.")
-        candidates: list[ParagraphCategory] = []
-        for candidate in review.candidate_labels:
-            try:
-                candidates.append(ParagraphCategory(candidate))
-            except ValueError:
-                continue
-        if candidates:
-            paragraph.candidate_labels = candidates
+        paragraph.category = review.label
+        if review.candidate_labels:
+            paragraph.candidate_labels = list(review.candidate_labels)
         for op in review.ops:
-            if op.op != "split_unit":
-                continue
-            try:
-                left_label = ParagraphCategory(op.left_label)
-                right_label = ParagraphCategory(op.right_label)
-            except ValueError:
-                continue
             paragraph.split_suggestions.append(
                 SplitSuggestion(
                     anchor_text=op.anchor_text,
                     occurrence=op.occurrence,
-                    left_label=left_label,
-                    right_label=right_label,
+                    left_label=op.left_label,
+                    right_label=op.right_label,
                     reason=review.reason,
                 )
             )

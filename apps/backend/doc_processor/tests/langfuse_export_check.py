@@ -11,7 +11,7 @@ from doc_processor import ParserConfig, run_parser
 from doc_processor.env import ensure_local_env_loaded
 from doc_processor.observability import flush_langfuse, langfuse_callback_context
 from doc_processor.observability.langfuse import langfuse_enabled
-from doc_processor.types import RelevanceMode
+from doc_processor.parser_types import RelevanceMode
 
 
 RELEVANT_ENV_KEYS = (

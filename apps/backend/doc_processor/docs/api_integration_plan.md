@@ -38,11 +38,7 @@ The integration plan has three real blockers that should be treated as
 explicit milestones:
 
 1. Runtime mismatch:
-<<<<<<< HEAD
    - `apps/backend/api/pyproject.toml` is pinned to Python `3.13`
-=======
-   - `apps/backend/api/pyproject.toml` is pinned to Python `3.12`
->>>>>>> origin/refactor/api-integration
    - `apps/backend/doc_processor/pyproject.toml` currently requires Python `>=3.13`
 2. PDF ingest gap:
    - `document_processor.DocIR.from_file(..., doc_type="pdf")` is not implemented

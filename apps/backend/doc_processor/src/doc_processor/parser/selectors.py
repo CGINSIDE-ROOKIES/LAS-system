@@ -4,7 +4,7 @@ from statistics import mean
 
 from document_processor import DocIR, ParagraphIR
 
-from ..types import ParagraphAnalysis, WorkflowMeta
+from ..parser_types import ParagraphAnalysis, WorkflowMeta
 
 
 def build_paragraph_analyses(doc: DocIR) -> list[ParagraphAnalysis]:
