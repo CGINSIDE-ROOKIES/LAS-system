@@ -27,14 +27,15 @@ _SYSTEM_PROMPT = """\
 {{"law_names": [...], "intent": "...", "is_legal": true/false}}
 
 - law_names: 질문에 법령명이 명시된 경우만 추출. 추론하거나 유추하지 말 것. 없으면 []
-- intent: "normative" | "case_law" | "mixed" | null (법률 무관이면 null)
+- intent: "normative" | "case_law" | "mixed" | "graph_lookup" | null (법률 무관이면 null)
+  -> "graph_lookup": 법령 구조(하위법령/위임/참조 관계) 조회 질의
 - is_legal: 법률 관련 질문이면 true, 아니면 false
 
 인식 가능한 법령 목록:
 {law_list}
 """
 
-_VALID_INTENTS = frozenset({"normative", "case_law", "mixed"})
+_VALID_INTENTS = frozenset({"normative", "case_law", "mixed", "graph_lookup"})
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
