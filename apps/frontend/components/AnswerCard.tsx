@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { FileText, BookOpen, ExternalLink, ThumbsUp, ThumbsDown, ChevronDown, FilterX, Scale } from "lucide-react";
+import { renderMarkdown } from "@/lib/render-markdown";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -82,11 +83,14 @@ export function AnswerCard({ data, qaId }: AnswerCardProps) {
       )}
       {/* 답변 요약 */}
       <div className="rounded-lg border border-border bg-card p-4">
-        <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-primary">
+        <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-primary">
           <FileText className="h-3.5 w-3.5" />
           답변 요약
         </div>
-        <p className="text-sm font-medium leading-relaxed text-foreground">{data.summary}</p>
+        <div
+          className="prose-answer text-sm leading-relaxed text-foreground"
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(data.summary) }}
+        />
       </div>
 
       {/* 근거 조문 */}

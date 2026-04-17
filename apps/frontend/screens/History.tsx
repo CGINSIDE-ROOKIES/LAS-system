@@ -50,9 +50,11 @@ import { deleteHistoryItem, deleteHistoryItems, getHistory, HistoryItem } from "
 const LIMIT = 20;
 
 function deriveCitations(item: HistoryItem): string[] {
+  const seen = new Set<string>();
   return item.sources
-    .filter((s) => s.doc_type === "law")
-    .map((s) => s.article_no ? `${s.law_name} ${s.article_no}` : s.law_name);
+    .filter((s) => s.doc_type === "law" && s.law_name)
+    .map((s) => s.article_no ? `${s.law_name} ${s.article_no}` : s.law_name)
+    .filter((c) => { if (seen.has(c)) return false; seen.add(c); return true; });
 }
 
 function extractArticleContent(text: string): string {
@@ -252,7 +254,7 @@ const History = () => {
                         placeholder="질문 또는 답변 검색..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-9"
+                        className="pl-9 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-primary/60 focus-visible:[box-shadow:0_0_0_3px_hsl(var(--primary)/0.08),0_0_10px_hsl(var(--primary)/0.12)]"
                       />
                     </div>
 

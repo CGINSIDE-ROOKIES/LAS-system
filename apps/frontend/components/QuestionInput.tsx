@@ -1,13 +1,6 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
-
-const exampleQuestions = [
-  "근로계약서 작성 시 필수 기재사항은?",
-  "연장근로수당 지급 기준은?",
-  "하도급 계약에서 위법 소지가 있는 조항은?",
-  "기간제 근로자 계약 시 주의사항은?",
-];
 
 interface QuestionInputProps {
   onSubmit: (question: string) => void;
@@ -16,6 +9,16 @@ interface QuestionInputProps {
 
 export function QuestionInput({ onSubmit, disabled }: QuestionInputProps) {
   const [value, setValue] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = Math.min(el.scrollHeight, 200);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > 200 ? "auto" : "hidden";
+  }, [value]);
 
   const handleSubmit = () => {
     if (!value.trim() || disabled) return;
@@ -27,6 +30,7 @@ export function QuestionInput({ onSubmit, disabled }: QuestionInputProps) {
     <div className="space-y-3">
       <div className="relative">
         <textarea
+          ref={textareaRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
@@ -35,10 +39,11 @@ export function QuestionInput({ onSubmit, disabled }: QuestionInputProps) {
               handleSubmit();
             }
           }}
-          placeholder="예: 근로계약서 작성 시 필수 기재사항은 무엇인가요?"
+          placeholder="근로계약서 작성 시 필수 기재사항은 무엇인가요?"
           disabled={disabled}
-          className="w-full resize-none rounded-lg border border-border bg-card px-4 py-3 pr-12 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
-          rows={3}
+          rows={1}
+          className="w-full resize-none rounded-lg border border-border bg-card px-4 py-3 pr-12 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary/60 focus:outline-none focus:[box-shadow:0_0_0_3px_hsl(var(--primary)/0.08),0_0_10px_hsl(var(--primary)/0.12)] disabled:opacity-50"
+          style={{ minHeight: "44px", maxHeight: "200px" }}
         />
         <Button
           size="icon"
@@ -48,18 +53,6 @@ export function QuestionInput({ onSubmit, disabled }: QuestionInputProps) {
         >
           <Send className="h-4 w-4" />
         </Button>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {exampleQuestions.map((q) => (
-          <button
-            key={q}
-            onClick={() => onSubmit(q)}
-            disabled={disabled}
-            className="rounded-md border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:opacity-50"
-          >
-            {q}
-          </button>
-        ))}
       </div>
     </div>
   );

@@ -4,7 +4,107 @@ import { MessageBubble, ChatMessage } from "./MessageBubble";
 import { Button } from "@/components/ui/button";
 import { askStream } from "@/lib/api-client";
 import { QA_STREAM_TIMEOUT_MS, sseErrorMessage, streamTransportErrorMessage } from "@/lib/errors";
-import { SquarePen } from "lucide-react";
+import { SquarePen, Scale, ChevronLeft, ChevronRight } from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
+
+const exampleQuestions = [
+  "근로계약서 작성 시 필수 기재사항은?",
+  "연장근로수당 지급 기준은?",
+  "하도급 계약에서 위법 소지가 있는 조항은?",
+  "기간제 근로자 계약 시 주의사항은?",
+];
+
+function ScrollableChips({
+  questions,
+  onSelect,
+  disabled = false,
+  className,
+}: {
+  questions: string[];
+  onSelect: (q: string) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const update = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setIsOverflowing(el.scrollWidth > el.clientWidth + 1);
+    setCanScrollLeft(el.scrollLeft > 1);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    el.addEventListener("scroll", update, { passive: true });
+    return () => { ro.disconnect(); el.removeEventListener("scroll", update); };
+  }, [update]);
+
+  const scrollTo = (dir: "left" | "right") => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir === "left" ? -(el.clientWidth * 0.6) : el.clientWidth * 0.6, behavior: "smooth" });
+  };
+
+  return (
+    <div className={cn("flex items-center", className)}>
+      <button
+        type="button"
+        onClick={() => scrollTo("left")}
+        tabIndex={canScrollLeft ? 0 : -1}
+        aria-hidden={!canScrollLeft}
+        className={cn(
+          "shrink-0 rounded-full p-1 text-muted-foreground transition-all hover:bg-accent hover:text-foreground",
+          !canScrollLeft && "invisible"
+        )}
+      >
+        <ChevronLeft className="h-4 w-4" />
+      </button>
+
+      <div
+        ref={scrollRef}
+        className={cn(
+          "flex flex-1 flex-nowrap gap-2 overflow-x-scroll py-1 [&::-webkit-scrollbar]:hidden [scrollbar-width:none]",
+          !isOverflowing && "justify-center"
+        )}
+      >
+        {questions.map((q) => (
+          <button
+            key={q}
+            type="button"
+            onClick={() => onSelect(q)}
+            disabled={disabled}
+            className="shrink-0 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-[0_0_10px_rgba(186,230,253,0.25),0_2px_6px_rgba(0,0,0,0.04)] transition-all hover:-translate-y-0.5 hover:shadow-[0_0_14px_rgba(186,230,253,0.4),0_4px_8px_rgba(0,0,0,0.05)] hover:border-primary hover:text-primary disabled:opacity-50"
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => scrollTo("right")}
+        tabIndex={canScrollRight ? 0 : -1}
+        aria-hidden={!canScrollRight}
+        className={cn(
+          "shrink-0 rounded-full p-1 text-muted-foreground transition-all hover:bg-accent hover:text-foreground",
+          !canScrollRight && "invisible"
+        )}
+      >
+        <ChevronRight className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
 
 export type Citation = {
   article: string;  // e.g. "근로기준법 제17조"
@@ -90,7 +190,15 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
       }
     } else {
       const stored = loadMessages();
-      if (stored.length > 0) setMessages(stored);
+      if (stored.length === 0) return;
+      setMessages(stored);
+      // 마지막 답변의 citations 복원 — answerData에 lawName까지 포함돼 저장됨
+      const lastAnswer = [...stored].reverse().find(
+        (m) => m.role === "assistant" && m.answerData?.citations?.length
+      );
+      if (lastAnswer?.answerData?.citations) {
+        onCitationsChange?.(lastAnswer.answerData.citations as unknown as Citation[]);
+      }
     }
   }, []);
 
@@ -294,81 +402,104 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
 
   const hasMessages = messages.length > 0;
 
-  if (!hasMessages) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center px-6">
-        <div className="w-full max-w-2xl">
-          {/* Logo / Title */}
-          <div className="mb-8 text-center">
-            {/* Icon with glow ring */}
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mx-auto mb-6 relative w-fit">
-              <div className="absolute inset-0 rounded-2xl bg-primary/20 blur-xl scale-150" />
-              <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/20 shadow-lg">
-                <svg className="h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-                </svg>
-              </div>
-            </div>
-
-            {/* Title */}
-            <h1
-              className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/60 bg-clip-text text-transparent"
-              style={{ animationDelay: "120ms" }}
-            >
-              무엇이 궁금하신가요?
-            </h1>
-
-            {/* Subtitle */}
-            <p
-              className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 text-sm text-muted-foreground leading-relaxed"
-              style={{ animationDelay: "220ms" }}
-            >
-              노동법 및 하도급법 관련 질문에 대해
-              <br />
-              근거 조문과 판례를 함께 제공합니다.
-            </p>
-          </div>
-
-          {/* Input */}
-          <div
-            className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both"
-            style={{ animationDelay: "340ms" }}
-          >
-            <QuestionInput onSubmit={streamAnswer} disabled={isStreaming} />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="flex h-10 shrink-0 items-center justify-end border-b border-border px-4">
-        <Button variant="ghost" size="sm" onClick={handleNewChat} disabled={isStreaming}>
-          <SquarePen className="mr-1.5 h-3.5 w-3.5" />
-          새 대화
-        </Button>
+      {/* 통합 헤더 — 항상 표시 */}
+      <div className="flex h-10 shrink-0 items-center border-b border-border px-2">
+        <SidebarTrigger />
+        {hasMessages && (
+          <div className="ml-auto">
+            <Button variant="ghost" size="sm" onClick={handleNewChat} disabled={isStreaming}>
+              <SquarePen className="mr-1.5 h-3.5 w-3.5" />
+              새 대화
+            </Button>
+          </div>
+        )}
       </div>
 
-      {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-6 py-4">
-        <div className="space-y-4">
-          {messages.map((msg, idx) => (
-            <div key={msg.id}>
-              {idx > 0 && !msg.isFollowUpContext && messages[idx - 1]?.isFollowUpContext && (
-                <div className="mb-4 h-px bg-border/50" />
-              )}
-              <MessageBubble message={msg} />
+      {!hasMessages ? (
+        <div className="flex flex-1 flex-col items-center justify-center px-6">
+          <div className="w-full max-w-3xl">
+            {/* Logo / Title */}
+            <div className="mb-8 text-center">
+              {/* Icon with glow ring */}
+              <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mx-auto mb-6 relative w-fit">
+                <div className="absolute inset-0 rounded-2xl bg-primary/20 blur-xl scale-150" />
+                <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/20 shadow-lg">
+                  <Scale className="h-8 w-8 text-primary" />
+                </div>
+              </div>
+
+              {/* Title */}
+              <h1
+                className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/60 bg-clip-text text-transparent"
+                style={{ animationDelay: "120ms" }}
+              >
+                무엇이 궁금하신가요?
+              </h1>
+
+              {/* Subtitle */}
+              <p
+                className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 text-sm text-muted-foreground leading-relaxed"
+                style={{ animationDelay: "220ms" }}
+              >
+                노동법 및 하도급법 관련 질문에 대해
+                <br />
+                근거 조문과 판례를 함께 제공합니다.
+              </p>
             </div>
-          ))}
-        </div>
-      </div>
 
-      {/* Input */}
-      <div className="shrink-0 border-t border-border px-6 py-4">
-        <QuestionInput onSubmit={streamAnswer} disabled={isStreaming} />
-      </div>
+            {/* Input */}
+            <div
+              className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both"
+              style={{ animationDelay: "340ms" }}
+            >
+              <QuestionInput onSubmit={streamAnswer} disabled={isStreaming} />
+            </div>
+          </div>
+
+          {/* 추천 질문 칩 */}
+          <div
+            className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 w-full max-w-3xl"
+            style={{ animationDelay: "440ms" }}
+          >
+            <ScrollableChips
+              questions={exampleQuestions}
+              onSelect={streamAnswer}
+              disabled={isStreaming}
+            />
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Messages */}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-6 py-4">
+            <div className="space-y-4">
+              {messages.map((msg, idx) => (
+                <div key={msg.id}>
+                  {idx > 0 && !msg.isFollowUpContext && messages[idx - 1]?.isFollowUpContext && (
+                    <div className="mb-4 h-px bg-border/50" />
+                  )}
+                  <MessageBubble message={msg} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 선 → 칩 → 입력창 */}
+          <div className="shrink-0 border-t border-border px-6 py-4 space-y-3">
+            {!isStreaming && (
+              <ScrollableChips
+                questions={exampleQuestions}
+                onSelect={streamAnswer}
+              />
+            )}
+            <div className="mx-auto w-full max-w-3xl">
+              <QuestionInput onSubmit={streamAnswer} disabled={isStreaming} />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
