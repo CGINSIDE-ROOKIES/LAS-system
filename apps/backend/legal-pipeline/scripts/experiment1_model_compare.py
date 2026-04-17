@@ -224,30 +224,35 @@ def run_b_with_model(tc: TestCase, neo4j_client: Any, cfg: ModelConfig) -> RunRe
 # ── 요약 출력 ──────────────────────────────────────────────────────────────────
 
 def _print_summary(all_results: list[RunResult], configs: list[ModelConfig]) -> None:
-    print("\n" + "=" * 80)
+    print("\n" + "=" * 95)
     print("멀티 모델 비교 결과 (방식 B — LLM 자유 Cypher 생성)")
-    print("=" * 80)
-    print(f"{'모델':<28} {'law_name':>10} {'rel_type':>10} {'결과수avg':>10} {'레이턴시avg':>12} {'토큰(in/out)':>14} {'에러'}")
-    print("-" * 80)
+    print("=" * 95)
+    print(f"{'모델':<28} {'success':>9} {'law_name':>10} {'rel_type':>10} {'kw_hit':>8} {'결과수avg':>10} {'레이턴시avg':>12} {'토큰(in/out)':>14} {'에러'}")
+    print("-" * 95)
 
     for cfg in configs:
         rows = [r for r in all_results if r.model_label == cfg.label]
         if not rows:
             continue
         n = len(rows)
+        success_acc = sum(
+            1 for r in rows
+            if r.law_name_correct and r.relation_type_correct and r.keyword_hit and not r.error
+        ) / n
         law_acc = sum(1 for r in rows if r.law_name_correct) / n
         rel_acc = sum(1 for r in rows if r.relation_type_correct) / n
+        kw_acc = sum(1 for r in rows if r.keyword_hit) / n
         avg_cnt = sum(r.results_count for r in rows) / n
         avg_lat = sum(r.latency_ms for r in rows) / n
         total_in = sum(r.input_tokens for r in rows)
         total_out = sum(r.output_tokens for r in rows)
         errs = sum(1 for r in rows if r.error)
         print(
-            f"{cfg.label:<28} {law_acc:>9.0%} {rel_acc:>10.0%} {avg_cnt:>10.1f} "
+            f"{cfg.label:<28} {success_acc:>8.0%} {law_acc:>10.0%} {rel_acc:>10.0%} {kw_acc:>8.0%} {avg_cnt:>10.1f} "
             f"{avg_lat:>10.0f}ms {total_in:>7}in/{total_out:<5}out {errs:>4}"
         )
 
-    print("=" * 80)
+    print("=" * 95)
 
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
@@ -271,7 +276,7 @@ def main() -> None:
         print(f"[{i:02d}/{len(TEST_CASES)}] {tc.query[:50]}")
         for cfg in configs:
             r = run_b_with_model(tc, neo4j, cfg)
-            status = "OK" if (r.law_name_correct and r.relation_type_correct and not r.error) else "FAIL"
+            status = "OK" if (r.law_name_correct and r.relation_type_correct and r.keyword_hit and not r.error) else "FAIL"
             print(
                 f"  {cfg.label:<28} [{status}] law={r.law_name_correct} rel={r.relation_type_correct} "
                 f"cnt={r.results_count} {r.latency_ms:.0f}ms"

@@ -227,8 +227,8 @@ def run_method_b(tc: TestCase, neo4j_client: Any, api_key: str) -> RunResult:
             system_prompt=_SYSTEM_PROMPT_B,
         )
         if usage:
-            input_tokens = usage.get("prompt_tokens", 0) or usage.get("promptTokenCount", 0)
-            output_tokens = usage.get("completion_tokens", 0) or usage.get("candidatesTokenCount", 0)
+            input_tokens = usage.get("input", 0)
+            output_tokens = usage.get("output", 0)
 
         # JSON 파싱
         m = _JSON_RE.search(raw_text)
@@ -370,20 +370,18 @@ Final Answer: (최종 답변)
                 system_prompt=system_prompt,
             )
             if usage:
-                input_tokens += usage.get("prompt_tokens", 0) or usage.get("promptTokenCount", 0)
-                output_tokens += usage.get("completion_tokens", 0) or usage.get("candidatesTokenCount", 0)
+                input_tokens += usage.get("input", 0)
+                output_tokens += usage.get("output", 0)
 
             _logger_c.warning("C raw_text [step=%d] query=%r | %r", _step, tc.query[:40], raw_text[:300])
-
-            if _FINAL_RE.search(raw_text):
-                break
 
             m = _TOOL_CALL_RE.search(raw_text)
             if not m:
                 m = _CYPHER_JSON_RE.search(raw_text)
             if m:
                 try:
-                    tool_input = json.loads(m.group(1))
+                    decoder = json.JSONDecoder()
+                    tool_input, _ = decoder.raw_decode(raw_text, m.start(1))
                     cypher = tool_input.get("cypher", "")
                     params = tool_input.get("params", {})
                     got_law_name = params.get("law_name")
@@ -404,7 +402,11 @@ Final Answer: (최종 답변)
                 except Exception as tool_exc:
                     observation = f"오류: {tool_exc}"
                 conversation += f"\n{raw_text}\nObservation: {observation}"
-            else:
+
+            if _FINAL_RE.search(raw_text):
+                break
+
+            if not m:
                 break
 
     except Exception as exc:
@@ -439,28 +441,33 @@ def _check_keyword_hit(results: list[dict], keywords: list[str]) -> bool:
 
 def _print_summary(all_results: list[RunResult]) -> None:
     methods = ["A_template", "B_llm_free", "C_react_agent"]
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 80)
     print("실험1 결과 요약")
-    print("=" * 70)
-    print(f"{'방식':<16} {'law_name':<10} {'rel_type':<10} {'결과수(avg)':<12} {'레이턴시(avg)':<14} {'에러수'}")
-    print("-" * 70)
+    print("=" * 80)
+    print(f"{'방식':<16} {'success':<10} {'law_name':<10} {'rel_type':<10} {'kw_hit':<8} {'결과수(avg)':<12} {'레이턴시(avg)':<14} {'에러수'}")
+    print("-" * 80)
 
     for method in methods:
         method_results = [r for r in all_results if r.method == method]
         if not method_results:
             continue
         n = len(method_results)
+        success_acc = sum(
+            1 for r in method_results
+            if r.law_name_correct and r.relation_type_correct and r.keyword_hit and not r.error
+        ) / n
         law_acc = sum(1 for r in method_results if r.law_name_correct) / n
         rel_acc = sum(1 for r in method_results if r.relation_type_correct) / n
+        kw_acc = sum(1 for r in method_results if r.keyword_hit) / n
         avg_count = sum(r.results_count for r in method_results) / n
         avg_latency = sum(r.latency_ms for r in method_results) / n
         errors = sum(1 for r in method_results if r.error)
         print(
-            f"{method:<16} {law_acc:.0%}{'':<5} {rel_acc:.0%}{'':<5} "
-            f"{avg_count:>8.1f}    {avg_latency:>8.0f}ms    {errors}"
+            f"{method:<16} {success_acc:.0%}{'':<5} {law_acc:.0%}{'':<5} {rel_acc:.0%}{'':<5} "
+            f"{kw_acc:.0%}{'':<3} {avg_count:>8.1f}    {avg_latency:>8.0f}ms    {errors}"
         )
 
-    print("=" * 70)
+    print("=" * 80)
 
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
@@ -490,7 +497,7 @@ def main() -> None:
         r_c = run_method_c(tc, neo4j, api_key)
 
         for r in (r_a, r_b, r_c):
-            status = "OK" if (r.law_name_correct and r.relation_type_correct and not r.error) else "FAIL"
+            status = "OK" if (r.law_name_correct and r.relation_type_correct and r.keyword_hit and not r.error) else "FAIL"
             print(
                 f"  {r.method:<16} [{status}] law={r.law_name_correct} rel={r.relation_type_correct} "
                 f"cnt={r.results_count} {r.latency_ms:.0f}ms"

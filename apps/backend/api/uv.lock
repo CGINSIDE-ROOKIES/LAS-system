@@ -539,7 +539,9 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "google-genai", marker = "extra == 'eval'", specifier = ">=1.0" },
     { name = "langfuse", specifier = ">=4.0.0" },
+    { name = "openai", marker = "extra == 'eval'", specifier = ">=1.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "ragas", marker = "extra == 'eval'", specifier = ">=0.2" },
 ]
