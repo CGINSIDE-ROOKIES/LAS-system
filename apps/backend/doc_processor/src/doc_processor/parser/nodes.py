@@ -10,7 +10,7 @@ from document_processor import DocIR
 from ..logging_utils import log_info
 from ..observability import traced_structure_analysis_node
 from ..state import WorkflowState
-from ..types import ParserAnalysis, ParserDocumentMeta, ParserResult, RelevanceDecision, RelevanceMode, WorkflowDelta, WorkflowMeta
+from ..parser_types import ParserAnalysis, ParserDocumentMeta, ParserResult, RelevanceDecision, RelevanceMode, WorkflowDelta, WorkflowMeta
 from .boundaries import BoundaryReviewOutput, apply_boundary_reviews, detect_boundary_suspects, review_boundary_suspects_with_llm
 from .converters import attach_parser_metadata_to_doc
 from .labels import LabelReviewOutput, apply_label_reviews, label_paragraphs, review_single_ambiguous_label_with_llm

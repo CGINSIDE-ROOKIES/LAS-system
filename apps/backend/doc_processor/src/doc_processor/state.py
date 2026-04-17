@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from document_processor import DocIR
 
-from .types import ParserAnalysis, ParserResult, RelevanceMode, WorkflowDelta, WorkflowMeta
+from .parser_types import ParserAnalysis, ParserResult, RelevanceMode, WorkflowDelta, WorkflowMeta
 
 
 class ParserConfig(BaseModel):
@@ -35,7 +35,7 @@ class ParserConfig(BaseModel):
     langfuse_metadata: dict[str, str] = Field(default_factory=dict)
     langfuse_environment: str | None = None
     langfuse_release: str | None = None
-    langfuse_flush_at_end: bool = True
+    langfuse_flush_at_end: bool = False
     relevance_model_override: Any | None = Field(default=None, exclude=True)
     boundary_model_override: Any | None = Field(default=None, exclude=True)
     label_model_override: Any | None = Field(default=None, exclude=True)
