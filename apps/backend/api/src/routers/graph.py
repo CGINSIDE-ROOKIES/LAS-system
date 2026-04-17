@@ -60,11 +60,14 @@ def graph_query(
 
     try:
         results = neo4j.run_query(plan.cypher, plan.params)
-    except Neo4jClientError as exc:
-        logger.error("graph_query Neo4j 실패: %s", exc)
+    except Neo4jClientError:
+        logger.error("graph_query Neo4j 실패", exc_info=True)
         return JSONResponse(
             status_code=503,
-            content={"code": "GRAPH_QUERY_ERROR", "error": str(exc)},
+            content={
+                "code": "GRAPH_QUERY_ERROR",
+                "error": "그래프 조회 중 내부 오류가 발생했습니다.",
+            },
         )
 
     return GraphQueryResponse(
