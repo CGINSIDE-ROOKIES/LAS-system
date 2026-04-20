@@ -1109,6 +1109,7 @@ def build_related_doc_records(
     raw_related_base_dir: str | Path = "data/raw/02_related_legal_docs",
     max_chars: int = 1200,
     overlap: int = 150,
+    verified_law_case_relations: list[dict] | None = None,
 ) -> list[dict[str, Any]]:
     from src.export.legal_case_dataset_builder import build_legal_case_records
 
@@ -1116,6 +1117,7 @@ def build_related_doc_records(
         raw_related_base_dir=raw_related_base_dir,
         max_chars=max_chars,
         overlap=overlap,
+        verified_law_case_relations=verified_law_case_relations,
     )
     if records:
         return records
@@ -1133,6 +1135,7 @@ def build_relation_records(
     expanded_base_dir: str | Path = "data/expanded/03_expanded_related_docs",
     normalized_base_dir: str | Path | None = None,
     include_law_to_law_relations: bool = True,
+    include_case_to_case_relations: bool = True,
 ) -> list[dict[str, Any]]:
     from src.export.legal_relation_builder import build_legal_relation_records
     from src.export.law_to_law_relation_builder import build_law_to_law_relation_records
@@ -1149,6 +1152,13 @@ def build_relation_records(
 
     if include_law_to_law_relations and normalized_base_dir is not None:
         records.extend(build_law_to_law_relation_records(normalized_base_dir=normalized_base_dir))
+
+    if include_case_to_case_relations:
+        from src.export.legal_case_relation_builder import build_case_to_case_relation_records
+        records.extend(build_case_to_case_relation_records(
+            raw_related_base_dir=raw_related_base_dir,
+            skip_source_targets={"decc"},
+        ))
 
     records.sort(key=lambda row: str(row.get("id") or ""))
     return records
@@ -1191,22 +1201,35 @@ def build_and_write_datasets(
         include_non_searchable_law_parts=include_non_searchable_law_parts,
         include_appendix_as_law_rows=False,
     )
-    related_records = build_related_doc_records(
-        raw_related_base_dir=raw_related_base_dir,
-        max_chars=max_chars,
-        overlap=overlap,
-    )
+    # relation_records를 먼저 빌드하여 검증된 law_to_case를 legal_case 메타/텍스트에 반영
     relation_records = build_relation_records(
         raw_related_base_dir=raw_related_base_dir,
         expanded_base_dir=expanded_base_dir,
         normalized_base_dir=normalized_base_dir,
         include_law_to_law_relations=include_law_to_law_relations,
     )
+    law_case_rows = [r for r in relation_records if r.get("relation_model") == "law_to_case"]
+    related_records = build_related_doc_records(
+        raw_related_base_dir=raw_related_base_dir,
+        max_chars=max_chars,
+        overlap=overlap,
+        verified_law_case_relations=law_case_rows,
+    )
     case_reference_audit_records = build_case_reference_audit_records(
         raw_related_base_dir=raw_related_base_dir,
     )
 
     appendix_manifest: dict[str, Any] | None = None
+    if normalized_appendix_base_dir is not None and write_legacy_appendix_datasets:
+        from src.export.appendix_dataset_builder import build_and_write_appendix_datasets
+
+        appendix_manifest = build_and_write_appendix_datasets(
+            normalized_appendix_base_dir=normalized_appendix_base_dir,
+            output_dir=output_dir,
+            max_chars=max_chars,
+            overlap=overlap,
+            normalized_appendix_asset_base_dir=normalized_appendix_asset_base_dir,
+        )
 
     article_appendix_manifest: dict[str, Any] | None = None
     if merge_appendices_into_law_article and normalized_appendix_base_dir is not None:
@@ -1250,9 +1273,16 @@ def build_and_write_datasets(
         ),
     }
 
+    case_to_case_count = sum(1 for r in relation_records if r.get("relation_model") == "case_to_case")
+    law_to_law_count = sum(1 for r in relation_records if r.get("relation_model") == "law_to_law")
+    law_to_case_count = sum(1 for r in relation_records if r.get("relation_model") == "law_to_case")
+
     manifest = {
         "legal_corpus_count": len(legal_corpus_records),
         "legal_relations_count": len(relation_records),
+        "law_to_case_count": law_to_case_count,
+        "law_to_law_count": law_to_law_count,
+        "case_to_case_count": case_to_case_count,
         "law_record_count": len(law_records),
         "related_doc_record_count": len(related_records),
         "case_reference_audit_manifest": case_reference_audit_manifest,
