@@ -18,6 +18,7 @@
 from functools import lru_cache
 
 from rag_pipeline.generation.pipeline import RagPipeline
+from rag_pipeline.generation.service import GenerationService
 from rag_pipeline.query_parser import QueryParser
 from rag_pipeline.graph.neo4j_client import Neo4jClient
 from rag_pipeline.graph.cypher_planner import CypherPlanner
@@ -42,6 +43,15 @@ def get_query_parser() -> QueryParser:
 
 
 @lru_cache(maxsize=1)
+def get_generation_service() -> GenerationService:
+    """환경변수 기반으로 GenerationService 인스턴스를 반환한다.
+
+    suggestions 등 경량 LLM 호출에 재사용한다.
+    """
+    return GenerationService.from_env()
+
+
+@lru_cache(maxsize=1)
 def get_neo4j_client() -> Neo4jClient:
     """환경변수 기반으로 Neo4jClient 인스턴스를 반환한다.
 
@@ -63,11 +73,13 @@ def warmup_dependencies() -> None:
     """
     get_rag_pipeline()
     get_query_parser()
+    get_generation_service()
 
 
 def reset_dependency_caches() -> None:
     """테스트/로컬 디버깅용 캐시 초기화 유틸리티."""
     get_rag_pipeline.cache_clear()
     get_query_parser.cache_clear()
+    get_generation_service.cache_clear()
     get_neo4j_client.cache_clear()
     get_cypher_planner.cache_clear()

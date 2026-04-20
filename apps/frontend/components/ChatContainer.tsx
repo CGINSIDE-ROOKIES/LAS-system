@@ -2,28 +2,57 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { QuestionInput } from "./QuestionInput";
 import { MessageBubble, ChatMessage } from "./MessageBubble";
 import { Button } from "@/components/ui/button";
-import { askStream } from "@/lib/api-client";
+import { askStream, getSuggestions } from "@/lib/api-client";
 import { QA_STREAM_TIMEOUT_MS, sseErrorMessage, streamTransportErrorMessage } from "@/lib/errors";
 import { SquarePen, Scale, ChevronLeft, ChevronRight } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 
-const exampleQuestions = [
-  "근로계약서 작성 시 필수 기재사항은?",
-  "연장근로수당 지급 기준은?",
-  "하도급 계약에서 위법 소지가 있는 조항은?",
-  "기간제 근로자 계약 시 주의사항은?",
+const QUESTION_POOL = [
+  // 근로계약서 작성
+  "근로계약서에 꼭 들어가야 하는 항목은 무엇인가요?",
+  "수습 근로자에게도 최저임금이 적용되나요?",
+  "연장근로 수당은 어떻게 계산해야 하나요?",
+  // 해고·계약 종료 리스크
+  "해고 시 사전 통지가 필요하지 않은 예외가 있나요?",
+  "기간제 근로계약을 갱신하지 않을 때 주의할 점은?",
+  "해고예고가 적용되지 않는 경우는 무엇인가요?",
+  "기간제 계약 종료 시 유의사항은?",
+  // 근로시간·임금 설계
+  "연장근로 기준은?",
+  "휴일근로 수당 기준은?",
+  "성과급도 퇴직금에 포함되나요?",
+  // 파견·도급 리스크
+  "도급 계약에서 불법파견이 되는 경우는?",
+  "도급이 파견으로 판단되는 기준은?",
+  "파견이 허용되는 업무 범위는 어디까지인가요?",
+  // 하도급 계약
+  "하도급 계약서 필수 기재 내용은?",
+  "하도급 대금 감액 금지 예외는?",
+  "하도급법 위반 시 손해배상 책임 범위는?",
+  "기술자료 요구가 금지되는 경우는?",
 ];
+
+function pickRandom<T>(arr: T[], n: number): T[] {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, n);
+}
 
 function ScrollableChips({
   questions,
   onSelect,
   disabled = false,
+  loading = false,
   className,
 }: {
   questions: string[];
   onSelect: (q: string) => void;
   disabled?: boolean;
+  loading?: boolean;
   className?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -55,6 +84,16 @@ function ScrollableChips({
     el.scrollBy({ left: dir === "left" ? -(el.clientWidth * 0.6) : el.clientWidth * 0.6, behavior: "smooth" });
   };
 
+  if (loading) {
+    return (
+      <div className={cn("flex items-center justify-center gap-2 py-1", className)}>
+        {["w-28", "w-32", "w-24", "w-28"].map((w, i) => (
+          <div key={i} className={cn("h-7 animate-pulse rounded-full bg-muted", w)} />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className={cn("flex items-center", className)}>
       <button
@@ -73,7 +112,7 @@ function ScrollableChips({
       <div
         ref={scrollRef}
         className={cn(
-          "flex flex-1 flex-nowrap gap-2 overflow-x-scroll py-1 [&::-webkit-scrollbar]:hidden [scrollbar-width:none]",
+          "flex flex-1 flex-nowrap gap-2 overflow-x-scroll px-3 py-0.5 [&::-webkit-scrollbar]:hidden [scrollbar-width:none]",
           !isOverflowing && "justify-center"
         )}
       >
@@ -117,6 +156,7 @@ interface ChatContainerProps {
 }
 
 const STORAGE_KEY = "las_chat_messages";
+const SUGGESTIONS_KEY = "las_chat_suggestions";
 
 function loadMessages(): ChatMessage[] {
   try {
@@ -138,12 +178,20 @@ function loadMessages(): ChatMessage[] {
   }
 }
 
+type FollowUpContext = { question: string; answer: string };
+
 export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[] | null>(null);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [defaultQuestions] = useState(() => pickRandom(QUESTION_POOL, 4));
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const followUpContextRef = useRef<FollowUpContext | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const suggestionsGenRef = useRef(0);
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
@@ -156,15 +204,54 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   }, [messages, scrollToBottom]);
 
   useEffect(() => {
-    const stored = loadMessages();
-    if (stored.length === 0) return;
-    setMessages(stored);
-    // 마지막 답변의 citations 복원 — answerData에 lawName까지 포함돼 저장됨
-    const lastAnswer = [...stored].reverse().find(
-      (m) => m.role === "assistant" && m.answerData?.citations?.length
-    );
-    if (lastAnswer?.answerData?.citations) {
-      onCitationsChange?.(lastAnswer.answerData.citations as unknown as Citation[]);
+    const raw = sessionStorage.getItem("las_followup_context");
+    if (raw) {
+      try {
+        const ctx: FollowUpContext = JSON.parse(raw);
+        sessionStorage.removeItem("las_followup_context");
+        sessionStorage.removeItem(STORAGE_KEY);
+        sessionStorage.removeItem(SUGGESTIONS_KEY);
+        followUpContextRef.current = ctx;
+        setMessages([
+          { id: "followup-prev-q", role: "user", content: ctx.question, isFollowUpContext: true },
+          {
+            id: "followup-prev-a",
+            role: "assistant",
+            content: "",
+            isFollowUpContext: true,
+            answerData: {
+              summary: ctx.answer,
+              citations: [],
+              references: [],
+              isIrrelevant: false,
+              lawContextStatus: "ok",
+              lawFilterActive: false,
+            },
+          },
+        ]);
+      } catch {
+        const stored = loadMessages();
+        if (stored.length > 0) setMessages(stored);
+      }
+    } else {
+      const stored = loadMessages();
+      if (stored.length === 0) return;
+      setMessages(stored);
+      // 마지막 답변의 citations 복원
+      const lastAnswer = [...stored].reverse().find(
+        (m) => m.role === "assistant" && m.answerData?.citations?.length
+      );
+      if (lastAnswer?.answerData?.citations) {
+        onCitationsChange?.(lastAnswer.answerData.citations as unknown as Citation[]);
+      }
+      // suggestions 복원
+      try {
+        const rawSugs = sessionStorage.getItem(SUGGESTIONS_KEY);
+        if (rawSugs) {
+          const parsed = JSON.parse(rawSugs);
+          if (Array.isArray(parsed) && parsed.length > 0) setSuggestions(parsed);
+        }
+      } catch {}
     }
   }, []);
 
@@ -173,6 +260,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   }, []);
 
   useEffect(() => {
+    messagesRef.current = messages;
     if (messages.length === 0) return;
     try {
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
@@ -182,11 +270,32 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   }, [messages]);
 
   const streamAnswer = useCallback(async (userQuestion: string) => {
+    let prevCtx: FollowUpContext | null = null;
+    if (followUpContextRef.current) {
+      prevCtx = followUpContextRef.current;
+      followUpContextRef.current = null;
+    } else {
+      const msgs = messagesRef.current;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (m.role === "assistant" && m.answerData?.summary && !m.isFollowUpContext) {
+          const prevUser = msgs.slice(0, i).reverse().find((u) => u.role === "user" && !u.isFollowUpContext);
+          if (prevUser) prevCtx = { question: prevUser.content, answer: m.answerData.summary };
+          break;
+        }
+      }
+    }
+
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     const timeoutId = setTimeout(() => controller.abort("timeout"), QA_STREAM_TIMEOUT_MS);
     const t0 = performance.now();
+
+    setSuggestions(null);
+    setSuggestionsLoading(false);
+    const sugGen = ++suggestionsGenRef.current;
+    let accumulatedContent = "";
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -208,8 +317,16 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
         if (Array.isArray(parsed) && parsed.length > 0) lawFilter = parsed;
       } catch {}
 
-      for await (const event of askStream({ question: userQuestion, law_filter: lawFilter }, controller.signal)) {
+      for await (const event of askStream({
+        question: userQuestion,
+        law_filter: lawFilter,
+        ...(prevCtx && {
+          previous_question: prevCtx.question,
+          previous_answer: prevCtx.answer,
+        }),
+      }, controller.signal)) {
         if (event.type === "chunk") {
+          accumulatedContent += event.content;
           setMessages((prev) =>
             prev.map((m) =>
               m.id === aiId
@@ -279,6 +396,9 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
           );
           onCitationsChange?.(parsedCitations);
 
+          const answerText = accumulatedContent
+            .replace(/\n?\[ANSWERABLE:[^\]]+\]\s*$/i, "").trimEnd();
+
           setMessages((prev) =>
             prev.map((m) =>
               m.id === aiId
@@ -289,7 +409,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
                     statusMessage: undefined,
                     qa_id: event.qa_id ?? undefined,
                     answerData: {
-                      summary: m.content,
+                      summary: m.content.replace(/\n?\[ANSWERABLE:[^\]]+\]\s*$/i, "").trimEnd(),
                       citations: parsedCitations,
                       references: [],
                       isIrrelevant: event.law_context_status === "irrelevant",
@@ -300,6 +420,25 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
                 : m
             )
           );
+
+          const isIrrelevant = event.law_context_status === "irrelevant";
+          const isUnanswerable = /\[ANSWERABLE:no\]/i.test(accumulatedContent);
+          if (isIrrelevant || isUnanswerable) return;
+
+          setSuggestionsLoading(true);
+          getSuggestions({ question: userQuestion, answer: answerText })
+            .then((sugs) => {
+              if (suggestionsGenRef.current !== sugGen) return;
+              const next = sugs.length > 0 ? sugs : null;
+              setSuggestions(next);
+              try {
+                if (next) sessionStorage.setItem(SUGGESTIONS_KEY, JSON.stringify(next));
+                else sessionStorage.removeItem(SUGGESTIONS_KEY);
+              } catch {}
+            })
+            .finally(() => {
+              if (suggestionsGenRef.current === sugGen) setSuggestionsLoading(false);
+            });
         } else if (event.type === "error") {
           console.error("[LAS:QA] SSE 에러:", event.code, event.error);
           setMessages((prev) =>
@@ -340,6 +479,9 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
     setMessages([]);
     sessionStorage.removeItem(STORAGE_KEY);
     onCitationsChange?.([]);
+    setSuggestions(null);
+    setSuggestionsLoading(false);
+    sessionStorage.removeItem(SUGGESTIONS_KEY);
   }, [onCitationsChange]);
 
   const hasMessages = messages.length > 0;
@@ -406,9 +548,10 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
             style={{ animationDelay: "440ms" }}
           >
             <ScrollableChips
-              questions={exampleQuestions}
+              questions={suggestions ?? defaultQuestions}
               onSelect={streamAnswer}
               disabled={isStreaming}
+              loading={suggestionsLoading}
             />
           </div>
         </div>
@@ -417,18 +560,24 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
           {/* Messages */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-6 py-4">
             <div className="space-y-4">
-              {messages.map((msg) => (
-                <MessageBubble key={msg.id} message={msg} />
+              {messages.map((msg, idx) => (
+                <div key={msg.id}>
+                  {idx > 0 && !msg.isFollowUpContext && messages[idx - 1]?.isFollowUpContext && (
+                    <div className="mb-4 h-px bg-border/50" />
+                  )}
+                  <MessageBubble message={msg} />
+                </div>
               ))}
             </div>
           </div>
 
           {/* 선 → 칩 → 입력창 */}
           <div className="shrink-0 border-t border-border px-6 py-4 space-y-3">
-            {!isStreaming && (
+            {(!isStreaming || suggestionsLoading) && (
               <ScrollableChips
-                questions={exampleQuestions}
+                questions={suggestions ?? defaultQuestions}
                 onSelect={streamAnswer}
+                loading={suggestionsLoading}
               />
             )}
             <div className="mx-auto w-full max-w-3xl">
