@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from document_processor import DocIR
 
 from ..prompts import load_prompt
 from ..state import ParserConfig
-from ..types import RelevanceDecision, RelevanceMode, WorkflowMeta
+from ..parser_types import RelevanceDecision, RelevanceMode, WorkflowMeta
 from .llm_utils import invoke_structured_model
 from .selectors import build_paragraph_analyses, non_empty_paragraphs
 from .rules import match_clause_start
@@ -36,7 +38,7 @@ NEGATIVE_KEYWORDS = (
 
 class RelevanceLLMOutput(BaseModel):
     is_relevant: bool
-    doc_kind: str
+    doc_kind: Literal["contract", "non_contract", "uncertain"]
     reason: str
     confidence: float | None = None
 

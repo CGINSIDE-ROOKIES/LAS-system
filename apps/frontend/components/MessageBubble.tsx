@@ -1,6 +1,37 @@
+import { useState, useRef, useEffect } from "react";
 import { User, Bot } from "lucide-react";
 import { SimpleMarkdown } from "./SimpleMarkdown";
 import { AnswerCard } from "./AnswerCard";
+import { cn } from "@/lib/utils";
+
+/** 받은 텍스트를 한 글자씩 드립해서 타이핑 효과를 만드는 컴포넌트 */
+function TypewriterText({ text }: { text: string }) {
+  const [displayed, setDisplayed] = useState("");
+  const indexRef = useRef(0);
+
+  useEffect(() => {
+    // 이미 따라잡은 경우 아무것도 안 함
+    if (indexRef.current >= text.length) return;
+
+    const id = setInterval(() => {
+      const remaining = text.length - indexRef.current;
+      if (remaining <= 0) { clearInterval(id); return; }
+      // 백로그가 많으면 step 올려서 스트림에 따라잡기
+      const step = remaining > 80 ? 4 : remaining > 20 ? 2 : 1;
+      indexRef.current = Math.min(indexRef.current + step, text.length);
+      setDisplayed(text.slice(0, indexRef.current));
+    }, 16);
+
+    return () => clearInterval(id);
+  }, [text]);
+
+  return (
+    <>
+      {displayed}
+      <span className="animate-cursor-blink ml-px font-light text-primary">|</span>
+    </>
+  );
+}
 
 export interface ChatMessage {
   id: string;
@@ -9,6 +40,7 @@ export interface ChatMessage {
   isStreaming?: boolean;
   statusMessage?: string;
   qa_id?: string;
+  isFollowUpContext?: boolean;
   answerData?: {
     summary: string;
     citations: { article: string; content: string }[];
@@ -26,7 +58,7 @@ interface MessageBubbleProps {
 export function MessageBubble({ message }: MessageBubbleProps) {
   if (message.role === "user") {
     return (
-      <div className="flex justify-end gap-3">
+      <div className={cn("flex justify-end gap-3", message.isFollowUpContext && "opacity-50")}>
         <div className="max-w-[70%] rounded-lg bg-primary px-4 py-3 text-sm text-primary-foreground">
           {message.content}
         </div>
@@ -38,7 +70,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   }
 
   return (
-    <div className="flex gap-3">
+    <div className={cn("flex gap-3", message.isFollowUpContext && "opacity-50")}>
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
         <Bot className="h-4 w-4 text-primary" />
       </div>

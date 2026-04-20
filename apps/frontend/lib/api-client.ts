@@ -79,6 +79,8 @@ export interface AskRequest {
   doc_types?: string[];
   law_filter?: string[];
   answer_detail?: string;
+  previous_question?: string;
+  previous_answer?: string;
 }
 
 export interface RetrievedDoc {
@@ -149,6 +151,25 @@ export async function ask(request: AskRequest, signal?: AbortSignal): Promise<As
   });
   if (!res.ok) await throwApiError(res);
   return res.json();
+}
+
+export async function getSuggestions(request: {
+  question: string;
+  answer: string;
+  intent?: string;
+}): Promise<string[]> {
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/api/v1/qa/suggestions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.suggestions) ? data.suggestions : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function* askStream(

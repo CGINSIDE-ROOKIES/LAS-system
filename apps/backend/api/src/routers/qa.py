@@ -8,9 +8,8 @@
 
 import json
 import logging
+import re
 import time
-
-logger = logging.getLogger(__name__)
 
 import psycopg2.extensions
 from fastapi import APIRouter, Depends, Query
@@ -19,14 +18,29 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from src.db import get_db
-from src.dependencies import get_query_parser, get_rag_pipeline
+from src.dependencies import get_generation_service, get_query_parser, get_rag_pipeline
 from rag_pipeline.generation.pipeline import RagPipeline, build_system_prompt
+from rag_pipeline.generation.service import GenerationService
 from rag_pipeline.observability.tracing import end_span, start_span, start_trace, update_trace
 from rag_pipeline.query_parser import QueryParser
 from src.history import delete_history_item, delete_history_items, get_history, get_history_item, save_feedback, save_qa
 from rag_pipeline.retrieval.common import EmbeddingError, LLMError, LLMTimeoutError, RetrievalError
 
 router = APIRouter(tags=["qa"])
+logger = logging.getLogger(__name__)
+
+_ANSWERABLE_RE = re.compile(r'\n?\[ANSWERABLE:(yes|no)\]\s*$', re.IGNORECASE)
+
+
+def _strip_answerable_flag(answer: str) -> tuple[str, bool]:
+    """답변 끝의 [ANSWERABLE:yes/no] 플래그를 파싱해 제거한다.
+
+    플래그가 없으면 (answer, True) 반환 (하위 호환).
+    """
+    m = _ANSWERABLE_RE.search(answer)
+    if m:
+        return answer[:m.start()].rstrip(), m.group(1).lower() == "yes"
+    return answer, True
 
 _IRRELEVANT_ANSWER = (
     "저는 노동법·하도급법 전문 법률 Q&A 어시스턴트입니다. "
@@ -59,21 +73,25 @@ def _resolve_query_filters(
       1) UI에서 전달한 request.law_filter
       2) QueryParser가 추출한 parsed.law_names
     """
+    parse_query = (
+        f"[이전 질문] {request.previous_question}\n[현재 질문] {request.question}"
+        if request.previous_question
+        else request.question
+    )
     span = start_span(trace, "query_parse", input={"question": request.question})
     try:
-        parsed = parser.parse(request.question)
+        parsed = parser.parse(parse_query)
     except Exception:
         end_span(span, level="ERROR")
         raise
     logger.info(
-        "query_parser: law_names=%r article_no=%r intent=%r is_legal=%r parser_fallback=%r",
-        parsed.law_names, parsed.article_no, parsed.intent, parsed.is_legal, parsed.parser_fallback,
+        "query_parser: law_names=%r intent=%r is_legal=%r parser_fallback=%r",
+        parsed.law_names, parsed.intent, parsed.is_legal, parsed.parser_fallback,
     )
     end_span(
         span,
         output={
             "law_names": parsed.law_names,
-            "article_no": parsed.article_no,
             "intent": parsed.intent,
             "is_legal": parsed.is_legal,
             "parser_fallback": parsed.parser_fallback,
@@ -106,6 +124,8 @@ class AskRequest(BaseModel):
     doc_types: list[str] | None = None
     law_filter: list[str] | None = None
     answer_detail: str | None = None
+    previous_question: str | None = Field(default=None, max_length=2000)
+    previous_answer: str | None = Field(default=None, max_length=4000)
 
     @field_validator("answer_detail")
     @classmethod
@@ -267,23 +287,26 @@ def ask(
         law_names=effective_law_names,
         intent=parsed.intent,
         trace=trace,
+        previous_question=request.previous_question,
+        previous_answer=request.previous_answer,
     )
+    answer, can_answer = _strip_answerable_flag(result.answer)
     qa_id: str | None = None
-    if result.answer.strip():
+    if answer.strip() and can_answer:
         try:
             qa_id = save_qa(
                 conn,
                 question=request.question,
-                answer=result.answer,
+                answer=answer,
                 law_context_status=result.law_context_status,
                 retrieved_docs=result.retrieved_docs,
                 session_id=request.session_id,
             )
         except Exception:
             logger.exception("DB save failed in ask")
-    logger.info("ask 완료: %.2fs | law_context_status=%s", time.perf_counter() - t0, result.law_context_status)
+    logger.info("ask 완료: %.2fs | law_context_status=%s | can_answer=%s", time.perf_counter() - t0, result.law_context_status, can_answer)
     return AskResponse(
-        answer=result.answer,
+        answer=answer,
         retrieved_docs=[RetrievedDoc(**doc) for doc in result.retrieved_docs],
         law_context_status=result.law_context_status,
         qa_id=qa_id,
@@ -331,6 +354,8 @@ def ask_stream(
                 law_names=effective_law_names,
                 intent=parsed.intent,
                 trace=trace,
+                previous_question=request.previous_question,
+                previous_answer=request.previous_answer,
             )
             first_chunk = True
             for chunk in chunks:
@@ -340,10 +365,10 @@ def ask_stream(
                 answer_parts.append(chunk)
                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}\n\n"
 
-            logger.info("ask_stream 완료: %.2fs | law_context_status=%s", time.perf_counter() - t0, meta.law_context_status)
-            answer = "".join(answer_parts)
+            answer, can_answer = _strip_answerable_flag("".join(answer_parts))
+            logger.info("ask_stream 완료: %.2fs | law_context_status=%s | can_answer=%s", time.perf_counter() - t0, meta.law_context_status, can_answer)
             qa_id = None
-            if answer.strip():
+            if answer.strip() and can_answer:
                 try:
                     qa_id = save_qa(
                         conn,
@@ -381,3 +406,65 @@ def ask_stream(
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no"},
     )
+
+
+_SUGGESTIONS_SYSTEM = (
+    "당신은 노동법·하도급법 전문 법률 Q&A 어시스턴트입니다. "
+    "사용자의 질문과 답변을 바탕으로 후속 질문 4개를 생성합니다. "
+    "반드시 아래 규칙을 따르세요:\n"
+    "1. 답변에서 실제로 언급된 개념·조건·예외 범위 안에서만 질문을 만드세요. 답변에 없는 내용은 추천하지 마세요.\n"
+    "2. 각 질문은 20자 이내로 간결하게 작성하세요.\n"
+    "3. 반드시 JSON 배열 형식으로만 반환하세요. 예: [\"질문1\", \"질문2\", \"질문3\", \"질문4\"]"
+)
+
+
+def _build_suggestions_prompt(question: str, answer: str, intent: str | None) -> str:
+    intent_hint = f"\n질문 유형: {intent}" if intent else ""
+    return (
+        f"질문: {question}{intent_hint}\n\n"
+        f"답변:\n{answer}\n\n"
+        "위 대화를 바탕으로 사용자가 이어서 궁금해할 후속 질문 4개를 JSON 배열로 반환하세요."
+    )
+
+
+def _parse_suggestions(raw: str) -> list[str]:
+    """LLM 응답에서 후속 질문 목록을 파싱한다. 파싱 실패 시 빈 리스트 반환."""
+    cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
+    match = re.search(r"\[.*\]", cleaned, re.DOTALL)
+    if not match:
+        return []
+    try:
+        result = json.loads(match.group())
+        if isinstance(result, list):
+            return [str(s).strip() for s in result if isinstance(s, str) and str(s).strip()][:4]
+    except json.JSONDecodeError:
+        pass
+    return []
+
+
+class SuggestionsRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    answer: str = Field(min_length=1, max_length=8000)
+    intent: str | None = None
+
+
+class SuggestionsResponse(BaseModel):
+    suggestions: list[str]
+
+
+@router.post("/suggestions", response_model=SuggestionsResponse)
+def get_suggestions(
+    request: SuggestionsRequest,
+    gen_service: GenerationService = Depends(get_generation_service),
+) -> SuggestionsResponse:
+    """질문·답변을 바탕으로 후속 추천 질문 3개를 생성합니다."""
+    try:
+        result = gen_service.generate(
+            _build_suggestions_prompt(request.question, request.answer, request.intent),
+            system_prompt=_SUGGESTIONS_SYSTEM,
+        )
+        suggestions = _parse_suggestions(result.answer)
+    except Exception:
+        logger.exception("suggestions 생성 실패")
+        suggestions = []
+    return SuggestionsResponse(suggestions=suggestions)

@@ -497,3 +497,22 @@ def build_evidence_preview(
     start = max(0, idx - 40)
     end = min(len(normalized_text), idx + limit)
     return normalized_text[start:end].strip()
+
+
+_DETC_CASE_TYPE_TOKENS = {"헌가", "헌나", "헌다", "헌라", "헌마", "헌바", "헌사", "헌아"}
+
+
+def classify_case_type_from_number(case_number: str) -> str | None:
+    """사건번호에서 사례 유형(prec/detc)을 분류한다.
+
+    헌[가나다라마바사아] → "detc", 기타 유효 토큰 → "prec", 그 외 → None.
+    """
+    match = re.fullmatch(r"(\d{2,4})([가-힣]{1,4})(\d{1,8})", str(case_number or "").strip())
+    if not match:
+        return None
+    token = match.group(2)
+    if token in _DETC_CASE_TYPE_TOKENS:
+        return "detc"
+    if token in ALLOWED_CASE_TYPE_TOKENS:
+        return "prec"
+    return None

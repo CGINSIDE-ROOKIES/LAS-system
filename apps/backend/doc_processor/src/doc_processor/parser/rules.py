@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterable
 
-from ..types import NumberingLevel
+from ..parser_types import NumberingLevel
 
 ARTICLE_RE = re.compile(
     r"^\s*제\s*(?P<number>\d+)\s*조(?:의\s*(?P<subnumber>\d+))?\s*(?:[(:（](?P<title>[^)）]{1,120})[)）])?",

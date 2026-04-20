@@ -8,6 +8,11 @@ foundation:
 - config/result surface: `ParserConfig`, `parser_analysis`, `parser_result`
 - document metadata: `paragraph.meta.parser`, `working_doc.meta.parser_doc`
 
+For LLM and tool-call integration, use
+[llm_tool_api.md](/home/maxjo/Work/LAS-system/apps/backend/doc_processor/docs/llm_tool_api.md).
+That guide documents the compact request/response surface built on top of the
+parser internals and the separate edit engine.
+
 Current parser package/code surface:
 
 - package directory: `src/doc_processor/parser`
@@ -90,7 +95,7 @@ Document-level parser metadata should live at:
 - split review only covers boundary corrections, not full paragraph restructuring
 - clause-level risk review is not part of the parser stage yet
 - pause/resume human review is not part of the graph yet
-- native source-document write-back is not implemented in this package yet
+- native source-document write-back exists through `doc_processor.api` and `doc_processor.edit_engine`, but only for `docx`/`hwp`/`hwpx`
 - PDF should be treated as a suggestion-only format until a dedicated ingest path exists
 
 ## Prior Reference Implementation
