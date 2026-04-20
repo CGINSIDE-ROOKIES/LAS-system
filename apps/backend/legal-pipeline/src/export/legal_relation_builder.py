@@ -496,7 +496,8 @@ def _dedup_family_search_hits(rows: list[dict[str, Any]]) -> list[dict[str, Any]
             continue
         case_id = str(row.get("canonical_case_id") or row.get("canonical_id") or "").strip()
         root_uid = str(row.get("root_law_uid") or "").strip()
-        key = (case_id, root_uid)
+        root_law_name = str(row.get("root_law_name") or "").strip()
+        key = (case_id, root_uid if root_uid else root_law_name)
         search_hit_only.setdefault(key, []).append(row)
 
     for group_rows in search_hit_only.values():
