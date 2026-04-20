@@ -11,21 +11,6 @@ import logging
 import re
 import time
 
-logger = logging.getLogger(__name__)
-
-_ANSWERABLE_RE = re.compile(r'\n?\[ANSWERABLE:(yes|no)\]\s*$', re.IGNORECASE)
-
-
-def _strip_answerable_flag(answer: str) -> tuple[str, bool]:
-    """답변 끝의 [ANSWERABLE:yes/no] 플래그를 파싱해 제거한다.
-
-    플래그가 없으면 (answer, True) 반환 (하위 호환).
-    """
-    m = _ANSWERABLE_RE.search(answer)
-    if m:
-        return answer[:m.start()].rstrip(), m.group(1).lower() == "yes"
-    return answer, True
-
 import psycopg2.extensions
 from fastapi import APIRouter, Depends, Query
 from fastapi import HTTPException
@@ -42,6 +27,20 @@ from src.history import delete_history_item, delete_history_items, get_history, 
 from rag_pipeline.retrieval.common import EmbeddingError, LLMError, LLMTimeoutError, RetrievalError
 
 router = APIRouter(tags=["qa"])
+logger = logging.getLogger(__name__)
+
+_ANSWERABLE_RE = re.compile(r'\n?\[ANSWERABLE:(yes|no)\]\s*$', re.IGNORECASE)
+
+
+def _strip_answerable_flag(answer: str) -> tuple[str, bool]:
+    """답변 끝의 [ANSWERABLE:yes/no] 플래그를 파싱해 제거한다.
+
+    플래그가 없으면 (answer, True) 반환 (하위 호환).
+    """
+    m = _ANSWERABLE_RE.search(answer)
+    if m:
+        return answer[:m.start()].rstrip(), m.group(1).lower() == "yes"
+    return answer, True
 
 _IRRELEVANT_ANSWER = (
     "저는 노동법·하도급법 전문 법률 Q&A 어시스턴트입니다. "
