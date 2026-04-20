@@ -113,7 +113,7 @@ function ScrollableChips({
       <div
         ref={scrollRef}
         className={cn(
-          "flex flex-1 flex-nowrap gap-2 overflow-x-scroll px-3 py-0.5 [&::-webkit-scrollbar]:hidden [scrollbar-width:none]",
+          "flex flex-1 flex-nowrap gap-2 overflow-x-scroll py-0.5 [&::-webkit-scrollbar]:hidden [scrollbar-width:none]",
           !isOverflowing && "justify-center"
         )}
       >
@@ -123,7 +123,7 @@ function ScrollableChips({
             type="button"
             onClick={() => onSelect(q)}
             disabled={disabled}
-            className="shrink-0 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-[0_0_10px_rgba(186,230,253,0.25),0_2px_6px_rgba(0,0,0,0.04)] transition-all hover:-translate-y-0.5 hover:shadow-[0_0_14px_rgba(186,230,253,0.4),0_4px_8px_rgba(0,0,0,0.05)] hover:border-primary hover:text-primary disabled:opacity-50"
+            className="shrink-0 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-[0_0_10px_rgba(186,230,253,0.25),0_2px_6px_rgba(0,0,0,0.04)] transition-all hover:-translate-y-0.5 hover:shadow-[0_0_14px_rgba(186,230,253,0.4),0_4px_8px_rgba(0,0,0,0.05)] hover:border-primary hover:text-primary disabled:opacity-50 first:ml-3 last:mr-3"
           >
             {q}
           </button>
@@ -551,17 +551,19 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
           </div>
 
           {/* 추천 질문 칩 */}
-          <div
-            className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 w-full max-w-3xl"
-            style={{ animationDelay: "440ms" }}
-          >
-            <ScrollableChips
-              questions={suggestions ?? defaultQuestions}
-              onSelect={streamAnswer}
-              disabled={isStreaming}
-              loading={suggestionsLoading}
-            />
-          </div>
+          {settings.showFollowUpQuestions && (
+            <div
+              className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 w-full max-w-3xl"
+              style={{ animationDelay: "440ms" }}
+            >
+              <ScrollableChips
+                questions={suggestions ?? defaultQuestions}
+                onSelect={streamAnswer}
+                disabled={isStreaming}
+                loading={suggestionsLoading}
+              />
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -581,7 +583,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
 
           {/* 선 → 칩 → 입력창 */}
           <div className="shrink-0 border-t border-border px-6 py-4 space-y-3">
-            {(!isStreaming || suggestionsLoading) && (
+            {settings.showFollowUpQuestions && (!isStreaming || suggestionsLoading) && (
               <ScrollableChips
                 questions={suggestions ?? defaultQuestions}
                 onSelect={streamAnswer}
