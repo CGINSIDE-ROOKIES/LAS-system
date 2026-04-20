@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTheme } from "next-themes";
-import { defaultSettings, SETTINGS_KEY, type Settings } from "@/hooks/useSettings";
+import { defaultSettings, loadSettings, saveSettings, type Settings } from "@/hooks/useSettings";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,14 +16,11 @@ const Settings = () => {
   const { theme, setTheme } = useTheme();
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(SETTINGS_KEY);
-      if (raw) setSettings({ ...defaultSettings, ...JSON.parse(raw) });
-    } catch {}
+    setSettings(loadSettings());
   }, []);
 
   const handleSave = () => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    saveSettings(settings);
     toast.success("설정이 저장되었습니다.", {
       description: "변경사항이 적용됩니다.",
     });
