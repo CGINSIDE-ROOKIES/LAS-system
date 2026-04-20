@@ -124,6 +124,7 @@ class AskRequest(BaseModel):
     doc_types: list[str] | None = None
     law_filter: list[str] | None = None
     answer_detail: str | None = None
+    top_k: int | None = Field(default=None, ge=1, le=50)
     previous_question: str | None = Field(default=None, max_length=2000)
     previous_answer: str | None = Field(default=None, max_length=4000)
 
@@ -289,6 +290,7 @@ def ask(
         trace=trace,
         previous_question=request.previous_question,
         previous_answer=request.previous_answer,
+        top_k=request.top_k,
     )
     answer, can_answer = _strip_answerable_flag(result.answer)
     qa_id: str | None = None
@@ -356,6 +358,7 @@ def ask_stream(
                 trace=trace,
                 previous_question=request.previous_question,
                 previous_answer=request.previous_answer,
+                top_k=request.top_k,
             )
             first_chunk = True
             for chunk in chunks:

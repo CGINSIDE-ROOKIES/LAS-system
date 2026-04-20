@@ -232,6 +232,7 @@ class RagPipeline:
         law_names: list[str] | None,
         intent: str | None = None,
         trace: Any | None = None,
+        top_k: int | None = None,
     ) -> tuple[list[dict[str, Any]], str, str, bool]:
         """검색 → 융합 → 순위 조정 → 컨텍스트 빌드.
 
@@ -245,7 +246,8 @@ class RagPipeline:
             (llm_rows, context_text, law_context_status, law_context_added)
         """
         rcfg = self._cfg.retrieval
-        candidate_k = max(rcfg.top_k, rcfg.candidate_k)
+        effective_top_k = top_k or rcfg.top_k
+        candidate_k = max(effective_top_k, rcfg.candidate_k)
 
         if intent == "case_law":
             law_names = None
@@ -366,9 +368,9 @@ class RagPipeline:
                 non_law_col_rows = [r for i, r in enumerate(collection_rows) if i != law_idx]
                 non_law_col_names = [c for i, c in enumerate(rcfg.qdrant_collections) if i != law_idx]
 
-                law_quota = max(1, round(rcfg.top_k * rcfg.normative_law_ratio))
-                case_quota = rcfg.top_k - law_quota
-                logger.info("normative slot: top_k=%d law_quota=%d case_quota=%d", rcfg.top_k, law_quota, case_quota)
+                law_quota = max(1, round(effective_top_k * rcfg.normative_law_ratio))
+                case_quota = effective_top_k - law_quota
+                logger.info("normative slot: top_k=%d law_quota=%d case_quota=%d", effective_top_k, law_quota, case_quota)
 
                 law_slots = rank_rows(law_article_rows)[:law_quota]
                 case_merged = (
@@ -405,7 +407,7 @@ class RagPipeline:
         # ── ranking ────────────────────────────────────────────────────────────
         ranking_span = start_span(
             retrieval_span, "ranking",
-            input={"top_k": rcfg.top_k, "min_law_contexts": rcfg.min_law_contexts},
+            input={"top_k": effective_top_k, "min_law_contexts": rcfg.min_law_contexts},
         )
         try:
             if _is_normative_slot:
@@ -417,7 +419,7 @@ class RagPipeline:
             else:
                 llm_rows, law_context_status, law_context_added = select_rows_with_law_policy(
                     rrf_rows,
-                    top_k=rcfg.top_k,
+                    top_k=effective_top_k,
                     min_law_contexts=rcfg.min_law_contexts,
                     enforce_min_law_contexts=enforce,
                 )
@@ -502,6 +504,7 @@ class RagPipeline:
         trace: Any | None = None,
         previous_question: str | None = None,
         previous_answer: str | None = None,
+        top_k: int | None = None,
     ) -> RagResult:
         """검색 + 생성 파이프라인을 실행하고 최종 결과를 반환한다."""
         if trace is None:
@@ -516,7 +519,7 @@ class RagPipeline:
             )
         try:
             llm_rows, context_text, law_context_status = self._prepare_generation(
-                question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace,
+                question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace, top_k=top_k,
             )
             if not llm_rows:
                 logger.info("run: 검색 결과 0건 — LLM 호출 생략")
@@ -576,6 +579,7 @@ class RagPipeline:
         trace: Any | None = None,
         previous_question: str | None = None,
         previous_answer: str | None = None,
+        top_k: int | None = None,
     ) -> tuple[RagResult, Iterator[str]]:
         """검색 후 생성을 스트리밍으로 반환한다.
 
@@ -594,7 +598,7 @@ class RagPipeline:
             )
         try:
             llm_rows, context_text, law_context_status = self._prepare_generation(
-                question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace,
+                question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace, top_k=top_k,
             )
             if not llm_rows:
                 logger.info("stream: 검색 결과 0건 — LLM 호출 생략")
@@ -678,8 +682,9 @@ class RagPipeline:
         law_names: list[str] | None,
         intent: str | None,
         trace: Any | None = None,
+        top_k: int | None = None,
     ) -> tuple[list[dict[str, Any]], str, str]:
         llm_rows, context_text, law_context_status, _ = self._retrieve(
-            question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace,
+            question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace, top_k=top_k,
         )
         return llm_rows, context_text, law_context_status

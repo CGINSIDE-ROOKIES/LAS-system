@@ -148,8 +148,8 @@ const Settings = () => {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="5">빠른 검색 (기본)</SelectItem>
-                        <SelectItem value="10">일반 검색</SelectItem>
-                        <SelectItem value="20">정밀 검색</SelectItem>
+                        <SelectItem value="8">일반 검색</SelectItem>
+                        <SelectItem value="12">정밀 검색</SelectItem>
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">

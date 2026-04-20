@@ -79,6 +79,7 @@ export interface AskRequest {
   doc_types?: string[];
   law_filter?: string[];
   answer_detail?: string;
+  top_k?: number;
   previous_question?: string;
   previous_answer?: string;
 }

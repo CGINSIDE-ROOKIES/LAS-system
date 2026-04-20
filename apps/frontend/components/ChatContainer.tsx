@@ -370,6 +370,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
       question: userQuestion,
       law_filter: lawFilter,
       answer_detail: settings.answerDetail,
+      top_k: settings.topK,
       ...(prevCtx && {
         previous_question: prevCtx.question,
         previous_answer: prevCtx.answer,
