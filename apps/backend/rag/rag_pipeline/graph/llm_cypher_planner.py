@@ -34,14 +34,15 @@ _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 _FORBIDDEN_KEYWORDS = frozenset({
     "CREATE", "MERGE", "SET", "DELETE", "DETACH",
-    "DROP", "CALL", "LOAD", "APOC",
+    "DROP", "CALL", "LOAD", "APOC", "REMOVE",  # REMOVE 추가 (P1)
 })
 _FORBIDDEN_PATTERNS = [re.compile(r"\bUNION\b", re.IGNORECASE)]
 _ALLOWED_RELS = frozenset({
     "HAS_ARTICLE", "HAS_CHILD_LAW", "DELEGATES_TO_LAW",
     "REFERS_TO_LAW", "REFERS_TO_ARTICLE",
 })
-_REL_RE = re.compile(r"\[:(\w+)\]")
+# `[:TYPE]` 및 `[r:TYPE]`, `[r:TYPE*]` 등 변수·범위 포함 패턴 모두 캡처 (P1)
+_REL_RE = re.compile(r"\[(?:\w+\s*:\s*|:)(\w+)")
 
 
 class CypherGuardError(ValueError):
