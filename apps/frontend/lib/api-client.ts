@@ -78,6 +78,8 @@ export interface AskRequest {
   question: string;
   doc_types?: string[];
   law_filter?: string[];
+  answer_detail?: string;
+  top_k?: number;
   previous_question?: string;
   previous_answer?: string;
 }
@@ -141,11 +143,12 @@ export async function submitFeedback(
   if (!res.ok) await throwApiError(res);
 }
 
-export async function ask(request: AskRequest): Promise<AskResponse> {
+export async function ask(request: AskRequest, signal?: AbortSignal): Promise<AskResponse> {
   const res = await fetch(`${getApiBaseUrl()}/api/v1/qa/ask`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
+    signal,
   });
   if (!res.ok) await throwApiError(res);
   return res.json();

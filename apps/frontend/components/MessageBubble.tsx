@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { User, Bot } from "lucide-react";
+import { SimpleMarkdown } from "./SimpleMarkdown";
 import { AnswerCard } from "./AnswerCard";
 import { cn } from "@/lib/utils";
 
@@ -88,9 +89,17 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               <p className="mt-2 text-sm text-muted-foreground">{message.statusMessage}</p>
             )}
             {message.content && (
-              <p className="mt-2 text-sm text-foreground whitespace-pre-line">
-                <TypewriterText text={message.content} />
-              </p>
+              <SimpleMarkdown
+                classes={{
+                  p: "mt-2 text-sm leading-relaxed text-foreground",
+                  ul: "mt-2 ml-4 list-disc space-y-1 text-sm text-foreground",
+                  ol: "mt-2 ml-4 list-decimal space-y-1 text-sm text-foreground",
+                  h2: "mt-3 mb-1 text-sm font-semibold text-foreground",
+                  h3: "mt-2 mb-1 text-sm font-semibold text-foreground",
+                }}
+              >
+                {message.content}
+              </SimpleMarkdown>
             )}
           </div>
         ) : message.answerData ? (
