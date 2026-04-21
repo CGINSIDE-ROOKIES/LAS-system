@@ -190,7 +190,7 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect }: L
                 <p className="text-xs text-muted-foreground">
                   법령 구조 질의로 해석되지 않았습니다
                   <br />
-                  <span className="text-muted-foreground/60">예: "근로기준법 하위법령은?"</span>
+                  <span className="text-muted-foreground/60">예: &quot;근로기준법 하위법령은?&quot;</span>
                 </p>
               </>
             )}
