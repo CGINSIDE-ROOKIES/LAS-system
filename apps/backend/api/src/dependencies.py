@@ -17,6 +17,8 @@
 
 from functools import lru_cache
 
+from httpx import get
+
 from rag_pipeline.generation.pipeline import RagPipeline
 from rag_pipeline.generation.service import GenerationService
 from rag_pipeline.query_parser import QueryParser
@@ -74,7 +76,10 @@ def warmup_dependencies() -> None:
     get_rag_pipeline()
     get_query_parser()
     get_generation_service()
+    get_cypher_planner()
 
+    neo4j = get_neo4j_client()
+    neo4j.verify_connectivity()
 
 def reset_dependency_caches() -> None:
     """테스트/로컬 디버깅용 캐시 초기화 유틸리티."""
