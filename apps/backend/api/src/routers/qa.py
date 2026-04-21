@@ -52,13 +52,13 @@ _VALID_DOC_TYPES = {"law", "prec", "detc", "decc", "expc"}
 def _stream_error_payload(exc: Exception) -> dict[str, str]:
     """SSE 에러 이벤트용 코드/메시지 매핑."""
     if isinstance(exc, EmbeddingError):
-        return {"type": "error", "code": "EMBEDDING_ERROR", "error": str(exc)}
+        return {"type": "error", "code": "EMBEDDING_ERROR", "error": "검색 임베딩 처리 중 오류가 발생했습니다."}
     if isinstance(exc, LLMTimeoutError):
-        return {"type": "error", "code": "LLM_TIMEOUT", "error": str(exc)}
+        return {"type": "error", "code": "LLM_TIMEOUT", "error": "응답 생성 시간이 초과되었습니다."}
     if isinstance(exc, LLMError):
-        return {"type": "error", "code": "LLM_ERROR", "error": str(exc)}
+        return {"type": "error", "code": "LLM_ERROR", "error": "LLM 응답 생성 중 오류가 발생했습니다."}
     if isinstance(exc, RetrievalError):
-        return {"type": "error", "code": "PIPELINE_ERROR", "error": str(exc)}
+        return {"type": "error", "code": "PIPELINE_ERROR", "error": "검색 파이프라인 오류가 발생했습니다."}
     return {"type": "error", "code": "INTERNAL_ERROR", "error": "서버 오류가 발생했습니다."}
 
 
