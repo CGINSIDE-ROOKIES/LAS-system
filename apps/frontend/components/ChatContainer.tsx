@@ -154,6 +154,8 @@ export type Citation = {
 
 interface ChatContainerProps {
   onCitationsChange?: (citations: Citation[]) => void;
+  onQuestionSubmit?: (question: string) => void;
+  onNewChat?: () => void;
 }
 
 const STORAGE_KEY = "las_chat_messages";
@@ -231,7 +233,7 @@ function parseCitations(retrievedDocs: RetrievedDoc[]): Citation[] {
 
 type FollowUpContext = { question: string; answer: string };
 
-export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
+export function ChatContainer({ onCitationsChange, onQuestionSubmit, onNewChat }: ChatContainerProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [suggestions, setSuggestions] = useState<string[] | null>(null);
@@ -322,6 +324,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   }, [messages]);
 
   const streamAnswer = useCallback(async (userQuestion: string) => {
+    onQuestionSubmit?.(userQuestion);
     let prevCtx: FollowUpContext | null = null;
     if (followUpContextRef.current) {
       prevCtx = followUpContextRef.current;
@@ -481,7 +484,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
       clearTimeout(timeoutId);
       setIsStreaming(false);
     }
-  }, [scrollToBottom, settings]);
+  }, [scrollToBottom, settings, onQuestionSubmit]);
 
   const handleNewChat = useCallback(() => {
     abortRef.current?.abort();
@@ -491,7 +494,8 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
     setSuggestions(null);
     setSuggestionsLoading(false);
     sessionStorage.removeItem(SUGGESTIONS_KEY);
-  }, [onCitationsChange]);
+    onNewChat?.();
+  }, [onCitationsChange, onNewChat]);
 
   const hasMessages = messages.length > 0;
 

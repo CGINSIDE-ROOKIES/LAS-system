@@ -173,6 +173,23 @@ export async function getSuggestions(request: {
   }
 }
 
+// ── Graph ─────────────────────────────────────────────────────────────────────
+
+export type { GraphQueryResponse } from "./graph-types";
+
+export async function queryGraph(query: string, signal?: AbortSignal): Promise<import("./graph-types").GraphQueryResponse> {
+  const res = await fetch(`${getApiBaseUrl()}/api/v1/graph/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+    signal,
+  });
+  if (!res.ok) await throwApiError(res);
+  return res.json();
+}
+
+// ── Q&A stream ────────────────────────────────────────────────────────────────
+
 export async function* askStream(
   request: AskRequest,
   signal?: AbortSignal
