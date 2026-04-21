@@ -206,6 +206,13 @@ class LlmCypherPlanner:
             logger.warning("llm_cypher_planner: GEMINI_API_KEY 미설정, 건너뜀")
             return None
 
+        # LLM 호출 전 사전 필터 — 쿼리에 금지 키워드가 직접 포함된 경우 즉시 차단
+        query_upper = query.upper()
+        for kw in _FORBIDDEN_KEYWORDS:
+            if re.search(rf"\b{kw}\b", query_upper):
+                logger.warning("llm_cypher_planner: pre-filter 차단 (keyword=%s)", kw)
+                return None
+
         raw_text = ""
         try:
             raw_text, _ = generate_answer(
