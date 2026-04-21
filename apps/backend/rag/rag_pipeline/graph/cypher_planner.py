@@ -224,9 +224,10 @@ class CypherPlanner:
                 model=self._cfg.model,
                 api_key=self._cfg.api_key,
                 timeout=self._cfg.timeout,
-                max_tokens=256,
+                max_tokens=2048,
                 temperature=0.0,
                 system_prompt=_SYSTEM_PROMPT,
+                response_mime_type="application/json",
             )
             slots = _parse_slots(raw_text)
             logger.debug(
