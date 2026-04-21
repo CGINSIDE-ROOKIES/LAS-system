@@ -154,6 +154,7 @@ export type Citation = {
 interface ChatContainerProps {
   onCitationsChange?: (citations: Citation[]) => void;
   onQuestionSubmit?: (question: string) => void;
+  onNewChat?: () => void;
 }
 
 const STORAGE_KEY = "las_chat_messages";
@@ -181,7 +182,7 @@ function loadMessages(): ChatMessage[] {
 
 type FollowUpContext = { question: string; answer: string };
 
-export function ChatContainer({ onCitationsChange, onQuestionSubmit }: ChatContainerProps) {
+export function ChatContainer({ onCitationsChange, onQuestionSubmit, onNewChat }: ChatContainerProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [suggestions, setSuggestions] = useState<string[] | null>(null);
@@ -484,7 +485,8 @@ export function ChatContainer({ onCitationsChange, onQuestionSubmit }: ChatConta
     setSuggestions(null);
     setSuggestionsLoading(false);
     sessionStorage.removeItem(SUGGESTIONS_KEY);
-  }, [onCitationsChange]);
+    onNewChat?.();
+  }, [onCitationsChange, onNewChat]);
 
   const hasMessages = messages.length > 0;
 

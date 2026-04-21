@@ -12,10 +12,18 @@ const Index = () => {
   const [citations, setCitations] = useState<Citation[]>([]);
   const [rightTab, setRightTab] = useState<"reference" | "graph">("reference");
   const [graphQuery, setGraphQuery] = useState<string>("");
+  const [graphQuerySeq, setGraphQuerySeq] = useState<number>(0);
   const [selectedGraphNode, setSelectedGraphNode] = useState<GraphNode | null>(null);
 
   const handleQuestionSubmit = (question: string) => {
     setGraphQuery(question);
+    setGraphQuerySeq((s) => s + 1);
+    setSelectedGraphNode(null);
+  };
+
+  const handleNewChat = () => {
+    setGraphQuery("");
+    setGraphQuerySeq(0);
     setSelectedGraphNode(null);
   };
 
@@ -29,6 +37,7 @@ const Index = () => {
             <ChatContainer
               onCitationsChange={setCitations}
               onQuestionSubmit={handleQuestionSubmit}
+              onNewChat={handleNewChat}
             />
           </div>
 
@@ -61,6 +70,7 @@ const Index = () => {
                 <div className="flex h-full flex-col">
                   <LawGraphPanel
                     lastQuery={graphQuery}
+                    queryKey={graphQuerySeq}
                     isActive={rightTab === "graph"}
                     onNodeSelect={setSelectedGraphNode}
                   />

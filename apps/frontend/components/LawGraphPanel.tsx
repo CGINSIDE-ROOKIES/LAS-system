@@ -9,6 +9,7 @@ import type { GraphNode, LawGraphData } from "@/lib/graph-types";
 
 interface LawGraphPanelProps {
   lastQuery: string;
+  queryKey: number;
   isActive: boolean;
   onNodeSelect: (node: GraphNode | null) => void;
 }
@@ -73,18 +74,18 @@ function buildVisDatasets(graphData: LawGraphData) {
   };
 }
 
-export function LawGraphPanel({ lastQuery, isActive, onNodeSelect }: LawGraphPanelProps) {
+export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect }: LawGraphPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const networkRef = useRef<Network | null>(null);
   const [state, setState] = useState<PanelState>("idle");
   const [graphData, setGraphData] = useState<LawGraphData | null>(null);
-  const lastSuccessQuery = useRef<string>("");  // 성공한 쿼리만 기록
-  const requestToken = useRef<number>(0);       // 요청 순서 토큰
+  const lastSuccessKey = useRef<number>(-1);  // 성공한 queryKey만 기록
+  const requestToken = useRef<number>(0);     // 요청 순서 토큰
   const abortRef = useRef<AbortController | null>(null);
 
-  // 그래프 탭 활성화 + 새 질문이 있을 때 API 호출
+  // 그래프 탭 활성화 + 새 질문(queryKey 변경)이 있을 때 API 호출
   useEffect(() => {
-    if (!isActive || !lastQuery || lastQuery === lastSuccessQuery.current) return;
+    if (!isActive || !lastQuery || queryKey === lastSuccessKey.current) return;
 
     // 이전 요청 중단
     abortRef.current?.abort();
@@ -96,7 +97,7 @@ export function LawGraphPanel({ lastQuery, isActive, onNodeSelect }: LawGraphPan
     setGraphData(null);
     onNodeSelect(null);
 
-    queryGraph(lastQuery)
+    queryGraph(lastQuery, controller.signal)
       .then((resp) => {
         if (token !== requestToken.current || controller.signal.aborted) return;
         const data = toGraphData(resp);
@@ -104,7 +105,7 @@ export function LawGraphPanel({ lastQuery, isActive, onNodeSelect }: LawGraphPan
           setState("empty");
           return;
         }
-        lastSuccessQuery.current = lastQuery;  // 성공 시에만 기록
+        lastSuccessKey.current = queryKey;  // 성공 시에만 기록
         setGraphData(data);
         setState("success");
       })
@@ -118,7 +119,7 @@ export function LawGraphPanel({ lastQuery, isActive, onNodeSelect }: LawGraphPan
       });
 
     return () => { controller.abort(); };
-  }, [isActive, lastQuery, onNodeSelect]);
+  }, [isActive, queryKey, lastQuery, onNodeSelect]);
 
   // graphData가 바뀔 때 vis-network 렌더링
   useEffect(() => {
