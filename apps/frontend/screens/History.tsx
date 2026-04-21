@@ -46,6 +46,7 @@ import { format, addDays } from "date-fns";
 import { ko } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { deleteHistoryItem, deleteHistoryItems, getHistory, HistoryItem } from "@/lib/api-client";
+import { SimpleMarkdown } from "@/components/SimpleMarkdown";
 
 const LIMIT = 20;
 
@@ -421,8 +422,8 @@ const History = () => {
                                 <CardContent className="space-y-4 p-4">
                                   <div className="space-y-2">
                                     <h4 className="text-sm font-medium text-foreground">AI 답변</h4>
-                                    <div className="whitespace-pre-wrap rounded-lg bg-muted/50 p-4 text-sm text-foreground">
-                                      {item.answer}
+                                    <div className="rounded-lg bg-muted/50 p-4 text-sm text-foreground">
+                                      <SimpleMarkdown>{item.answer}</SimpleMarkdown>
                                     </div>
                                   </div>
 

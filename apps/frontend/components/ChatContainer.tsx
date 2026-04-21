@@ -2,11 +2,12 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { QuestionInput } from "./QuestionInput";
 import { MessageBubble, ChatMessage } from "./MessageBubble";
 import { Button } from "@/components/ui/button";
-import { askStream, getSuggestions } from "@/lib/api-client";
+import { askStream, getSuggestions, type RetrievedDoc } from "@/lib/api-client";
 import { QA_STREAM_TIMEOUT_MS, sseErrorMessage, streamTransportErrorMessage } from "@/lib/errors";
 import { SquarePen, Scale, ChevronLeft, ChevronRight } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
+import { useSettings } from "@/hooks/useSettings";
 
 const QUESTION_POOL = [
   // 근로계약서 작성
@@ -112,7 +113,7 @@ function ScrollableChips({
       <div
         ref={scrollRef}
         className={cn(
-          "flex flex-1 flex-nowrap gap-2 overflow-x-scroll px-3 py-0.5 [&::-webkit-scrollbar]:hidden [scrollbar-width:none]",
+          "flex flex-1 flex-nowrap gap-2 overflow-x-scroll py-0.5 [&::-webkit-scrollbar]:hidden [scrollbar-width:none]",
           !isOverflowing && "justify-center"
         )}
       >
@@ -122,7 +123,7 @@ function ScrollableChips({
             type="button"
             onClick={() => onSelect(q)}
             disabled={disabled}
-            className="shrink-0 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-[0_0_10px_rgba(186,230,253,0.25),0_2px_6px_rgba(0,0,0,0.04)] transition-all hover:-translate-y-0.5 hover:shadow-[0_0_14px_rgba(186,230,253,0.4),0_4px_8px_rgba(0,0,0,0.05)] hover:border-primary hover:text-primary disabled:opacity-50"
+            className="shrink-0 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-[0_0_10px_rgba(186,230,253,0.25),0_2px_6px_rgba(0,0,0,0.04)] transition-all hover:-translate-y-0.5 hover:shadow-[0_0_14px_rgba(186,230,253,0.4),0_4px_8px_rgba(0,0,0,0.05)] hover:border-primary hover:text-primary disabled:opacity-50 first:ml-3 last:mr-3"
           >
             {q}
           </button>
@@ -178,6 +179,56 @@ function loadMessages(): ChatMessage[] {
   }
 }
 
+function parseCitations(retrievedDocs: RetrievedDoc[]): Citation[] {
+  return retrievedDocs
+    .filter((doc) => doc.doc_type === "law")
+    .map((doc) => {
+      let articleLabel: string;
+      if (doc.article_no) {
+        articleLabel = `${doc.law_name} ${doc.article_no}`;
+      } else {
+        const noMatch = (doc.text || doc.snippet).match(/조문번호:\s*(제?\d[\d조의]*)/);
+        if (noMatch) {
+          const extracted = noMatch[1];
+          articleLabel = extracted.startsWith("제")
+            ? `${doc.law_name} ${extracted}`
+            : `${doc.law_name} 제${extracted}조`;
+        } else {
+          articleLabel = doc.law_name;
+        }
+      }
+
+      const raw = doc.text || doc.snippet;
+      let content = raw;
+      const metaIdx = raw.indexOf("조문제목:");
+      if (metaIdx !== -1) {
+        const afterMeta = raw.slice(metaIdx + "조문제목:".length);
+        const contentMatch = afterMeta.match(/제\d/);
+        if (contentMatch?.index !== undefined) {
+          content = afterMeta.slice(contentMatch.index).trim();
+        }
+      } else {
+        const stripped = raw.replace(/^법령명:[^\n]*조문번호:[^\n]*\s*/i, "").trim();
+        content = stripped;
+      }
+      content = content
+        .replace(/\[\[([\s\S]*?)\]\]/g, (_, inner) =>
+          inner
+            .split(/,\s*'/)
+            .map((s: string) => s.replace(/^'|'$/g, "").trim())
+            .filter(Boolean)
+            .join("\n")
+        )
+        .replace(/([\u2460-\u2473\u2474-\u2487①-⑳])\s+\1/g, "$1")
+        .replace(/(\d+\.)\s+\1/g, "$1")
+        .trim();
+
+      if (content.length < 20) return null;
+      return { article: articleLabel, content, lawName: doc.law_name };
+    })
+    .filter((c): c is Citation => c !== null);
+}
+
 type FollowUpContext = { question: string; answer: string };
 
 export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
@@ -187,6 +238,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [defaultQuestions] = useState(() => pickRandom(QUESTION_POOL, 4));
   const scrollRef = useRef<HTMLDivElement>(null);
+  const settings = useSettings();
 
   const abortRef = useRef<AbortController | null>(null);
   const followUpContextRef = useRef<FollowUpContext | null>(null);
@@ -289,7 +341,6 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    const timeoutId = setTimeout(() => controller.abort("timeout"), QA_STREAM_TIMEOUT_MS);
     const t0 = performance.now();
 
     setSuggestions(null);
@@ -308,23 +359,29 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
     setMessages((prev) => [...prev, userMsg, aiMsg]);
     setIsStreaming(true);
 
-    console.log("[LAS:QA] 질문 전송:", userQuestion.slice(0, 80));
+    let lawFilter: string[] | undefined;
     try {
-      let lawFilter: string[] | undefined;
-      try {
-        const raw = localStorage.getItem("las_law_filter");
-        const parsed = raw ? JSON.parse(raw) : [];
-        if (Array.isArray(parsed) && parsed.length > 0) lawFilter = parsed;
-      } catch {}
+      const raw = localStorage.getItem("las_law_filter");
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed) && parsed.length > 0) lawFilter = parsed;
+    } catch {}
 
-      for await (const event of askStream({
-        question: userQuestion,
-        law_filter: lawFilter,
-        ...(prevCtx && {
-          previous_question: prevCtx.question,
-          previous_answer: prevCtx.answer,
-        }),
-      }, controller.signal)) {
+    const request = {
+      question: userQuestion,
+      law_filter: lawFilter,
+      answer_detail: settings.answerDetail,
+      top_k: settings.topK,
+      ...(prevCtx && {
+        previous_question: prevCtx.question,
+        previous_answer: prevCtx.answer,
+      }),
+    };
+
+    console.log("[LAS:QA] 질문 전송:", userQuestion.slice(0, 80));
+
+    const timeoutId = setTimeout(() => controller.abort("timeout"), QA_STREAM_TIMEOUT_MS);
+    try {
+      for await (const event of askStream(request, controller.signal)) {
         if (event.type === "chunk") {
           accumulatedContent += event.content;
           setMessages((prev) =>
@@ -343,58 +400,12 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
             )
           );
         } else if (event.type === "done") {
-          const parsedCitations: Citation[] = event.retrieved_docs
-            .filter((doc) => doc.doc_type === "law")
-            .map((doc) => {
-              let articleLabel: string;
-              if (doc.article_no) {
-                articleLabel = `${doc.law_name} ${doc.article_no}`;
-              } else {
-                const noMatch = (doc.text || doc.snippet).match(/조문번호:\s*(제?\d[\d조의]*)/);
-                if (noMatch) {
-                  const extracted = noMatch[1];
-                  articleLabel = extracted.startsWith("제")
-                    ? `${doc.law_name} ${extracted}`
-                    : `${doc.law_name} 제${extracted}조`;
-                } else {
-                  articleLabel = doc.law_name;
-                }
-              }
-
-              const raw = doc.text || doc.snippet;
-              let content = raw;
-              const metaIdx = raw.indexOf("조문제목:");
-              if (metaIdx !== -1) {
-                const afterMeta = raw.slice(metaIdx + "조문제목:".length);
-                const contentMatch = afterMeta.match(/제\d/);
-                if (contentMatch?.index !== undefined) {
-                  content = afterMeta.slice(contentMatch.index).trim();
-                }
-              } else {
-                const stripped = raw.replace(/^법령명:[^\n]*조문번호:[^\n]*\s*/i, "").trim();
-                content = stripped;
-              }
-              content = content
-                .replace(/\[\[([\s\S]*?)\]\]/g, (_, inner) =>
-                  inner
-                    .split(/,\s*'/)
-                    .map((s: string) => s.replace(/^'|'$/g, "").trim())
-                    .filter(Boolean)
-                    .join("\n")
-                )
-                .replace(/([\u2460-\u2473\u2474-\u2487①-⑳])\s+\1/g, "$1")
-                .replace(/(\d+\.)\s+\1/g, "$1")
-                .trim();
-
-              if (content.length < 20) return null;
-              return { article: articleLabel, content, lawName: doc.law_name };
-            })
-            .filter((c): c is Citation => c !== null);
+          const citations = parseCitations(event.retrieved_docs);
 
           console.log(
             `[LAS:QA] 스트림 완료: ${((performance.now() - t0) / 1000).toFixed(2)}s | docs=${event.retrieved_docs.length} | law_context_status=${event.law_context_status}`
           );
-          onCitationsChange?.(parsedCitations);
+          onCitationsChange?.(citations);
 
           const answerText = accumulatedContent
             .replace(/\n?\[ANSWERABLE:[^\]]+\]\s*$/i, "").trimEnd();
@@ -410,7 +421,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
                     qa_id: event.qa_id ?? undefined,
                     answerData: {
                       summary: m.content.replace(/\n?\[ANSWERABLE:[^\]]+\]\s*$/i, "").trimEnd(),
-                      citations: parsedCitations,
+                      citations,
                       references: [],
                       isIrrelevant: event.law_context_status === "irrelevant",
                       lawContextStatus: event.law_context_status,
@@ -458,9 +469,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
     } catch (err) {
       const errorContent = streamTransportErrorMessage(err);
       if (errorContent === null) return;
-
       console.error("[LAS:QA] 스트림 예외:", err);
-
       setMessages((prev) =>
         prev.map((m) =>
           m.id === aiId
@@ -472,7 +481,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
       clearTimeout(timeoutId);
       setIsStreaming(false);
     }
-  }, [scrollToBottom]);
+  }, [scrollToBottom, settings]);
 
   const handleNewChat = useCallback(() => {
     abortRef.current?.abort();
@@ -543,17 +552,19 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
           </div>
 
           {/* 추천 질문 칩 */}
-          <div
-            className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 w-full max-w-3xl"
-            style={{ animationDelay: "440ms" }}
-          >
-            <ScrollableChips
-              questions={suggestions ?? defaultQuestions}
-              onSelect={streamAnswer}
-              disabled={isStreaming}
-              loading={suggestionsLoading}
-            />
-          </div>
+          {settings.showFollowUpQuestions && (
+            <div
+              className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 w-full max-w-3xl"
+              style={{ animationDelay: "440ms" }}
+            >
+              <ScrollableChips
+                questions={suggestions ?? defaultQuestions}
+                onSelect={streamAnswer}
+                disabled={isStreaming}
+                loading={suggestionsLoading}
+              />
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -573,7 +584,7 @@ export function ChatContainer({ onCitationsChange }: ChatContainerProps) {
 
           {/* 선 → 칩 → 입력창 */}
           <div className="shrink-0 border-t border-border px-6 py-4 space-y-3">
-            {(!isStreaming || suggestionsLoading) && (
+            {settings.showFollowUpQuestions && (!isStreaming || suggestionsLoading) && (
               <ScrollableChips
                 questions={suggestions ?? defaultQuestions}
                 onSelect={streamAnswer}

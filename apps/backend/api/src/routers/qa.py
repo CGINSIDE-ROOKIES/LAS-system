@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from src.db import get_db
 from src.dependencies import get_generation_service, get_query_parser, get_rag_pipeline
-from rag_pipeline.generation.pipeline import RagPipeline
+from rag_pipeline.generation.pipeline import RagPipeline, build_system_prompt
 from rag_pipeline.generation.service import GenerationService
 from rag_pipeline.observability.tracing import end_span, start_span, start_trace, update_trace
 from rag_pipeline.query_parser import QueryParser
@@ -52,13 +52,13 @@ _VALID_DOC_TYPES = {"law", "prec", "detc", "decc", "expc"}
 def _stream_error_payload(exc: Exception) -> dict[str, str]:
     """SSE 에러 이벤트용 코드/메시지 매핑."""
     if isinstance(exc, EmbeddingError):
-        return {"type": "error", "code": "EMBEDDING_ERROR", "error": str(exc)}
+        return {"type": "error", "code": "EMBEDDING_ERROR", "error": "검색 임베딩 처리 중 오류가 발생했습니다."}
     if isinstance(exc, LLMTimeoutError):
-        return {"type": "error", "code": "LLM_TIMEOUT", "error": str(exc)}
+        return {"type": "error", "code": "LLM_TIMEOUT", "error": "응답 생성 시간이 초과되었습니다."}
     if isinstance(exc, LLMError):
-        return {"type": "error", "code": "LLM_ERROR", "error": str(exc)}
+        return {"type": "error", "code": "LLM_ERROR", "error": "LLM 응답 생성 중 오류가 발생했습니다."}
     if isinstance(exc, RetrievalError):
-        return {"type": "error", "code": "PIPELINE_ERROR", "error": str(exc)}
+        return {"type": "error", "code": "PIPELINE_ERROR", "error": "검색 파이프라인 오류가 발생했습니다."}
     return {"type": "error", "code": "INTERNAL_ERROR", "error": "서버 오류가 발생했습니다."}
 
 
@@ -115,13 +115,25 @@ def _irrelevant_ask_response() -> "AskResponse":
     )
 
 
+_VALID_ANSWER_DETAILS = {"brief", "normal", "detailed"}
+
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     session_id: str | None = None
     doc_types: list[str] | None = None
     law_filter: list[str] | None = None
+    answer_detail: str | None = None
+    top_k: int | None = Field(default=None, ge=1, le=50)
     previous_question: str | None = Field(default=None, max_length=2000)
     previous_answer: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("answer_detail")
+    @classmethod
+    def answer_detail_valid(cls, v: str | None) -> str | None:
+        if v is not None and v not in _VALID_ANSWER_DETAILS:
+            raise ValueError(f"유효하지 않은 answer_detail: {v!r}. 허용값: {sorted(_VALID_ANSWER_DETAILS)}")
+        return v
 
     @field_validator("question")
     @classmethod
@@ -271,12 +283,14 @@ def ask(
 
     result = pipeline.run(
         request.question,
+        system_prompt=build_system_prompt(request.answer_detail),
         doc_types=request.doc_types,
         law_names=effective_law_names,
         intent=parsed.intent,
         trace=trace,
         previous_question=request.previous_question,
         previous_answer=request.previous_answer,
+        top_k=request.top_k,
     )
     answer, can_answer = _strip_answerable_flag(result.answer)
     qa_id: str | None = None
@@ -337,12 +351,14 @@ def ask_stream(
         try:
             meta, chunks = pipeline.stream(
                 request.question,
+                system_prompt=build_system_prompt(request.answer_detail),
                 doc_types=request.doc_types,
                 law_names=effective_law_names,
                 intent=parsed.intent,
                 trace=trace,
                 previous_question=request.previous_question,
                 previous_answer=request.previous_answer,
+                top_k=request.top_k,
             )
             first_chunk = True
             for chunk in chunks:
