@@ -4,11 +4,20 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { ChatContainer, Citation } from "@/components/ChatContainer";
 import { LawReferencePanel } from "@/components/LawReferencePanel";
 import { LawGraphPanel } from "@/components/LawGraphPanel";
+import { GraphNodeDetailPanel } from "@/components/GraphNodeDetailPanel";
 import { cn } from "@/lib/utils";
+import type { GraphNode } from "@/lib/graph-types";
 
 const Index = () => {
   const [citations, setCitations] = useState<Citation[]>([]);
   const [rightTab, setRightTab] = useState<"reference" | "graph">("reference");
+  const [graphQuery, setGraphQuery] = useState<string>("");
+  const [selectedGraphNode, setSelectedGraphNode] = useState<GraphNode | null>(null);
+
+  const handleQuestionSubmit = (question: string) => {
+    setGraphQuery(question);
+    setSelectedGraphNode(null);
+  };
 
   return (
     <SidebarProvider>
@@ -17,7 +26,10 @@ const Index = () => {
         <div className="flex flex-1 overflow-hidden">
           {/* Left: Chat */}
           <div className="flex flex-1 flex-col border-r border-border">
-            <ChatContainer onCitationsChange={setCitations} />
+            <ChatContainer
+              onCitationsChange={setCitations}
+              onQuestionSubmit={handleQuestionSubmit}
+            />
           </div>
 
           {/* Right: 탭 패널 */}
@@ -46,7 +58,16 @@ const Index = () => {
               {rightTab === "reference" ? (
                 <LawReferencePanel citations={citations} />
               ) : (
-                <LawGraphPanel />
+                <div className="flex h-full flex-col">
+                  <LawGraphPanel
+                    lastQuery={graphQuery}
+                    isActive={rightTab === "graph"}
+                    onNodeSelect={setSelectedGraphNode}
+                  />
+                  {selectedGraphNode && (
+                    <GraphNodeDetailPanel node={selectedGraphNode} />
+                  )}
+                </div>
               )}
             </div>
           </div>

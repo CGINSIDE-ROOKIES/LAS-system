@@ -1,93 +1,216 @@
-import { useEffect, useRef } from "react";
-import { Network } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Network as NetworkIcon, Loader2, AlertCircle, BarChart3 } from "lucide-react";
+import { DataSet } from "vis-data";
+import { Network } from "vis-network";
+import type { Options } from "vis-network";
+import { queryGraph } from "@/lib/api-client";
+import { toGraphData } from "@/lib/graph-adapter";
+import type { GraphNode, LawGraphData } from "@/lib/graph-types";
 
-const nodes = [
-  { id: "labor", label: "근로기준법", x: 200, y: 80, primary: true },
-  { id: "a17", label: "제17조", x: 80, y: 180, primary: false },
-  { id: "a50", label: "제50조", x: 200, y: 200, primary: false },
-  { id: "a56", label: "제56조", x: 320, y: 180, primary: false },
-  { id: "a114", label: "제114조", x: 140, y: 280, primary: false },
-  { id: "subcontract", label: "하도급법", x: 400, y: 100, primary: true },
-  { id: "s3", label: "제3조", x: 380, y: 260, primary: false },
-  { id: "s13", label: "제13조", x: 480, y: 220, primary: false },
-];
+interface LawGraphPanelProps {
+  lastQuery: string;
+  isActive: boolean;
+  onNodeSelect: (node: GraphNode | null) => void;
+}
 
-const edges = [
-  { from: "labor", to: "a17" },
-  { from: "labor", to: "a50" },
-  { from: "labor", to: "a56" },
-  { from: "a17", to: "a114" },
-  { from: "subcontract", to: "s3" },
-  { from: "subcontract", to: "s13" },
-  { from: "a56", to: "a50" },
-];
+type PanelState = "idle" | "loading" | "success" | "empty" | "plan_failed" | "error";
 
-export function LawGraphPanel() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+const VIS_OPTIONS: Options = {
+  nodes: {
+    shape: "dot",
+    font: { size: 12, face: "system-ui, sans-serif" },
+    borderWidth: 1.5,
+    chosen: true,
+  },
+  edges: {
+    arrows: { to: { enabled: true, scaleFactor: 0.6 } },
+    color: { color: "hsl(220, 16%, 75%)", highlight: "hsl(217, 91%, 50%)" },
+    font: { size: 10, align: "middle" },
+    smooth: { enabled: true, type: "curvedCW", roundness: 0.2 },
+  },
+  interaction: {
+    hover: true,
+    tooltipDelay: 200,
+    navigationButtons: false,
+    keyboard: false,
+  },
+  physics: {
+    enabled: true,
+    barnesHut: {
+      gravitationalConstant: -3000,
+      centralGravity: 0.4,
+      springLength: 120,
+      springConstant: 0.05,
+      damping: 0.4,
+    },
+    stabilization: { iterations: 150, fit: true },
+  },
+};
 
+function buildVisDatasets(graphData: LawGraphData) {
+  const visNodes = graphData.nodes.map((n) => ({
+    id: n.id,
+    label: n.label,
+    size: n.isCenter ? 28 : 18,
+    color: n.isCenter
+      ? { background: "hsl(217, 91%, 50%)", border: "hsl(217, 91%, 40%)", highlight: { background: "hsl(217, 91%, 45%)", border: "hsl(217, 91%, 35%)" } }
+      : n.kind === "law"
+        ? { background: "hsl(217, 91%, 92%)", border: "hsl(217, 60%, 70%)", highlight: { background: "hsl(217, 91%, 85%)", border: "hsl(217, 60%, 60%)" } }
+        : { background: "hsl(142, 71%, 93%)", border: "hsl(142, 60%, 65%)", highlight: { background: "hsl(142, 71%, 86%)", border: "hsl(142, 60%, 55%)" } },
+    font: { color: n.isCenter ? "#fff" : "hsl(220, 30%, 20%)" },
+  }));
+
+  const visEdges = graphData.edges.map((e) => ({
+    id: e.id,
+    from: e.source,
+    to: e.target,
+    label: e.relationType === "child_law" ? "하위" : e.relationType === "delegation" ? "위임" : e.relationType === "reference" ? "참조" : "",
+  }));
+
+  return {
+    nodes: new DataSet(visNodes),
+    edges: new DataSet(visEdges),
+  };
+}
+
+export function LawGraphPanel({ lastQuery, isActive, onNodeSelect }: LawGraphPanelProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const networkRef = useRef<Network | null>(null);
+  const [state, setState] = useState<PanelState>("idle");
+  const [graphData, setGraphData] = useState<LawGraphData | null>(null);
+  const lastSuccessQuery = useRef<string>("");  // 성공한 쿼리만 기록
+  const requestToken = useRef<number>(0);       // 요청 순서 토큰
+  const abortRef = useRef<AbortController | null>(null);
+
+  // 그래프 탭 활성화 + 새 질문이 있을 때 API 호출
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!isActive || !lastQuery || lastQuery === lastSuccessQuery.current) return;
 
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
+    // 이전 요청 중단
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const token = ++requestToken.current;
 
-    const w = rect.width;
-    const h = rect.height;
-    const scaleX = w / 560;
-    const scaleY = h / 340;
+    setState("loading");
+    setGraphData(null);
+    onNodeSelect(null);
 
-    ctx.clearRect(0, 0, w, h);
+    queryGraph(lastQuery)
+      .then((resp) => {
+        if (token !== requestToken.current || controller.signal.aborted) return;
+        const data = toGraphData(resp);
+        if (!data) {
+          setState("empty");
+          return;
+        }
+        lastSuccessQuery.current = lastQuery;  // 성공 시에만 기록
+        setGraphData(data);
+        setState("success");
+      })
+      .catch((err) => {
+        if (token !== requestToken.current || controller.signal.aborted) return;
+        if (err?.code === "GRAPH_PLAN_FAILED") {
+          setState("plan_failed");
+        } else {
+          setState("error");
+        }
+      });
 
-    // Draw edges
-    ctx.strokeStyle = "hsl(220, 16%, 80%)";
-    ctx.lineWidth = 1;
-    edges.forEach((e) => {
-      const from = nodes.find((n) => n.id === e.from)!;
-      const to = nodes.find((n) => n.id === e.to)!;
-      ctx.beginPath();
-      ctx.moveTo(from.x * scaleX, from.y * scaleY);
-      ctx.lineTo(to.x * scaleX, to.y * scaleY);
-      ctx.stroke();
+    return () => { controller.abort(); };
+  }, [isActive, lastQuery, onNodeSelect]);
+
+  // graphData가 바뀔 때 vis-network 렌더링
+  useEffect(() => {
+    if (!containerRef.current || !graphData) return;
+
+    networkRef.current?.destroy();
+
+    const { nodes, edges } = buildVisDatasets(graphData);
+    const network = new Network(containerRef.current, { nodes, edges }, VIS_OPTIONS);
+    networkRef.current = network;
+
+    network.on("click", (params) => {
+      if (params.nodes.length === 0) {
+        onNodeSelect(null);
+        return;
+      }
+      const nodeId = params.nodes[0] as string;
+      const found = graphData.nodes.find((n) => n.id === nodeId) ?? null;
+      onNodeSelect(found);
     });
 
-    // Draw nodes
-    nodes.forEach((node) => {
-      const x = node.x * scaleX;
-      const y = node.y * scaleY;
-      const r = node.primary ? 28 : 20;
-
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = node.primary ? "hsl(217, 91%, 50%)" : "hsl(217, 91%, 95%)";
-      ctx.fill();
-      ctx.strokeStyle = node.primary ? "hsl(217, 91%, 40%)" : "hsl(217, 60%, 75%)";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      ctx.fillStyle = node.primary ? "#fff" : "hsl(220, 30%, 20%)";
-      ctx.font = `${node.primary ? 11 : 10}px system-ui, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(node.label, x, y);
-    });
-  }, []);
+    return () => {
+      network.destroy();
+      networkRef.current = null;
+    };
+  }, [graphData, onNodeSelect]);
 
   return (
     <div className="flex h-full flex-col">
       <div className="shrink-0 border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
-          <Network className="h-4 w-4 text-primary" />
+          <NetworkIcon className="h-4 w-4 text-primary" />
           <h2 className="text-sm font-semibold text-foreground">법령 관계 그래프</h2>
+          {state === "loading" && (
+            <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          )}
         </div>
       </div>
-      <div className="flex-1 p-4">
-        <canvas ref={canvasRef} className="h-full w-full rounded-lg border border-border bg-card" />
+
+      <div className="relative flex-1 overflow-hidden">
+        {/* vis-network 컨테이너 — success일 때만 표시 */}
+        <div
+          ref={containerRef}
+          className="absolute inset-0"
+          style={{ display: state === "success" ? "block" : "none" }}
+        />
+
+        {/* 상태별 안내 메시지 */}
+        {state !== "success" && (
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+            {state === "idle" && (
+              <>
+                <BarChart3 className="h-8 w-8 text-muted-foreground/40" />
+                <p className="text-xs text-muted-foreground">
+                  질문을 입력하면 법령 구조 그래프가 표시됩니다
+                </p>
+              </>
+            )}
+            {state === "loading" && (
+              <>
+                <Loader2 className="h-6 w-6 animate-spin text-primary/60" />
+                <p className="text-xs text-muted-foreground">그래프 조회 중...</p>
+              </>
+            )}
+            {state === "plan_failed" && (
+              <>
+                <AlertCircle className="h-6 w-6 text-amber-500/70" />
+                <p className="text-xs text-muted-foreground">
+                  법령 구조 질의로 해석되지 않았습니다
+                  <br />
+                  <span className="text-muted-foreground/60">예: "근로기준법 하위법령은?"</span>
+                </p>
+              </>
+            )}
+            {state === "empty" && (
+              <>
+                <NetworkIcon className="h-6 w-6 text-muted-foreground/40" />
+                <p className="text-xs text-muted-foreground">그래프 결과가 없습니다</p>
+              </>
+            )}
+            {state === "error" && (
+              <>
+                <AlertCircle className="h-6 w-6 text-destructive/70" />
+                <p className="text-xs text-muted-foreground">
+                  일시적 오류가 발생했습니다
+                  <br />
+                  <span className="text-muted-foreground/60">잠시 후 다시 시도해주세요</span>
+                </p>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
