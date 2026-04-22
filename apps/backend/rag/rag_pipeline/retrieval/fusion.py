@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 
-from .common import normalize_source_id
 
 _RANK_NOT_FOUND = 1_000_000_000
 
@@ -23,13 +22,12 @@ def _sha1_hex(data: bytes) -> str:
 def _rrf_key(row: dict[str, object]) -> str:
     """두 백엔드의 결과를 같은 문서인지 판별하기 위한 정규화 키를 반환한다.
 
-    source_id가 있으면 정규화(suffix 제거)해서 키로 사용하고,
+    source_id가 있으면 그대로 키로 사용하고,
     없으면 텍스트 앞 800자의 SHA-1 해시를 fallback으로 사용한다.
     """
     sid = str(row.get("source_id", "") or "")
-    key = normalize_source_id(sid) if sid else ""
-    if key:
-        return key
+    if sid:
+        return sid
     text = str(row.get("text", "") or "")
     return f"text::{_sha1_hex(text[:800].encode('utf-8'))}"
 
@@ -75,14 +73,12 @@ def _merge_rows_into_rrf(
 
         sid = str(row.get("source_id", "") or "")
         key = _rrf_key(row)
-        sid_norm = normalize_source_id(sid) if sid else ""
         rrf_score = 1.0 / (rrf_k + rank)
 
         cur = merged.get(key)
         if cur is None:
             cur = {
                 "source_id_raw": sid,
-                "source_id_normalized": sid_norm,
                 "doc_type": row.get("doc_type", ""),
                 "law_name": row.get("law_name", ""),
                 "article_no": row.get("article_no", ""),
@@ -95,8 +91,6 @@ def _merge_rows_into_rrf(
         else:
             if not str(cur.get("source_id_raw", "") or "") and sid:
                 cur["source_id_raw"] = sid
-            if not str(cur.get("source_id_normalized", "") or "") and sid_norm:
-                cur["source_id_normalized"] = sid_norm
 
         cur["rrf_score"] = float(cur["rrf_score"]) + rrf_score
         cast_sources = cur["sources"]
@@ -123,9 +117,7 @@ def _tie_break_sort_key(row: dict[str, object]) -> tuple[float, int, int, str]:
             if rank > 0:
                 best_rank = min(best_rank, rank)
         source_count = len(backends)
-    source_id = str(
-        row.get("source_id_normalized", "") or row.get("source_id_raw", "") or ""
-    )
+    source_id = str(row.get("source_id_raw", "") or "")
     return (-float(row["rrf_score"]), -source_count, best_rank, source_id)
 
 
@@ -138,16 +130,12 @@ def _materialize_fused_rows(
     ranked = sorted(merged.values(), key=_tie_break_sort_key)
     out: list[dict[str, object]] = []
     for i, row in enumerate(ranked[:top_k], start=1):
-        source_id_raw = str(row.get("source_id_raw", "") or "")
-        source_id_normalized = str(row.get("source_id_normalized", "") or "")
-        source_id = source_id_normalized or source_id_raw
+        source_id = str(row.get("source_id_raw", "") or "")
         out.append(
             {
                 "rank": i,
                 "score": round(float(row["rrf_score"]), 6),
                 "source_id": source_id,
-                "source_id_raw": source_id_raw,
-                "source_id_normalized": source_id_normalized,
                 "doc_type": row.get("doc_type", ""),
                 "law_name": row.get("law_name", ""),
                 "article_no": row.get("article_no", ""),
