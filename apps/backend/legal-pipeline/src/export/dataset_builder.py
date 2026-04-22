@@ -636,6 +636,20 @@ def _normalize_law_meta(parsed_law: dict[str, Any]) -> tuple[str | None, str]:
     return kind_name, classified_level
 
 
+_DELETED_ARTICLE_RE = re.compile(r"제\d[\d의]*조\s+삭제\s*<", re.UNICODE)
+
+
+def _is_header_only_supplementary(text: str) -> bool:
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    content = [
+        l for l in lines
+        if not l.startswith("법령명:")
+        and l not in {"구성요소: 부칙", "부칙제목: 부칙"}
+        and not l.startswith("부칙제목:")
+    ]
+    return len(content) == 0
+
+
 def _ensure_unique_record_id(
     record_id: str,
     seen_ids: dict[str, int],
@@ -692,6 +706,8 @@ def build_law_records(
                     text_variant=text_variant,
                     preserve_structure=preserve_structure,
                 )
+                if _DELETED_ARTICLE_RE.search(article_text) and len(article_text) < 150:
+                    continue
                 chunks = _chunk_text(
                     article_text,
                     max_chars=max_chars,
@@ -764,6 +780,8 @@ def build_law_records(
                     text_variant=text_variant,
                     preserve_structure=preserve_structure,
                 )
+                if _is_header_only_supplementary(text):
+                    continue
                 chunks = _chunk_text(
                     text,
                     max_chars=max_chars,
