@@ -15,6 +15,7 @@
       ...
 """
 
+import os
 from functools import lru_cache
 
 from httpx import get
@@ -24,6 +25,10 @@ from rag_pipeline.generation.service import GenerationService
 from rag_pipeline.query_parser import QueryParser
 from rag_pipeline.graph.neo4j_client import Neo4jClient
 from rag_pipeline.graph.cypher_planner import CypherPlanner
+from rag_pipeline.graph.llm_cypher_planner import (
+    LlmCypherPlanner,
+    LlmCypherPlannerWithFallback,
+)
 
 
 @lru_cache(maxsize=1)
@@ -63,8 +68,18 @@ def get_neo4j_client() -> Neo4jClient:
 
 
 @lru_cache(maxsize=1)
-def get_cypher_planner() -> CypherPlanner:
-    """환경변수 기반으로 CypherPlanner 인스턴스를 반환한다."""
+def get_cypher_planner() -> CypherPlanner | LlmCypherPlanner | LlmCypherPlannerWithFallback:
+    """GRAPH_QUERY_MODE 환경변수에 따라 방식 A/B를 선택한다.
+
+    template (기본)                   → CypherPlanner (방식 A)
+    llm_free                          → LlmCypherPlanner (방식 B)
+    llm_free_with_template_fallback   → LlmCypherPlannerWithFallback (B → A)
+    """
+    mode = os.getenv("GRAPH_QUERY_MODE", "template").strip().lower()
+    if mode == "llm_free":
+        return LlmCypherPlanner.from_env()
+    if mode == "llm_free_with_template_fallback":
+        return LlmCypherPlannerWithFallback.from_env()
     return CypherPlanner.from_env()
 
 
