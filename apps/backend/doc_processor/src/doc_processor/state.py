@@ -50,7 +50,7 @@ class WorkflowState(BaseModel):
     parser_config: ParserConfig = Field(default_factory=ParserConfig)
     parser_analysis: ParserAnalysis | None = None
     parser_result: ParserResult | None = None
-    active_review_unit_id: str | None = None
+    active_review_node_id: str | None = None
     active_review_kind: str | None = None
     llm_review_stage: str | None = None
     boundary_review_results: Annotated[list[dict[str, Any]], operator.add] = Field(default_factory=list)

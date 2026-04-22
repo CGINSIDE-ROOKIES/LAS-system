@@ -21,6 +21,14 @@ from doc_processor.edit_engine import (
 
 class EditEngineTests(unittest.TestCase):
     @staticmethod
+    def _ids(doc: DocIR) -> dict[str, str]:
+        return {
+            "p1": doc.paragraphs[0].node_id,
+            "r1": doc.paragraphs[0].runs[0].node_id,
+            "r2": doc.paragraphs[0].runs[1].node_id if len(doc.paragraphs[0].runs) > 1 else "",
+        }
+
+    @staticmethod
     def _build_simple_hwpx_bytes() -> bytes:
         hwpx_bytes = BytesIO()
         with zipfile.ZipFile(hwpx_bytes, "w") as archive:
@@ -73,12 +81,13 @@ class EditEngineTests(unittest.TestCase):
             },
             source_doc_type="docx",
         )
+        ids = self._ids(doc)
 
         updated, result = apply_edits_to_doc_ir(
             doc,
             [
                 ParagraphTextEdit(
-                    paragraph_unit_id="s1.p1",
+                    paragraph_id=ids["p1"],
                     old_text="Hello World",
                     new_text="Hello Legal World",
                     reason="Insert qualifier",
@@ -88,8 +97,8 @@ class EditEngineTests(unittest.TestCase):
 
         self.assertEqual(updated.paragraphs[0].text, "Hello Legal World")
         self.assertEqual(result.edits_applied, 1)
-        self.assertIn("s1.p1", result.modified_unit_ids)
-        self.assertIn("s1.p1.r1", result.modified_run_ids)
+        self.assertIn(ids["p1"], result.modified_target_ids)
+        self.assertIn(ids["r1"], result.modified_run_ids)
 
     def test_apply_edits_to_doc_ir_replaces_single_run_paragraph_without_garbling(self) -> None:
         doc = DocIR.from_mapping(
@@ -98,12 +107,13 @@ class EditEngineTests(unittest.TestCase):
             },
             source_doc_type="hwpx",
         )
+        ids = self._ids(doc)
 
         updated, result = apply_edits_to_doc_ir(
             doc,
             [
                 ParagraphTextEdit(
-                    paragraph_unit_id="s1.p1",
+                    paragraph_id=ids["p1"],
                     old_text="제3조 (계약기간 등)",
                     new_text="updated paragraph text",
                     reason="Replace heading",
@@ -114,15 +124,16 @@ class EditEngineTests(unittest.TestCase):
         self.assertEqual(updated.paragraphs[0].text, "updated paragraph text")
         self.assertEqual(updated.paragraphs[0].runs[0].text, "updated paragraph text")
         self.assertEqual(result.edits_applied, 1)
-        self.assertIn("s1.p1.r1", result.modified_run_ids)
+        self.assertIn(ids["r1"], result.modified_run_ids)
 
     def test_validate_edit_commands_rejects_text_mismatch(self) -> None:
         doc = DocIR.from_mapping({"s1.p1.r1": "Hello"})
+        ids = self._ids(doc)
 
         with self.assertRaises(EditValidationError):
             validate_edit_commands(
                 doc,
-                [RunTextEdit(run_unit_id="s1.p1.r1", old_text="World", new_text="Hello")],
+                [RunTextEdit(run_id=ids["r1"], old_text="World", new_text="Hello")],
             )
 
     def test_apply_edits_to_file_updates_docx_and_preserves_run_style(self) -> None:
@@ -138,12 +149,13 @@ class EditEngineTests(unittest.TestCase):
             styled = paragraph.add_run("World")
             styled.bold = True
             docx.save(source)
+            ids = self._ids(DocIR.from_file(source))
 
             result = apply_edits_to_file(
                 source,
                 [
                     ParagraphTextEdit(
-                        paragraph_unit_id="s1.p1",
+                        paragraph_id=ids["p1"],
                         old_text="Hello World",
                         new_text="Hello Legal World",
                         reason="Expand wording",
@@ -165,12 +177,13 @@ class EditEngineTests(unittest.TestCase):
             source = Path(tmp_dir) / "sample.hwpx"
             output = Path(tmp_dir) / "sample_edited.hwpx"
             source.write_bytes(self._build_simple_hwpx_bytes())
+            ids = self._ids(DocIR.from_file(source))
 
             result = apply_edits_to_file(
                 source,
                 [
                     RunTextEdit(
-                        run_unit_id="s1.p1.r2",
+                        run_id=ids["r2"],
                         old_text="World",
                         new_text="HWPX",
                         reason="Rename token",
@@ -192,13 +205,14 @@ class EditEngineTests(unittest.TestCase):
             docx = Document()
             docx.add_paragraph("Hello World")
             docx.save(source)
+            ids = self._ids(DocIR.from_file(source))
 
             with self.assertRaises(EditValidationError):
                 apply_edits_to_file(
                     source,
                     [
                         ParagraphTextEdit(
-                            paragraph_unit_id="s1.p1",
+                            paragraph_id=ids["p1"],
                             old_text="Hello World",
                             new_text="Hello Contract World",
                             reason="expand wording",
@@ -212,12 +226,13 @@ class EditEngineTests(unittest.TestCase):
             source = Path(tmp_dir) / "sample.hwpx"
             output = Path(tmp_dir) / "sample_edited.hwpx"
             source.write_bytes(self._build_single_run_hwpx_bytes("제3조 (계약기간 등)"))
+            ids = self._ids(DocIR.from_file(source))
 
             result = apply_edits_to_file(
                 source,
                 [
                     ParagraphTextEdit(
-                        paragraph_unit_id="s1.p1",
+                        paragraph_id=ids["p1"],
                         old_text="제3조 (계약기간 등)",
                         new_text="updated paragraph text",
                         reason="Replace heading",
@@ -239,6 +254,7 @@ class EditEngineTests(unittest.TestCase):
             },
             source_doc_type="hwp",
         )
+        ids = self._ids(fake_doc)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             source = Path(tmp_dir) / "sample.hwp"
@@ -256,7 +272,7 @@ class EditEngineTests(unittest.TestCase):
                     source,
                     [
                         RunTextEdit(
-                            run_unit_id="s1.p1.r2",
+                            run_id=ids["r2"],
                             old_text="World",
                             new_text="HWPX",
                             reason="Rename token",

@@ -80,7 +80,7 @@ class ParserNodeMeta(BaseModel):
 
 
 class ParagraphAnalysis(BaseModel):
-    unit_id: str
+    node_id: str
     text: str
     page_number: int | None = None
     has_tables: bool = False
@@ -105,26 +105,26 @@ class ParagraphAnalysis(BaseModel):
 class SubclauseEntry(BaseModel):
     subclause_id: str
     subclause_no: str
-    start_unit_id: str
-    end_unit_id: str
-    member_unit_ids: list[str] = Field(default_factory=list)
-    spans_by_unit: dict[str, list[TextSpan]] = Field(default_factory=dict)
+    start_node_id: str
+    end_node_id: str
+    member_node_ids: list[str] = Field(default_factory=list)
+    spans_by_node: dict[str, list[TextSpan]] = Field(default_factory=dict)
 
 
 class ClauseEntry(BaseModel):
     clause_id: str
     clause_no: str
     title: str | None = None
-    heading_unit_id: str | None = None
-    start_unit_id: str
-    end_unit_id: str
-    member_unit_ids: list[str] = Field(default_factory=list)
-    spans_by_unit: dict[str, list[TextSpan]] = Field(default_factory=dict)
+    heading_node_id: str | None = None
+    start_node_id: str
+    end_node_id: str
+    member_node_ids: list[str] = Field(default_factory=list)
+    spans_by_node: dict[str, list[TextSpan]] = Field(default_factory=dict)
     subclauses: list[SubclauseEntry] = Field(default_factory=list)
 
 
 class DocTargetRef(BaseModel):
-    unit_id: str
+    node_id: str
     kind: Literal["paragraph", "table", "image", "run", "cell"] = "paragraph"
     page_number: int | None = None
     span_start: int | None = None
@@ -136,8 +136,8 @@ class ParserDocumentMeta(BaseModel):
     clause_rule_name: str | None = None
     subclause_rule_name: str | None = None
     clause_entries: list[ClauseEntry] = Field(default_factory=list)
-    boundary_suspect_unit_ids: list[str] = Field(default_factory=list)
-    ambiguous_label_unit_ids: list[str] = Field(default_factory=list)
+    boundary_suspect_node_ids: list[str] = Field(default_factory=list)
+    ambiguous_label_node_ids: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
 
@@ -154,12 +154,12 @@ class ParserAnalysis(BaseModel):
     subclause_rule_name: str | None = None
     paragraphs: list[ParagraphAnalysis] = Field(default_factory=list)
     clause_entries: list[ClauseEntry] = Field(default_factory=list)
-    boundary_suspect_unit_ids: list[str] = Field(default_factory=list)
-    ambiguous_label_unit_ids: list[str] = Field(default_factory=list)
+    boundary_suspect_node_ids: list[str] = Field(default_factory=list)
+    ambiguous_label_node_ids: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
     def paragraph_map(self) -> dict[str, ParagraphAnalysis]:
-        return {paragraph.unit_id: paragraph for paragraph in self.paragraphs}
+        return {paragraph.node_id: paragraph for paragraph in self.paragraphs}
 
 
 class ParserResult(BaseModel):
@@ -170,8 +170,8 @@ class ParserResult(BaseModel):
     subclause_rule_name: str | None = None
     clause_count: int = 0
     subclause_count: int = 0
-    boundary_suspect_unit_ids: list[str] = Field(default_factory=list)
-    ambiguous_label_unit_ids: list[str] = Field(default_factory=list)
+    boundary_suspect_node_ids: list[str] = Field(default_factory=list)
+    ambiguous_label_node_ids: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
 

@@ -93,7 +93,7 @@ def parse_document(request: ParseDocumentRequest) -> ParseDocumentResult:
             paragraphs = paragraphs[: request.max_paragraphs]
         response.paragraphs = [
             ParagraphPreview(
-                unit_id=paragraph.unit_id,
+                node_id=paragraph.node_id,
                 text_excerpt=_truncate(paragraph.text, request.paragraph_excerpt_length),
                 text_length=len(paragraph.text),
                 page_number=paragraph.page_number,
@@ -105,7 +105,7 @@ def parse_document(request: ParseDocumentRequest) -> ParseDocumentResult:
                 has_tables=paragraph.has_tables,
                 has_images=paragraph.has_images,
                 writable_as_paragraph=not (paragraph.has_tables or paragraph.has_images),
-                run_count=len(_find_paragraph_runs(doc, paragraph.unit_id)),
+                run_count=len(_find_paragraph_runs(doc, paragraph.node_id)),
             )
             for paragraph in paragraphs
         ]
@@ -157,10 +157,10 @@ def _clause_summary(entry: ClauseEntry) -> ClauseSummary:
         clause_id=entry.clause_id,
         clause_no=entry.clause_no,
         title=entry.title,
-        heading_unit_id=entry.heading_unit_id,
-        start_unit_id=entry.start_unit_id,
-        end_unit_id=entry.end_unit_id,
-        member_unit_ids=entry.member_unit_ids,
+        heading_node_id=entry.heading_node_id,
+        start_node_id=entry.start_node_id,
+        end_node_id=entry.end_node_id,
+        member_node_ids=entry.member_node_ids,
         subclause_count=len(entry.subclauses),
     )
 
@@ -171,9 +171,9 @@ def _truncate(text: str, limit: int | None) -> str:
     return f"{text[:limit]}..."
 
 
-def _find_paragraph_runs(doc: DocIR, paragraph_unit_id: str):
+def _find_paragraph_runs(doc: DocIR, paragraph_node_id: str):
     for paragraph in _iter_doc_ir_paragraphs(doc.paragraphs):
-        if paragraph.unit_id == paragraph_unit_id:
+        if paragraph.node_id == paragraph_node_id:
             return paragraph.runs
     return []
 

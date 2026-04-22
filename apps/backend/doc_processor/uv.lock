@@ -162,7 +162,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "document-processor", git = "https://github.com/CGINSIDE-ROOKIES/document-processor.git" },
+    { name = "document-processor", git = "https://github.com/CGINSIDE-ROOKIES/document-processor.git?branch=refactor%2Fxml-hardening" },
     { name = "langchain", specifier = ">=1.0.0" },
     { name = "langchain-google-genai", specifier = ">=4.2.1" },
     { name = "langchain-openai", specifier = ">=1.1.12" },
@@ -174,7 +174,7 @@ requires-dist = [
 [[package]]
 name = "document-processor"
 version = "0.1.0"
-source = { git = "https://github.com/CGINSIDE-ROOKIES/document-processor.git#1fbbc5e91886c7894050ad3120c7e2c24b5663fc" }
+source = { git = "https://github.com/CGINSIDE-ROOKIES/document-processor.git?branch=refactor%2Fxml-hardening#717a8873ceb0fc8f38f09fd849b895351d7e9273" }
 dependencies = [
     { name = "jpype1" },
     { name = "pydantic" },

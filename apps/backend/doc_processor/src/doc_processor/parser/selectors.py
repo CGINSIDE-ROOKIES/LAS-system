@@ -4,10 +4,17 @@ from statistics import mean
 
 from document_processor import DocIR, ParagraphIR
 
-from ..parser_types import ParagraphAnalysis, WorkflowMeta
+from ..parser_types import ParagraphAnalysis
+
+
+def _required_node_id(paragraph: ParagraphIR) -> str:
+    if paragraph.node_id:
+        return paragraph.node_id
+    raise ValueError("DocIR paragraph is missing node_id. Call DocIR.ensure_node_identity() before parsing.")
 
 
 def build_paragraph_analyses(doc: DocIR) -> list[ParagraphAnalysis]:
+    doc.ensure_node_identity()
     analyses: list[ParagraphAnalysis] = []
     for paragraph in doc.paragraphs:
         analyses.append(build_paragraph_analysis(paragraph))
@@ -22,7 +29,7 @@ def build_paragraph_analysis(paragraph: ParagraphIR) -> ParagraphAnalysis:
         bold_ratio = round(len(bold_runs) / max(len(paragraph.runs), 1), 4)
 
     return ParagraphAnalysis(
-        unit_id=paragraph.unit_id,
+        node_id=_required_node_id(paragraph),
         text=paragraph.text or "",
         page_number=paragraph.page_number,
         has_tables=bool(paragraph.tables),
@@ -37,14 +44,14 @@ def non_empty_paragraphs(paragraphs: list[ParagraphAnalysis]) -> list[ParagraphA
     return [paragraph for paragraph in paragraphs if paragraph.text.strip()]
 
 
-def paragraph_position(paragraphs: list[ParagraphAnalysis], unit_id: str) -> str:
+def paragraph_position(paragraphs: list[ParagraphAnalysis], node_id: str) -> str:
     non_empty = non_empty_paragraphs(paragraphs)
-    ids = [paragraph.unit_id for paragraph in non_empty]
-    if unit_id not in ids:
+    ids = [paragraph.node_id for paragraph in non_empty]
+    if node_id not in ids:
         return "middle"
     if len(ids) == 1:
         return "only"
-    index = ids.index(unit_id)
+    index = ids.index(node_id)
     if index == 0:
         return "start"
     if index == len(ids) - 1:
@@ -53,4 +60,4 @@ def paragraph_position(paragraphs: list[ParagraphAnalysis], unit_id: str) -> str
 
 
 def paragraph_lookup(paragraphs: list[ParagraphAnalysis]) -> dict[str, ParagraphAnalysis]:
-    return {paragraph.unit_id: paragraph for paragraph in paragraphs}
+    return {paragraph.node_id: paragraph for paragraph in paragraphs}

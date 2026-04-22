@@ -35,15 +35,15 @@ class ClauseSummary(BaseModel):
     clause_id: str
     clause_no: str
     title: str | None = None
-    heading_unit_id: str | None = None
-    start_unit_id: str
-    end_unit_id: str
-    member_unit_ids: list[str] = Field(default_factory=list)
+    heading_node_id: str | None = None
+    start_node_id: str
+    end_node_id: str
+    member_node_ids: list[str] = Field(default_factory=list)
     subclause_count: int = 0
 
 
 class ParagraphPreview(BaseModel):
-    unit_id: str
+    node_id: str
     text_excerpt: str
     text_length: int
     page_number: int | None = None

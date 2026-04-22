@@ -64,14 +64,14 @@ class ObservabilityTests(unittest.TestCase):
             subclause_rule_name="numeric_dot",
             paragraphs=[
                 ParagraphAnalysis(
-                    unit_id="p1",
+                    node_id="p1",
                     text="제1조 목적",
                     category=ParagraphCategory.CLAUSE_HEADING,
                     clause_id="c1",
                     clause_no="1",
                 ),
                 ParagraphAnalysis(
-                    unit_id="p2",
+                    node_id="p2",
                     text="계약의 목적은 다음과 같다.",
                     category=ParagraphCategory.CLAUSE_BODY,
                     clause_id="c1",
@@ -82,12 +82,12 @@ class ObservabilityTests(unittest.TestCase):
                 ClauseEntry(
                     clause_id="c1",
                     clause_no="1",
-                    start_unit_id="p1",
-                    end_unit_id="p2",
+                    start_node_id="p1",
+                    end_node_id="p2",
                 )
             ],
-            boundary_suspect_unit_ids=["p2"],
-            ambiguous_label_unit_ids=["p2"],
+            boundary_suspect_node_ids=["p2"],
+            ambiguous_label_node_ids=["p2"],
             notes=["Detected clause numbering."],
         )
         state = WorkflowState(
@@ -95,7 +95,7 @@ class ObservabilityTests(unittest.TestCase):
             working_doc=doc,
             parser_analysis=analysis,
             parser_config=ParserConfig(boundary_review_enabled=False, label_review_enabled=True),
-            boundary_review_results=[{"unit_id": "p2", "review": {"action": "keep"}}],
+            boundary_review_results=[{"node_id": "p2", "review": {"action": "keep"}}],
             errors=["timeout waiting for label review"],
         )
 
@@ -132,12 +132,12 @@ class ObservabilityTests(unittest.TestCase):
                     "parser_analysis": {
                         "clause_rule_name": "article",
                         "paragraphs": [
-                            {"unit_id": "p1", "text": "제1조 목적", "category": "clause_heading"},
-                            {"unit_id": "p2", "text": "본문", "category": "clause_body"},
+                            {"node_id": "p1", "text": "제1조 목적", "category": "clause_heading"},
+                            {"node_id": "p2", "text": "본문", "category": "clause_body"},
                         ],
                         "clause_entries": [{"clause_id": "c1"}],
-                        "boundary_suspect_unit_ids": ["p2"],
-                        "ambiguous_label_unit_ids": [],
+                        "boundary_suspect_node_ids": ["p2"],
+                        "ambiguous_label_node_ids": [],
                         "notes": ["Detected clause numbering."],
                     },
                     "parser_result": {
@@ -145,8 +145,8 @@ class ObservabilityTests(unittest.TestCase):
                         "reason": "done",
                         "clause_count": 1,
                         "subclause_count": 0,
-                        "boundary_suspect_unit_ids": ["p2"],
-                        "ambiguous_label_unit_ids": [],
+                        "boundary_suspect_node_ids": ["p2"],
+                        "ambiguous_label_node_ids": [],
                         "notes": [],
                     },
                     "messages": [{"kind": "debug"}],

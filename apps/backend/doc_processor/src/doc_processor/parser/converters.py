@@ -16,17 +16,18 @@ from ..parser_types import (
 
 
 def clause_entry_to_targets(entry: ClauseEntry) -> list[DocTargetRef]:
-    return [DocTargetRef(unit_id=unit_id) for unit_id in entry.member_unit_ids]
+    return [DocTargetRef(node_id=node_id) for node_id in entry.member_node_ids]
 
 
 def resolve_targets_to_paragraphs(
     doc: DocIR,
     targets: list[DocTargetRef],
 ) -> list[ParagraphIR]:
-    by_unit = {paragraph.unit_id: paragraph for paragraph in doc.paragraphs}
+    doc.ensure_node_identity()
+    by_node = {paragraph.node_id: paragraph for paragraph in doc.paragraphs}
     resolved: list[ParagraphIR] = []
     for target in targets:
-        paragraph = by_unit.get(target.unit_id)
+        paragraph = by_node.get(target.node_id)
         if paragraph is not None:
             resolved.append(paragraph)
     return resolved
@@ -44,7 +45,7 @@ def attach_parser_metadata_to_doc(
     analysis: ParserAnalysis,
 ) -> DocIR:
     annotated = doc.model_copy(deep=True)
-    paragraph_map = {paragraph.unit_id: paragraph for paragraph in analysis.paragraphs}
+    paragraph_map = {paragraph.node_id: paragraph for paragraph in analysis.paragraphs}
 
     annotated.meta = _merge_meta(
         annotated.meta,
@@ -53,14 +54,14 @@ def attach_parser_metadata_to_doc(
             clause_rule_name=analysis.clause_rule_name,
             subclause_rule_name=analysis.subclause_rule_name,
             clause_entries=deepcopy(analysis.clause_entries),
-            boundary_suspect_unit_ids=list(analysis.boundary_suspect_unit_ids),
-            ambiguous_label_unit_ids=list(analysis.ambiguous_label_unit_ids),
+            boundary_suspect_node_ids=list(analysis.boundary_suspect_node_ids),
+            ambiguous_label_node_ids=list(analysis.ambiguous_label_node_ids),
             notes=list(analysis.notes),
         ),
     )
 
     for paragraph in annotated.paragraphs:
-        current = paragraph_map.get(paragraph.unit_id)
+        current = paragraph_map.get(paragraph.node_id)
         if current is None:
             continue
         paragraph.meta = _merge_meta(

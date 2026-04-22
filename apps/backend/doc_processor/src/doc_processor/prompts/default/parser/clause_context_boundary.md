@@ -19,7 +19,7 @@ Choose one action:
 
 ```json
 {
-  "unit_id": "s1.p71",
+  "node_id": "p_0d4f8a21c9b7e301",
   "text": "paragraph text here",
   "position_in_block": "start | middle | end | only",
   "active_clause_no": "16",
@@ -34,7 +34,7 @@ Choose one action:
 
 ```json
 {
-  "unit_id": "s1.p71",
+  "node_id": "p_0d4f8a21c9b7e301",
   "action": "keep",
   "reason": "One sentence.",
   "anchor_text": null,

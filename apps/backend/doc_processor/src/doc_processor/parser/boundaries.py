@@ -16,7 +16,7 @@ from .selectors import paragraph_lookup, paragraph_position
 
 
 class BoundaryReviewOutput(BaseModel):
-    unit_id: str
+    node_id: str
     action: Literal["keep", "detach", "split"]
     reason: str
     anchor_text: str | None = None
@@ -55,12 +55,12 @@ def detect_boundary_suspects(analysis: ParserAnalysis) -> ParserAnalysis:
     }
 
     if analysis.clause_entries:
-        suspect_ids.update(analysis.clause_entries[-1].member_unit_ids)
+        suspect_ids.update(analysis.clause_entries[-1].member_node_ids)
 
     for paragraph in analysis.paragraphs:
         if not paragraph.clause_id or not paragraph.text.strip():
             continue
-        if paragraph.unit_id in suspect_ids:
+        if paragraph.node_id in suspect_ids:
             paragraph.boundary_suspect = True
             paragraph.notes.append("Included in trailing final clause chunk boundary review.")
             continue
@@ -82,12 +82,12 @@ def detect_boundary_suspects(analysis: ParserAnalysis) -> ParserAnalysis:
         if paragraph.page_number is not None and paragraph.page_number > 1 and hint in {"title", "header"}:
             reasons.append("page_transition_furniture")
         if reasons and span_kinds.isdisjoint({ParagraphCategory.CLAUSE_HEADING, ParagraphCategory.SUBCLAUSE_HEADING}):
-            suspect_ids.add(paragraph.unit_id)
+            suspect_ids.add(paragraph.node_id)
             paragraph.boundary_suspect = True
             paragraph.notes.append(f"Boundary suspect: {', '.join(reasons)}.")
 
-    analysis.boundary_suspect_unit_ids = [paragraph.unit_id for paragraph in analysis.paragraphs if paragraph.unit_id in suspect_ids]
-    for suspect_id in analysis.boundary_suspect_unit_ids:
+    analysis.boundary_suspect_node_ids = [paragraph.node_id for paragraph in analysis.paragraphs if paragraph.node_id in suspect_ids]
+    for suspect_id in analysis.boundary_suspect_node_ids:
         paragraph_map[suspect_id].boundary_suspect = True
     return analysis
 
@@ -97,7 +97,7 @@ def review_boundary_suspects_with_llm(
     analysis: ParserAnalysis,
     config: ParserConfig,
 ) -> dict[str, BoundaryReviewOutput]:
-    if not config.boundary_review_enabled or not analysis.boundary_suspect_unit_ids:
+    if not config.boundary_review_enabled or not analysis.boundary_suspect_node_ids:
         return {}
 
     prompt = load_prompt("parser/clause_context_boundary_batch", profile=config.prompt_profile)
@@ -111,28 +111,28 @@ def review_boundary_suspects_with_llm(
         model_override=config.boundary_model_override,
         config=config,
     )
-    reviews = {review.unit_id: review for review in output.reviews if review.unit_id in set(analysis.boundary_suspect_unit_ids)}
+    reviews = {review.node_id: review for review in output.reviews if review.node_id in set(analysis.boundary_suspect_node_ids)}
     return reviews
 
 
 def review_single_boundary_suspect_with_llm(
     doc: DocIR,
     analysis: ParserAnalysis,
-    unit_id: str,
+    node_id: str,
     config: ParserConfig,
 ) -> BoundaryReviewOutput:
     prompt = load_prompt("parser/clause_context_boundary", profile=config.prompt_profile)
     paragraph_map = paragraph_lookup(analysis.paragraphs)
-    paragraph = paragraph_map[unit_id]
+    paragraph = paragraph_map[node_id]
     index = analysis.paragraphs.index(paragraph)
     prev_text = analysis.paragraphs[index - 1].text if index > 0 else ""
     if prev_text is None:
         prev_text = ""
     next_text = next((candidate.text for candidate in analysis.paragraphs[index + 1 :] if candidate.text.strip()), "")
     payload = {
-        "unit_id": paragraph.unit_id,
+        "node_id": paragraph.node_id,
         "text": paragraph.text,
-        "position_in_block": paragraph_position(analysis.paragraphs, paragraph.unit_id),
+        "position_in_block": paragraph_position(analysis.paragraphs, paragraph.node_id),
         "active_clause_no": paragraph.clause_no,
         "active_subclause_no": paragraph.subclause_no,
         "paragraph_label": _coarse_boundary_hint(paragraph),
@@ -151,16 +151,16 @@ def review_single_boundary_suspect_with_llm(
 
 def _build_boundary_review_blocks(analysis: ParserAnalysis) -> list[dict[str, object]]:
     paragraphs = analysis.paragraphs
-    suspect_ids = set(analysis.boundary_suspect_unit_ids)
+    suspect_ids = set(analysis.boundary_suspect_node_ids)
     if not suspect_ids:
         return []
 
     clause_order: list[str] = []
     suspect_indices_by_clause: dict[str, list[int]] = {}
     for index, paragraph in enumerate(paragraphs):
-        if paragraph.unit_id not in suspect_ids:
+        if paragraph.node_id not in suspect_ids:
             continue
-        clause_id = paragraph.clause_id or f"unit:{paragraph.unit_id}"
+        clause_id = paragraph.clause_id or f"node:{paragraph.node_id}"
         if clause_id not in suspect_indices_by_clause:
             clause_order.append(clause_id)
             suspect_indices_by_clause[clause_id] = []
@@ -185,12 +185,12 @@ def _build_boundary_review_blocks(analysis: ParserAnalysis) -> list[dict[str, ob
                 "is_trailing_final_clause_chunk": any(
                     "trailing final clause chunk" in note.lower() for note in notes
                 ),
-                "suspect_unit_ids": [paragraph.unit_id for paragraph in suspect_paragraphs],
+                "suspect_node_ids": [paragraph.node_id for paragraph in suspect_paragraphs],
                 "paragraphs": [
                     {
-                        "unit_id": paragraph.unit_id,
+                        "node_id": paragraph.node_id,
                         "text": paragraph.text,
-                        "is_suspect": paragraph.unit_id in suspect_ids,
+                        "is_suspect": paragraph.node_id in suspect_ids,
                         "current_kind": paragraph.spans[-1].kind.value if paragraph.spans else None,
                         "active_clause_no": paragraph.clause_no,
                         "active_subclause_no": paragraph.subclause_no,
@@ -209,8 +209,8 @@ def apply_boundary_reviews(analysis: ParserAnalysis, reviews: dict[str, Boundary
         return analysis
 
     paragraph_map = paragraph_lookup(analysis.paragraphs)
-    for unit_id, review in reviews.items():
-        paragraph = paragraph_map.get(unit_id)
+    for node_id, review in reviews.items():
+        paragraph = paragraph_map.get(node_id)
         if paragraph is None:
             continue
         paragraph.notes.append(f"Boundary LLM review: {review.reason}")
@@ -242,8 +242,8 @@ def apply_boundary_reviews(analysis: ParserAnalysis, reviews: dict[str, Boundary
                             reason=review.reason,
                         )
                     )
-    analysis.boundary_suspect_unit_ids = [
-        paragraph.unit_id for paragraph in analysis.paragraphs if paragraph.boundary_suspect
+    analysis.boundary_suspect_node_ids = [
+        paragraph.node_id for paragraph in analysis.paragraphs if paragraph.boundary_suspect
     ]
     analysis.clause_entries = build_clause_entries_from_analysis(analysis.paragraphs)
     return analysis
