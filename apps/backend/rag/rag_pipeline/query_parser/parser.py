@@ -24,15 +24,20 @@ _SYSTEM_PROMPT = """\
 당신은 법률 질문 분석기입니다.
 반드시 아래 형식의 JSON만 출력하세요. 설명, 코드 블록(```), 마크다운 없이 {{ 로 시작하는 순수 JSON만 출력하세요.
 
-{{"law_names": [...], "intent": "...", "is_legal": true/false}}
+{{"law_names": [...], "intent": "...", "is_legal": true/false, "normalized_query": "..."}}
 
-- law_names: 질문에 법령명이 명시된 경우만 추출. 추론하거나 유추하지 말 것. 없으면 []
+- law_names: [현재 질문]에 법령명이 명시된 경우만 추출. [이전 질문]에 나온 법령명은 포함하지 말 것. 추론하거나 유추하지 말 것. 없으면 []
 - intent: "normative" | "case_law" | "mixed" | "graph_lookup" | null (법률 무관이면 null)
   -> "graph_lookup": 법령 구조(하위법령/위임/참조 관계) 조회 질의
 - is_legal: 다음 중 하나라도 해당하면 true, 모두 해당 없으면 false
   · [현재 질문]이 법률 관련인 경우
   · [이전 질문]이 있고, [현재 질문]이 그 맥락에서 의미 있는 후속 질문인 경우
   (날씨·음식·일상 등 법률 및 이전 대화와 무관한 질문은 false)
+- normalized_query: [현재 질문]만을 법률 문서 검색에 최적화된 표준 법률 용어로 변환한 검색 쿼리. [이전 질문] 내용은 포함하지 말 것.
+  · 구어체·줄임말을 표준 법률 용어로 교정 (예: "월급 안주면" → "임금 미지급", "짤리면" → "해고")
+  · 오타·잘못된 법령명을 교정 (예: "근로기쥰법" → "근로기준법")
+  · 원문이 이미 표준 법률 용어면 그대로 반환
+  · is_legal=false이면 빈 문자열 반환
 
 인식 가능한 법령 목록:
 {law_list}
@@ -49,6 +54,7 @@ class QueryParseResult:
     law_names: list[str]
     intent: str | None  # "normative" | "case_law" | "mixed" | None
     is_legal: bool
+    normalized_query: str = ""
     parser_fallback: bool = False
 
 
@@ -84,13 +90,15 @@ class QueryParserConfig:
 
 # ── 프롬프트 빌더 ─────────────────────────────────────────────────────────────
 
-def _build_prompt(query: str) -> str:
+def _build_prompt(query: str, previous_question: str | None = None) -> str:
     """few-shot 예시를 포함한 사용자 메시지를 생성한다."""
     lines: list[str] = []
     for q, expected in FEW_SHOT_EXAMPLES:
         lines.append(f"질문: {q}")
         lines.append(f"출력: {expected}")
         lines.append("")
+    if previous_question:
+        lines.append(f"[이전 맥락 — is_legal 판단 참고용. law_names·normalized_query 추출 금지]: {previous_question}")
     lines.append(f"질문: {query}")
     lines.append("출력:")
     return "\n".join(lines)
@@ -148,6 +156,7 @@ def _parse_llm_output(text: str) -> QueryParseResult:
         law_names=_normalize_law_names(data.get("law_names")),
         intent=data.get("intent") if data.get("intent") in _VALID_INTENTS else None,
         is_legal=bool(data.get("is_legal", True)),
+        normalized_query=str(data.get("normalized_query") or "").strip(),
     )
 
 
@@ -167,7 +176,7 @@ class QueryParser:
         """환경변수에서 설정을 읽어 인스턴스를 생성한다."""
         return cls(QueryParserConfig.from_env())
 
-    def parse(self, query: str) -> QueryParseResult:
+    def parse(self, query: str, previous_question: str | None = None) -> QueryParseResult:
         """질문을 파싱해 구조화 결과를 반환한다.
 
         strict_mode=False(기본값): 파싱 실패 시 fallback 결과 반환 + 경고 로그.
@@ -193,7 +202,7 @@ class QueryParser:
             # QueryParser는 현재 동기 LLM 클라이언트(generate_answer)를 사용한다.
             # API 라우터도 sync endpoint로 동작해 일관성을 유지한다.
             raw_text, _ = generate_answer(
-                _build_prompt(query),
+                _build_prompt(query, previous_question),
                 provider="gemini",
                 url=cfg.url,
                 model=cfg.model,

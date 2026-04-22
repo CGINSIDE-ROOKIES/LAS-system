@@ -73,20 +73,15 @@ def _resolve_query_filters(
       1) UI에서 전달한 request.law_filter
       2) QueryParser가 추출한 parsed.law_names
     """
-    parse_query = (
-        f"[이전 질문] {request.previous_question}\n[현재 질문] {request.question}"
-        if request.previous_question
-        else request.question
-    )
     span = start_span(trace, "query_parse", input={"question": request.question})
     try:
-        parsed = parser.parse(parse_query)
+        parsed = parser.parse(request.question, previous_question=request.previous_question)
     except Exception:
         end_span(span, level="ERROR")
         raise
     logger.info(
-        "query_parser: law_names=%r intent=%r is_legal=%r parser_fallback=%r",
-        parsed.law_names, parsed.intent, parsed.is_legal, parsed.parser_fallback,
+        "query_parser: law_names=%r intent=%r is_legal=%r parser_fallback=%r normalized_query=%r",
+        parsed.law_names, parsed.intent, parsed.is_legal, parsed.parser_fallback, parsed.normalized_query,
     )
     end_span(
         span,
@@ -95,6 +90,7 @@ def _resolve_query_filters(
             "intent": parsed.intent,
             "is_legal": parsed.is_legal,
             "parser_fallback": parsed.parser_fallback,
+            "normalized_query": parsed.normalized_query,
         },
         level="DEFAULT",
     )
@@ -287,6 +283,7 @@ def ask(
         doc_types=request.doc_types,
         law_names=effective_law_names,
         intent=parsed.intent,
+        search_query=parsed.normalized_query or None,
         trace=trace,
         previous_question=request.previous_question,
         previous_answer=request.previous_answer,
@@ -355,6 +352,7 @@ def ask_stream(
                 doc_types=request.doc_types,
                 law_names=effective_law_names,
                 intent=parsed.intent,
+                search_query=parsed.normalized_query or None,
                 trace=trace,
                 previous_question=request.previous_question,
                 previous_answer=request.previous_answer,

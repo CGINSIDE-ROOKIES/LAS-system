@@ -15,40 +15,53 @@ FEW_SHOT_EXAMPLES: list[tuple[str, str]] = [
     # ── normative: 법령명 명시 ────────────────────────────────────────────────
     (
         "하도급거래 공정화에 관한 법률상 대금 지급 기한을 어기면 어떤 불이익이 있나요",
-        '{"law_names": ["하도급거래 공정화에 관한 법률"], "intent": "normative", "is_legal": true}',
+        '{"law_names": ["하도급거래 공정화에 관한 법률"], "intent": "normative", "is_legal": true, "normalized_query": "하도급대금 지급기한 위반 제재"}',
     ),
     # ── normative: 법령명 미명시 → [] ────────────────────────────────────────
     (
         "연장근로 허용 한도가 어떻게 되나요",
-        '{"law_names": [], "intent": "normative", "is_legal": true}',
+        '{"law_names": [], "intent": "normative", "is_legal": true, "normalized_query": "연장근로 허용 한도"}',
     ),
     (
         "직원 해고 시 사전 통보 기간은 어떻게 되나요",
-        '{"law_names": [], "intent": "normative", "is_legal": true}',
+        '{"law_names": [], "intent": "normative", "is_legal": true, "normalized_query": "해고 사전 통보 기간"}',
+    ),
+    # ── 구어체 정규화 ─────────────────────────────────────────────────────────
+    (
+        "월급 안주면 어떻게 해",
+        '{"law_names": [], "intent": "normative", "is_legal": true, "normalized_query": "임금 미지급 시 제재 및 구제"}',
+    ),
+    (
+        "근로기쥰법 연차",
+        '{"law_names": ["근로기준법"], "intent": "normative", "is_legal": true, "normalized_query": "근로기준법 연차 유급휴가"}',
     ),
     # ── case_law ─────────────────────────────────────────────────────────────
     (
         "프리랜서로 계약한 인력이 근로자로 인정될 수 있나요",
-        '{"law_names": [], "intent": "case_law", "is_legal": true}',
+        '{"law_names": [], "intent": "case_law", "is_legal": true, "normalized_query": "프리랜서 근로자성 인정 여부"}',
     ),
     # ── mixed ────────────────────────────────────────────────────────────────
     (
         "근로기준법상 연장근로 수당 관련 판례가 있나요",
-        '{"law_names": ["근로기준법"], "intent": "mixed", "is_legal": true}',
+        '{"law_names": ["근로기준법"], "intent": "mixed", "is_legal": true, "normalized_query": "연장근로 수당 판례"}',
     ),
-    # ── 후속 질문: 이전 질문 맥락으로 법률 관련 판단 ────────────────────────────
+    # ── 후속 질문: 이전 맥락으로 is_legal 판단, law_names는 현재 질문에서만 ────────
     (
-        "[이전 질문] 연장근로수당 지급 기준은 무엇인가요\n[현재 질문] 그럼 야간근로는요",
-        '{"law_names": [], "article_no": "", "intent": "normative", "is_legal": true}',
+        "그럼 야간근로는요",
+        '{"law_names": [], "intent": "normative", "is_legal": true, "normalized_query": "야간근로 수당 지급 기준"}',
+    ),
+    (
+        "수습직원 3개월 후 정규직 전환 안 하려면",
+        '{"law_names": [], "intent": "normative", "is_legal": true, "normalized_query": "수습직원 정규직 전환 거부 요건"}',
     ),
     # ── 대화 중 무관 질문: 이전 질문이 법률이어도 false ──────────────────────────
     (
-        "[이전 질문] 연장근로수당 지급 기준은 무엇인가요\n[현재 질문] 오늘 날씨 어때요",
-        '{"law_names": [], "article_no": "", "intent": null, "is_legal": false}',
+        "오늘 날씨 어때요",
+        '{"law_names": [], "intent": null, "is_legal": false, "normalized_query": ""}',
     ),
     # ── irrelevant ───────────────────────────────────────────────────────────
     (
         "오늘 점심 뭐 먹을까요",
-        '{"law_names": [], "intent": null, "is_legal": false}',
+        '{"law_names": [], "intent": null, "is_legal": false, "normalized_query": ""}',
     ),
 ]
