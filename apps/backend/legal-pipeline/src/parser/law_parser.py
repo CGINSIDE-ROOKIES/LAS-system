@@ -786,7 +786,7 @@ def parse_law_body(
         or _first_non_empty(law_root, "법령일련번호", "mst"),
         "ef_yd": (law_ref or {}).get("ef_yd")
         or _first_non_empty(law_root, "시행일자", "ef_yd")
-        or _first_non_empty(law_root.get("기본정보") or {}, "시행일자"),
+        or _first_non_empty(law_root["기본정보"] if isinstance(law_root.get("기본정보"), dict) else {}, "시행일자"),
         "kind_name": (law_ref or {}).get("kind_name")
         or _first_non_empty(law_root, "법령구분명", "법종구분명", "kind_name"),
         "classified_level": (law_ref or {}).get("classified_level"),

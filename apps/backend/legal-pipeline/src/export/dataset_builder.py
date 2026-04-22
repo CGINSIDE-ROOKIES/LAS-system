@@ -636,7 +636,7 @@ def _normalize_law_meta(parsed_law: dict[str, Any]) -> tuple[str | None, str]:
     return kind_name, classified_level
 
 
-_DELETED_ARTICLE_RE = re.compile(r"제\d[\d의]*조\s+삭제\s*<", re.UNICODE)
+_DELETED_ARTICLE_RE = re.compile(r"제\d+(?:조의\d+|조)\s+삭제", re.UNICODE)
 
 
 def _is_header_only_supplementary(text: str) -> bool:
