@@ -60,11 +60,31 @@ def _as_list(value: Any) -> list[Any]:
     return []
 
 
+_IMG_TAG_RE = re.compile(r"<img[^>]*/?>", re.IGNORECASE)
+
+
+def _flatten_nested_list(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            flat = _flatten_nested_list(item)
+            if flat:
+                parts.append(flat)
+        return "\n".join(parts)
+    return str(value) if value else ""
+
+
 def _normalize_text_preserve_structure(value: Any) -> str | None:
     if value in (None, ""):
         return None
 
+    if isinstance(value, list):
+        value = _flatten_nested_list(value)
+
     text = str(value).replace("\r\n", "\n").replace("\r", "\n").strip()
+    text = _IMG_TAG_RE.sub("", text).strip()
     if not text:
         return None
 
@@ -765,7 +785,8 @@ def parse_law_body(
         "mst": (law_ref or {}).get("mst")
         or _first_non_empty(law_root, "법령일련번호", "mst"),
         "ef_yd": (law_ref or {}).get("ef_yd")
-        or _first_non_empty(law_root, "시행일자", "ef_yd"),
+        or _first_non_empty(law_root, "시행일자", "ef_yd")
+        or _first_non_empty(law_root["기본정보"] if isinstance(law_root.get("기본정보"), dict) else {}, "시행일자"),
         "kind_name": (law_ref or {}).get("kind_name")
         or _first_non_empty(law_root, "법령구분명", "법종구분명", "kind_name"),
         "classified_level": (law_ref or {}).get("classified_level"),
