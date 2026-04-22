@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -96,7 +97,11 @@ def _dedup_texts(texts: list[str]) -> list[str]:
     return results
 
 
+_IMG_TAG_RE = re.compile(r"<img[^>]*/?>", re.IGNORECASE)
+
+
 def _normalize_law_text(text: str, *, preserve_structure: bool) -> str:
+    text = _IMG_TAG_RE.sub("", text).strip()
     return _normalize_structure(text) if preserve_structure else _normalize_space(text)
 
 
@@ -533,6 +538,26 @@ def _build_law_article_text(
     return "\n".join(line for line in lines if line).strip()
 
 
+def _parse_raw_list_text(text: str) -> str:
+    """normalized JSON에 '[[\\'...\\']]' 형태로 baked-in된 부칙 텍스트를 정상 텍스트로 변환."""
+    stripped = text.strip()
+    if not (stripped.startswith("[[") or stripped.startswith("['")):
+        return text
+    try:
+        parsed = ast.literal_eval(stripped)
+        if isinstance(parsed, list):
+            lines = []
+            for item in parsed:
+                if isinstance(item, list):
+                    lines.extend(str(x).strip() for x in item if x)
+                elif item:
+                    lines.append(str(item).strip())
+            return "\n".join(lines)
+    except (ValueError, SyntaxError):
+        pass
+    return text
+
+
 def _build_supplementary_text(
     parsed_law: dict[str, Any],
     supplementary: dict[str, Any],
@@ -564,7 +589,7 @@ def _build_supplementary_text(
     if number:
         lines.append(f"부칙번호: {number}")
     if text:
-        lines.append(text)
+        lines.append(_parse_raw_list_text(text))
 
     return "\n".join(line for line in lines if line).strip()
 

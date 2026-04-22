@@ -60,11 +60,31 @@ def _as_list(value: Any) -> list[Any]:
     return []
 
 
+_IMG_TAG_RE = re.compile(r"<img[^>]*/?>", re.IGNORECASE)
+
+
+def _flatten_nested_list(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            flat = _flatten_nested_list(item)
+            if flat:
+                parts.append(flat)
+        return "\n".join(parts)
+    return str(value) if value else ""
+
+
 def _normalize_text_preserve_structure(value: Any) -> str | None:
     if value in (None, ""):
         return None
 
+    if isinstance(value, list):
+        value = _flatten_nested_list(value)
+
     text = str(value).replace("\r\n", "\n").replace("\r", "\n").strip()
+    text = _IMG_TAG_RE.sub("", text).strip()
     if not text:
         return None
 
