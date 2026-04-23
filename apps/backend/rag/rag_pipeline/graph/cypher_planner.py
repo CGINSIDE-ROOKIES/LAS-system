@@ -64,44 +64,50 @@ ORDER BY child.law_name
 # T2: 위임 관계 (DELEGATES_TO_LAW)
 _CYPHER_DELEGATION = """
 MATCH (source:Law {law_name: $law_name})-[:DELEGATES_TO_LAW]->(target:Law)
-RETURN target.law_name AS target_law_name,
-       target.law_uid  AS target_law_uid
+RETURN target.law_name        AS target_law_name,
+       target.law_uid         AS target_law_uid,
+       target.classified_level AS classified_level
 ORDER BY target.law_name
 """.strip()
 
 # T3: 참조 관계 — 법 → 법 (REFERS_TO_LAW)
 _CYPHER_REFERENCE_LAW = """
 MATCH (source:Law {law_name: $law_name})-[:REFERS_TO_LAW]->(target:Law)
-RETURN 'law' AS ref_type,
-       target.law_name AS ref_name,
-       target.law_uid  AS ref_uid,
-       null            AS ref_article_no
+RETURN 'law'                   AS ref_type,
+       target.law_name         AS ref_name,
+       target.law_uid          AS ref_uid,
+       null                    AS ref_article_no,
+       target.classified_level AS ref_classified_level
 ORDER BY target.law_name
 """.strip()
 
 # T3b: 참조 관계 — 특정 조문 기준 (REFERS_TO_ARTICLE)
 # tgt_law를 함께 traverse해 어느 법령의 조문인지 반환한다.
+# Article 노드의 조문번호 필드명은 article_no_display (article_no 아님).
 _CYPHER_REFERENCE_ARTICLE = """
-MATCH (law:Law {law_name: $law_name})-[:HAS_ARTICLE]->(src:Article {article_no: $article_no})
-MATCH (src)-[:REFERS_TO_ARTICLE]->(tgt:Article)
+MATCH (law:Law {law_name: $law_name})-[:HAS_ARTICLE]->(src:Article {article_no_display: $article_no})
+MATCH (src)-[r:REFERS_TO_ARTICLE]->(tgt:Article)
 MATCH (tgt_law:Law)-[:HAS_ARTICLE]->(tgt)
-RETURN 'article' AS ref_type,
-       tgt.article_no   AS ref_article_no,
-       tgt.article_uid  AS ref_uid,
-       tgt_law.law_name AS ref_name
+RETURN 'article'                  AS ref_type,
+       tgt.article_no_display     AS ref_article_no,
+       tgt.article_uid            AS ref_uid,
+       tgt_law.law_name           AS ref_name,
+       src.article_no_display     AS src_article_no,
+       r.target_paragraph_nos     AS ref_paragraph_nos
 ORDER BY tgt_law.law_name,
-         toInteger(split(replace(tgt.article_no, '제', ''), '조')[0]),
-         tgt.article_no
+         toInteger(split(replace(tgt.article_no_display, '제', ''), '조')[0]),
+         tgt.article_no_display
 """.strip()
 
 # T4: 법령 조문 구조 (HAS_ARTICLE)
 # 조문번호를 숫자 기준으로 정렬한다 (문자열 정렬 시 제10조 < 제2조 오류 방지).
+# Article 노드의 조문번호 필드명은 article_no_display (article_no 아님).
 _CYPHER_STRUCTURE = """
 MATCH (law:Law {law_name: $law_name})-[:HAS_ARTICLE]->(article:Article)
-RETURN article.article_no  AS article_no,
-       article.article_uid AS article_uid
-ORDER BY toInteger(split(replace(article.article_no, '제', ''), '조')[0]),
-         article.article_no
+RETURN article.article_no_display AS article_no,
+       article.article_uid        AS article_uid
+ORDER BY toInteger(split(replace(article.article_no_display, '제', ''), '조')[0]),
+         article.article_no_display
 """.strip()
 
 
