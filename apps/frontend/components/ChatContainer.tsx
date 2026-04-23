@@ -228,7 +228,8 @@ function parseCitations(retrievedDocs: RetrievedDoc[]): Citation[] {
       if (content.length < 20) return null;
       return { article: articleLabel, content, lawName: doc.law_name };
     })
-    .filter((c): c is Citation => c !== null);
+    .filter((c): c is Citation => c !== null)
+    .filter((c, idx, arr) => arr.findIndex((x) => x.article === c.article) === idx);
 }
 
 type FollowUpContext = { question: string; answer: string };
@@ -238,7 +239,8 @@ export function ChatContainer({ onCitationsChange, onQuestionSubmit, onNewChat }
   const [isStreaming, setIsStreaming] = useState(false);
   const [suggestions, setSuggestions] = useState<string[] | null>(null);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  const [defaultQuestions] = useState(() => pickRandom(QUESTION_POOL, 4));
+  const [defaultQuestions, setDefaultQuestions] = useState(() => QUESTION_POOL.slice(0, 4));
+  useEffect(() => { setDefaultQuestions(pickRandom(QUESTION_POOL, 4)); }, []);
   const scrollRef = useRef<HTMLDivElement>(null);
   const settings = useSettings();
 

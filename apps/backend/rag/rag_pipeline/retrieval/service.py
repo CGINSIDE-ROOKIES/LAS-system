@@ -40,3 +40,5 @@ class RetrievalConfig:
     normative_law_ratio: float = 0.6  # normative 슬롯 기반 검색 시 law_article 슬롯 비율
     max_content_chars: int = 1200
     max_total_chars: int = 6000
+    min_chunk_text_len: int = 100
+    buljik_penalty: float = 0.3

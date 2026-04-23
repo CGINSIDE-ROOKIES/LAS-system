@@ -24,6 +24,45 @@ def _score_sort_key(row: dict[str, object]) -> tuple[float, str]:
 
 # ── Law 문서 점수 가산 ────────────────────────────────────────────────────────
 
+def filter_short_chunks(
+    rows: list[dict[str, object]],
+    *,
+    min_text_len: int,
+) -> list[dict[str, object]]:
+    """text가 min_text_len 미만인 껍데기 청크를 제거한다.
+
+    내용 없이 메타데이터 헤더만 남은 부칙 청크 등이 높은 벡터 유사도로
+    상위 순위에 진입하는 것을 막기 위한 hard filter다.
+    """
+    if min_text_len <= 0:
+        return rows
+    return [r for r in rows if len(str(r.get("text", "") or "").strip()) >= min_text_len]
+
+
+def apply_buljik_penalty(
+    rows: list[dict[str, object]],
+    *,
+    penalty: float,
+) -> list[dict[str, object]]:
+    """부칙 청크의 score에 패널티 배율을 적용하고 재정렬한다.
+
+    source_id에 'supplementary'가 포함된 청크를 부칙으로 판정한다.
+    penalty=1.0이면 변화 없음(비활성화).
+    """
+    if penalty >= 1.0 or not rows:
+        return rows
+    result = []
+    for row in rows:
+        cloned = dict(row)
+        if "supplementary" in str(row.get("source_id", "") or ""):
+            cloned["score"] = float(row.get("score", 0.0) or 0.0) * penalty
+        result.append(cloned)
+    result.sort(key=_score_sort_key)
+    for i, row in enumerate(result, start=1):
+        row["rank"] = i
+    return result
+
+
 def apply_law_boost(
     rows: list[dict[str, object]],
     *,

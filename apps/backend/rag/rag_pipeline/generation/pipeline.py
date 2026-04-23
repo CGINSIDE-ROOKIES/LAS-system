@@ -27,7 +27,9 @@ from ..retrieval.ranking import (
     LAW_CONTEXT_MISSING,
     LAW_CONTEXT_OK,
     LAW_CONTEXT_SUPPLEMENTED,
+    apply_buljik_penalty,
     apply_law_boost,
+    filter_short_chunks,
     rank_rows,
     select_rows_with_law_policy,
 )
@@ -413,6 +415,8 @@ class RagPipeline:
             end_span(fusion_span, output={"error": str(exc)}, level="ERROR")
             end_span(retrieval_span, level="ERROR")
             raise
+        rrf_rows = filter_short_chunks(rrf_rows, min_text_len=rcfg.min_chunk_text_len)
+        rrf_rows = apply_buljik_penalty(rrf_rows, penalty=rcfg.buljik_penalty)
         end_span(fusion_span, output={"fused_docs": len(rrf_rows)}, level="DEFAULT")
 
         # ── ranking ────────────────────────────────────────────────────────────
