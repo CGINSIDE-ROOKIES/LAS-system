@@ -292,6 +292,14 @@ class RagPipeline:
         end_span(embed_span, output={"dim": len(vector)}, level="DEFAULT")
 
         # ── qdrant + opensearch 병렬 실행 ──────────────────────────────────────
+        # normative 쿼리에서 legal_relation 컬렉션은 그래프 탐색용 메타데이터라
+        # 코사인 유사도가 높게 나와 실제 법령 조문을 candidate pool에서 밀어낸다.
+        effective_collections = (
+            [c for c in rcfg.qdrant_collections if c != "legal_relation"]
+            if intent == "normative"
+            else rcfg.qdrant_collections
+        )
+
         def _qdrant_task(collection: str) -> list[dict[str, Any]]:
             return search_qdrant_with_vector(
                 vector, candidate_k,
@@ -325,7 +333,7 @@ class RagPipeline:
         # span을 submit 전에 생성해야 실제 실행 시작 시각이 반영된다.
         qdrant_span = start_span(
             retrieval_span, "qdrant",
-            input={"collections": rcfg.qdrant_collections, "candidate_k": candidate_k},
+            input={"collections": effective_collections, "candidate_k": candidate_k},
         )
         opensearch_span = start_span(
             retrieval_span, "opensearch",
@@ -333,7 +341,7 @@ class RagPipeline:
         )
         qdrant_futures = [
             self._executor.submit(_qdrant_task, col)
-            for col in rcfg.qdrant_collections
+            for col in effective_collections
         ]
         bm25_future = self._executor.submit(_bm25_task) if rcfg.opensearch_url else None
 
@@ -363,13 +371,13 @@ class RagPipeline:
             input={"rrf_k": rcfg.rrf_k, "candidate_k": candidate_k, "auto_law_boost": rcfg.auto_law_boost},
         )
         try:
-            _is_normative_slot = intent == "normative" and "law_article" in rcfg.qdrant_collections
+            _is_normative_slot = intent == "normative" and "law_article" in effective_collections
             if _is_normative_slot:
                 # normative 슬롯 기반: law_article 슬롯 상위 고정 + case 슬롯 후순위
-                law_idx = rcfg.qdrant_collections.index("law_article")
+                law_idx = effective_collections.index("law_article")
                 law_article_rows = collection_rows[law_idx]
                 non_law_col_rows = [r for i, r in enumerate(collection_rows) if i != law_idx]
-                non_law_col_names = [c for i, c in enumerate(rcfg.qdrant_collections) if i != law_idx]
+                non_law_col_names = [c for i, c in enumerate(effective_collections) if i != law_idx]
 
                 law_quota = max(1, round(effective_top_k * rcfg.normative_law_ratio))
                 case_quota = effective_top_k - law_quota
@@ -391,7 +399,7 @@ class RagPipeline:
                     collection_rows,
                     rrf_k=rcfg.rrf_k,
                     top_k=candidate_k,
-                    backend_names=rcfg.qdrant_collections,
+                    backend_names=effective_collections,
                 )
                 # candidate_k 전체를 융합해야 law 보강 시 top_k 바깥 문서를 참조할 수 있음
                 rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)

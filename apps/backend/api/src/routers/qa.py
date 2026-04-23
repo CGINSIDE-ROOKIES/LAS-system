@@ -80,13 +80,14 @@ def _resolve_query_filters(
         end_span(span, level="ERROR")
         raise
     logger.info(
-        "query_parser: law_names=%r intent=%r is_legal=%r parser_fallback=%r normalized_query=%r",
-        parsed.law_names, parsed.intent, parsed.is_legal, parsed.parser_fallback, parsed.normalized_query,
+        "query_parser: law_names=%r suggested_laws=%r intent=%r is_legal=%r parser_fallback=%r normalized_query=%r",
+        parsed.law_names, parsed.suggested_laws, parsed.intent, parsed.is_legal, parsed.parser_fallback, parsed.normalized_query,
     )
     end_span(
         span,
         output={
             "law_names": parsed.law_names,
+            "suggested_laws": parsed.suggested_laws,
             "intent": parsed.intent,
             "is_legal": parsed.is_legal,
             "parser_fallback": parsed.parser_fallback,
@@ -97,7 +98,7 @@ def _resolve_query_filters(
     effective_law_names = (
         request.law_filter
         if request.law_filter is not None
-        else (parsed.law_names or None)
+        else (parsed.law_names or parsed.suggested_laws or None)
     )
     return parsed, effective_law_names
 

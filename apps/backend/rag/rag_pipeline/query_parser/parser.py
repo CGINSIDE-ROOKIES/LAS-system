@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..generation.llm_client import generate_answer
 from .data.few_shot import FEW_SHOT_EXAMPLES
@@ -24,9 +24,10 @@ _SYSTEM_PROMPT = """\
 당신은 법률 질문 분석기입니다.
 반드시 아래 형식의 JSON만 출력하세요. 설명, 코드 블록(```), 마크다운 없이 {{ 로 시작하는 순수 JSON만 출력하세요.
 
-{{"law_names": [...], "intent": "...", "is_legal": true/false, "normalized_query": "..."}}
+{{"law_names": [...], "suggested_laws": [...], "intent": "...", "is_legal": true/false, "normalized_query": "..."}}
 
 - law_names: [현재 질문]에 법령명이 명시된 경우만 추출. [이전 질문]에 나온 법령명은 포함하지 말 것. 추론하거나 유추하지 말 것. 없으면 []
+- suggested_laws: 법령명 미명시이지만 질문 맥락에서 명확히 추론 가능한 주요 법령. 불명확하거나 law_names에 이미 있으면 []
 - intent: "normative" | "case_law" | "mixed" | "graph_lookup" | null (법률 무관이면 null)
   -> "graph_lookup": 법령 구조(하위법령/위임/참조 관계) 조회 질의
 - is_legal: 다음 중 하나라도 해당하면 true, 모두 해당 없으면 false
@@ -55,6 +56,7 @@ class QueryParseResult:
     intent: str | None  # "normative" | "case_law" | "mixed" | None
     is_legal: bool
     normalized_query: str = ""
+    suggested_laws: list[str] = field(default_factory=list)
     parser_fallback: bool = False
 
 
@@ -152,11 +154,16 @@ def _normalize_law_names(raw: object) -> list[str]:
 
 def _parse_llm_output(text: str) -> QueryParseResult:
     data = _extract_json(text)
+    law_names = _normalize_law_names(data.get("law_names"))
+    suggested_laws = _normalize_law_names(data.get("suggested_laws"))
+    # law_names에 이미 포함된 항목은 suggested_laws에서 제거
+    suggested_laws = [s for s in suggested_laws if s not in law_names]
     return QueryParseResult(
-        law_names=_normalize_law_names(data.get("law_names")),
+        law_names=law_names,
         intent=data.get("intent") if data.get("intent") in _VALID_INTENTS else None,
         is_legal=bool(data.get("is_legal", True)),
         normalized_query=str(data.get("normalized_query") or "").strip(),
+        suggested_laws=suggested_laws,
     )
 
 
@@ -214,8 +221,8 @@ class QueryParser:
             )
             result = _parse_llm_output(raw_text)
             logger.debug(
-                "query_parser: query=%r law_names=%r intent=%r is_legal=%r",
-                query[:80], result.law_names, result.intent, result.is_legal,
+                "query_parser: query=%r law_names=%r suggested_laws=%r intent=%r is_legal=%r",
+                query[:80], result.law_names, result.suggested_laws, result.intent, result.is_legal,
             )
             return result
 
