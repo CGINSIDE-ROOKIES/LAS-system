@@ -71,7 +71,7 @@ function buildVisDatasets(graphData: LawGraphData) {
       : n.kind === "law"
         ? lawNodeColor(n.lawType)
         : { background: "hsl(142, 71%, 93%)", border: "hsl(142, 60%, 65%)", highlight: { background: "hsl(142, 71%, 86%)", border: "hsl(142, 60%, 55%)" } },
-    font: { color: n.isCenter ? "#fff" : "hsl(220, 30%, 20%)" },
+    font: { color: n.isCenter ? "hsl(217, 91%, 30%)" : "hsl(220, 30%, 20%)", size: n.isCenter ? 13 : 12 },
   }));
 
   const visEdges = graphData.edges.map((e) => ({
