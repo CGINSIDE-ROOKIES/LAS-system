@@ -20,6 +20,40 @@ _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 _VALID_RELATION_TYPES = frozenset({"child_law", "delegation", "reference", "structure"})
 
+# 별명 → 정식 법령명 매핑 (LLM이 줄임말로 추출했을 때 보정)
+_LAW_NAME_ALIASES: dict[str, str] = {
+    # 근로기준법 계열
+    "근기법": "근로기준법",
+    # 기간제법
+    "기간제법": "기간제 및 단시간 근로자 보호 등에 관한 법률",
+    "기간제및단시간근로자법": "기간제 및 단시간 근로자 보호 등에 관한 법률",
+    # 파견법
+    "파견법": "파견근로자 보호 등에 관한 법률",
+    "파견근로자법": "파견근로자 보호 등에 관한 법률",
+    # 최저임금법
+    "최저임금법": "최저임금법",
+    # 남녀고용평등법
+    "남녀평등법": "남녀고용평등과 일·가정 양립 지원에 관한 법률",
+    "남녀고용평등법": "남녀고용평등과 일·가정 양립 지원에 관한 법률",
+    "일가정양립법": "남녀고용평등과 일·가정 양립 지원에 관한 법률",
+    # 퇴직급여법
+    "퇴직급여법": "근로자퇴직급여 보장법",
+    "퇴직금법": "근로자퇴직급여 보장법",
+    # 하도급법
+    "하도급법": "하도급거래 공정화에 관한 법률",
+    "하도급거래법": "하도급거래 공정화에 관한 법률",
+    # 건설산업기본법
+    "건설법": "건설산업기본법",
+}
+
+
+def _resolve_law_name_alias(law_name: str | None) -> str | None:
+    """줄임말·별명을 정식 법령명으로 변환한다."""
+    if not law_name:
+        return law_name
+    normalized = law_name.strip().replace(" ", "")
+    return _LAW_NAME_ALIASES.get(normalized, law_name)
+
 _SYSTEM_PROMPT = """\
 당신은 법령 그래프 질의 분석기입니다.
 반드시 아래 형식의 JSON만 출력하세요. 설명, 코드 블록(```), 마크다운 없이 {{ 로 시작하는 순수 JSON만 출력하세요.
@@ -169,7 +203,7 @@ def _parse_slots(text: str) -> GraphQuerySlots:
     if relation_type not in _VALID_RELATION_TYPES:
         relation_type = None
     return GraphQuerySlots(
-        law_name=data.get("law_name") or None,
+        law_name=_resolve_law_name_alias(data.get("law_name") or None),
         article_no=data.get("article_no") or None,
         relation_type=relation_type,
     )

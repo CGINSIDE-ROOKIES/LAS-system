@@ -3,6 +3,7 @@ import type { GraphEdge, GraphNode } from "@/lib/graph-types";
 interface GraphNodeDetailPanelProps {
   node: GraphNode;
   edges: GraphEdge[];
+  nodes: GraphNode[];
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -17,7 +18,18 @@ const RELATION_LABEL: Record<string, string> = {
   structure: "구조",
 };
 
-export function GraphNodeDetailPanel({ node, edges }: GraphNodeDetailPanelProps) {
+function edgeCounterpartLabel(e: GraphEdge, nodeId: string, nodes: GraphNode[]): string {
+  const otherId = e.source === nodeId ? e.target : e.source;
+  const other = nodes.find((n) => n.id === otherId);
+  if (!other) return e.detail ?? "";
+  const direction = e.source === nodeId ? "→" : "←";
+  const name = other.articleNo
+    ? `${other.lawName ?? ""} ${other.articleNo}`.trim()
+    : (other.lawName ?? other.label);
+  return `${direction} ${name}`;
+}
+
+export function GraphNodeDetailPanel({ node, edges, nodes }: GraphNodeDetailPanelProps) {
   const connectedEdges = edges.filter(
     (e) => e.source === node.id || e.target === node.id
   );
@@ -84,7 +96,7 @@ export function GraphNodeDetailPanel({ node, edges }: GraphNodeDetailPanelProps)
                 <span className="rounded bg-muted px-1 py-0.5 text-[9px] font-medium shrink-0">
                   {RELATION_LABEL[e.relationType] ?? e.relationType}
                 </span>
-                <span className="truncate">{e.detail ?? (e.source === node.id ? "→ 대상" : "← 출처")}</span>
+                <span className="truncate">{edgeCounterpartLabel(e, node.id, nodes)}</span>
               </div>
             ))}
           </div>

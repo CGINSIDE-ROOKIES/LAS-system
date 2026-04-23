@@ -81,6 +81,7 @@ const Index = () => {
                     <GraphNodeDetailPanel
                       node={selectedGraphNode}
                       edges={graphData?.edges ?? []}
+                      nodes={graphData?.nodes ?? []}
                     />
                   )}
                 </div>
