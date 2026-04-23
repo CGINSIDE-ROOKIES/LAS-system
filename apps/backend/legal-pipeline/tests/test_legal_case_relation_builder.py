@@ -383,3 +383,62 @@ def test_build_case_to_case_relation_records_uses_structured_reference_field(tmp
     assert len(records) == 1
     assert records[0]["referenced_case_number"] == "2018다12345"
     assert records[0]["reference_sources"] == ["structured_field"]
+
+
+def test_build_case_to_case_relation_records_logs_expc_mapping_stats(tmp_path, caplog):
+    """expc→prec 매핑 결과(success/no_candidate/ambiguous)가 info 로그로 기록된다."""
+    import json
+    import logging
+
+    raw_dir = tmp_path / "raw" / "02_related_legal_docs"
+    root = raw_dir / "근로기준법"
+
+    # expc canonical row
+    expc_cid = "case::expc::9001"
+    _write_jsonl(
+        root / "canonical_cases.jsonl",
+        [
+            {
+                "id": expc_cid,
+                "canonical_case_id": expc_cid,
+                "canonical_id": expc_cid,
+                "target": "expc",
+                "doc_id": "9001",
+                "doc_number": "21-0001",
+                "root_law_name": "근로기준법",
+                "source_law_names": ["근로기준법"],
+                "source_law_uids": ["law-001"],
+                "detail_available": False,
+                "detail_payload_path": None,
+            },
+            {
+                "id": "case::prec::111",
+                "canonical_case_id": "case::prec::111",
+                "canonical_id": "case::prec::111",
+                "target": "prec",
+                "doc_id": "111",
+                "doc_number": "2018다111",
+                "root_law_name": "근로기준법",
+                "source_law_names": ["근로기준법"],
+                "source_law_uids": ["law-001"],
+                "detail_available": False,
+                "detail_payload_path": None,
+            },
+        ],
+    )
+
+    # sidecar: prec_id=111 (success) + prec_id=999 (no_candidate)
+    sidecar_path = root / "canonical" / "expc" / f"{expc_cid.replace('::', '__')}__related_prec_ids.json"
+    sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+    sidecar_path.write_text(json.dumps({"related_prec_ids": ["111", "999"]}), encoding="utf-8")
+
+    with caplog.at_level(logging.INFO, logger="src.export.legal_case_relation_builder"):
+        records = build_case_to_case_relation_records(raw_related_base_dir=raw_dir)
+
+    assert len(records) == 1
+    assert records[0]["source_case_type"] == "expc"
+
+    stat_logs = [m for m in caplog.messages if "expc->prec mapping stats" in m]
+    assert stat_logs, "mapping stats info 로그가 기록되어야 한다"
+    assert "success" in stat_logs[0]
+    assert "no_candidate" in stat_logs[0]

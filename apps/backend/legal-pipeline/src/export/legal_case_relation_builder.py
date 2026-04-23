@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+import logging
 import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 from src.common.io_utils import _safe_filename
 from src.export.legal_case_dataset_builder import (
@@ -140,6 +144,7 @@ def build_case_to_case_relation_records(
             doc_id_index[did].append(cr)
 
     records_by_id: dict[str, dict[str, Any]] = {}
+    expc_mapping_stats: dict[str, int] = {"success": 0, "no_candidate": 0, "ambiguous": 0}
 
     for row in canonical_rows:
         source_canonical_case_id = str(
@@ -162,8 +167,13 @@ def build_case_to_case_relation_records(
                     and str(c.get("canonical_case_id") or c.get("canonical_id") or c.get("id") or "").strip()
                     != source_canonical_case_id
                 ]
-                if len(candidates) != 1:
+                if len(candidates) == 0:
+                    expc_mapping_stats["no_candidate"] += 1
                     continue
+                if len(candidates) > 1:
+                    expc_mapping_stats["ambiguous"] += 1
+                    continue
+                expc_mapping_stats["success"] += 1
                 target_row = candidates[0]
                 target_cid = str(
                     target_row.get("canonical_case_id") or target_row.get("canonical_id") or target_row.get("id") or ""
@@ -307,6 +317,9 @@ def build_case_to_case_relation_records(
             record["embedding_text"] = _build_case_to_case_text(record)
             record["text"] = record["embedding_text"]
             records_by_id[relation_id] = record
+
+    if any(expc_mapping_stats.values()):
+        _log.info("expc->prec mapping stats: %s", expc_mapping_stats)
 
     return [records_by_id[key] for key in sorted(records_by_id)]
 
