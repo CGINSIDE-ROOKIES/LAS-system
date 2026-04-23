@@ -23,6 +23,7 @@ from .cypher_planner import (
     CypherPlanner,
     GraphQuerySlots,
     _extract_json,
+    _resolve_law_name_alias,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,13 +76,15 @@ _SYSTEM_PROMPT = """\
 아래 스키마에서 자연어 질의에 맞는 Cypher를 생성하세요.
 
 스키마:
-  노드: Law(law_uid, law_name), Article(article_uid, article_no)
+  노드: Law(law_uid, law_name, classified_level), Article(article_uid, article_no_display)
   관계:
     (Law)-[:HAS_ARTICLE]->(Article)
     (Law)-[:HAS_CHILD_LAW]->(Law)
     (Law)-[:DELEGATES_TO_LAW]->(Law)
     (Law)-[:REFERS_TO_LAW]->(Law)
-    (Article)-[:REFERS_TO_ARTICLE]->(Article)
+    (Article)-[:REFERS_TO_ARTICLE {target_paragraph_nos}]->(Article)
+
+중요: Article 노드의 조문번호 필드는 반드시 article_no_display 를 사용 (article_no 는 존재하지 않음)
 
 규칙:
   - MATCH/OPTIONAL MATCH/WHERE/RETURN/ORDER BY/LIMIT/WITH만 허용
@@ -92,9 +95,9 @@ _SYSTEM_PROMPT = """\
 
 relation_type별 필수 RETURN alias:
   child_law:  child_law_name, child_law_uid, classified_level
-  delegation: target_law_name, target_law_uid
-  reference(법→법): ref_type(='law'), ref_name, ref_uid, ref_article_no(=null)
-  reference(조문):  ref_type(='article'), ref_article_no, ref_uid, ref_name
+  delegation: target_law_name, target_law_uid, classified_level
+  reference(법→법): ref_type(='law'), ref_name, ref_uid, ref_article_no(=null), ref_classified_level
+  reference(조문):  ref_type(='article'), ref_article_no, ref_uid, ref_name, src_article_no, ref_paragraph_nos
   structure:  article_no, article_uid
 """
 
@@ -109,27 +112,27 @@ _FEW_SHOT = [
     ),
     (
         "산업안전보건법이 위임하는 법령을 알려주세요.",
-        '{"cypher": "MATCH (source:Law {law_name: $law_name})-[:DELEGATES_TO_LAW]->(target:Law) RETURN target.law_name AS target_law_name, target.law_uid AS target_law_uid ORDER BY target.law_name", "params": {"law_name": "산업안전보건법"}}',
+        '{"cypher": "MATCH (source:Law {law_name: $law_name})-[:DELEGATES_TO_LAW]->(target:Law) RETURN target.law_name AS target_law_name, target.law_uid AS target_law_uid, target.classified_level AS classified_level ORDER BY target.law_name", "params": {"law_name": "산업안전보건법"}}',
     ),
     (
         "최저임금법이 시행령에 위임하는 내용을 알려주세요.",
-        '{"cypher": "MATCH (source:Law {law_name: $law_name})-[:DELEGATES_TO_LAW]->(target:Law) RETURN target.law_name AS target_law_name, target.law_uid AS target_law_uid ORDER BY target.law_name", "params": {"law_name": "최저임금법"}}',
+        '{"cypher": "MATCH (source:Law {law_name: $law_name})-[:DELEGATES_TO_LAW]->(target:Law) RETURN target.law_name AS target_law_name, target.law_uid AS target_law_uid, target.classified_level AS classified_level ORDER BY target.law_name", "params": {"law_name": "최저임금법"}}',
     ),
     (
         "근로기준법이 참조하는 다른 법령은 무엇인가요?",
-        r"""{"cypher": "MATCH (source:Law {law_name: $law_name})-[:REFERS_TO_LAW]->(target:Law) RETURN 'law' AS ref_type, target.law_name AS ref_name, target.law_uid AS ref_uid, null AS ref_article_no ORDER BY target.law_name", "params": {"law_name": "근로기준법"}}""",
+        r"""{"cypher": "MATCH (source:Law {law_name: $law_name})-[:REFERS_TO_LAW]->(target:Law) RETURN 'law' AS ref_type, target.law_name AS ref_name, target.law_uid AS ref_uid, null AS ref_article_no, target.classified_level AS ref_classified_level ORDER BY target.law_name", "params": {"law_name": "근로기준법"}}""",
     ),
     (
         "최저임금법이 다른 법령을 참조하는 경우를 알려주세요.",
-        r"""{"cypher": "MATCH (source:Law {law_name: $law_name})-[:REFERS_TO_LAW]->(target:Law) RETURN 'law' AS ref_type, target.law_name AS ref_name, target.law_uid AS ref_uid, null AS ref_article_no ORDER BY target.law_name", "params": {"law_name": "최저임금법"}}""",
+        r"""{"cypher": "MATCH (source:Law {law_name: $law_name})-[:REFERS_TO_LAW]->(target:Law) RETURN 'law' AS ref_type, target.law_name AS ref_name, target.law_uid AS ref_uid, null AS ref_article_no, target.classified_level AS ref_classified_level ORDER BY target.law_name", "params": {"law_name": "최저임금법"}}""",
     ),
     (
         "하도급거래 공정화에 관한 법률 제2조가 참조하는 조문은?",
-        r"""{"cypher": "MATCH (law:Law {law_name: $law_name})-[:HAS_ARTICLE]->(src:Article {article_no: $article_no}) MATCH (src)-[:REFERS_TO_ARTICLE]->(tgt:Article) MATCH (tgt_law:Law)-[:HAS_ARTICLE]->(tgt) RETURN 'article' AS ref_type, tgt.article_no AS ref_article_no, tgt.article_uid AS ref_uid, tgt_law.law_name AS ref_name ORDER BY tgt_law.law_name, tgt.article_no", "params": {"law_name": "하도급거래 공정화에 관한 법률", "article_no": "제2조"}}""",
+        r"""{"cypher": "MATCH (law:Law {law_name: $law_name})-[:HAS_ARTICLE]->(src:Article {article_no_display: $article_no}) MATCH (src)-[r:REFERS_TO_ARTICLE]->(tgt:Article) MATCH (tgt_law:Law)-[:HAS_ARTICLE]->(tgt) RETURN 'article' AS ref_type, tgt.article_no_display AS ref_article_no, tgt.article_uid AS ref_uid, tgt_law.law_name AS ref_name, src.article_no_display AS src_article_no, r.target_paragraph_nos AS ref_paragraph_nos ORDER BY tgt_law.law_name, toInteger(split(replace(tgt.article_no_display, '제', ''), '조')[0]), tgt.article_no_display", "params": {"law_name": "하도급거래 공정화에 관한 법률", "article_no": "제2조"}}""",
     ),
     (
         "근로기준법의 조문 구조를 보여주세요.",
-        r"""{"cypher": "MATCH (law:Law {law_name: $law_name})-[:HAS_ARTICLE]->(article:Article) RETURN article.article_no AS article_no, article.article_uid AS article_uid ORDER BY toInteger(split(replace(article.article_no, '제', ''), '조')[0]), article.article_no", "params": {"law_name": "근로기준법"}}""",
+        r"""{"cypher": "MATCH (law:Law {law_name: $law_name})-[:HAS_ARTICLE]->(article:Article) RETURN article.article_no_display AS article_no, article.article_uid AS article_uid ORDER BY toInteger(split(replace(article.article_no_display, '제', ''), '조')[0]), article.article_no_display", "params": {"law_name": "근로기준법"}}""",
     ),
 ]
 
@@ -244,8 +247,14 @@ class LlmCypherPlanner:
                 logger.warning("llm_cypher_planner: relation_type 추론 실패 — cypher=%r", cypher[:120])
                 return None
 
+            raw_law_name = params.get("law_name") or None
+            resolved_law_name = _resolve_law_name_alias(raw_law_name)
+            if resolved_law_name != raw_law_name:
+                params["law_name"] = resolved_law_name
+                logger.debug("llm_cypher_planner: alias 해결 %r → %r", raw_law_name, resolved_law_name)
+
             slots = GraphQuerySlots(
-                law_name=params.get("law_name") or None,
+                law_name=resolved_law_name,
                 article_no=params.get("article_no") or None,
                 relation_type=relation_type,
             )
