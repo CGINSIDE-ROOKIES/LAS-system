@@ -48,6 +48,18 @@ const VIS_OPTIONS: Options = {
   },
 };
 
+function lawNodeColor(lawType: string | undefined) {
+  switch (lawType) {
+    case "시행령":
+      return { background: "hsl(217, 75%, 86%)", border: "hsl(217, 55%, 65%)", highlight: { background: "hsl(217, 75%, 79%)", border: "hsl(217, 55%, 55%)" } };
+    case "시행규칙":
+      return { background: "hsl(217, 55%, 82%)", border: "hsl(217, 40%, 62%)", highlight: { background: "hsl(217, 55%, 75%)", border: "hsl(217, 40%, 52%)" } };
+    case "법":
+    default:
+      return { background: "hsl(217, 91%, 92%)", border: "hsl(217, 60%, 70%)", highlight: { background: "hsl(217, 91%, 85%)", border: "hsl(217, 60%, 60%)" } };
+  }
+}
+
 function buildVisDatasets(graphData: LawGraphData) {
   const visNodes = graphData.nodes.map((n) => ({
     id: n.id,
@@ -56,7 +68,7 @@ function buildVisDatasets(graphData: LawGraphData) {
     color: n.isCenter
       ? { background: "hsl(217, 91%, 50%)", border: "hsl(217, 91%, 40%)", highlight: { background: "hsl(217, 91%, 45%)", border: "hsl(217, 91%, 35%)" } }
       : n.kind === "law"
-        ? { background: "hsl(217, 91%, 92%)", border: "hsl(217, 60%, 70%)", highlight: { background: "hsl(217, 91%, 85%)", border: "hsl(217, 60%, 60%)" } }
+        ? lawNodeColor(n.lawType)
         : { background: "hsl(142, 71%, 93%)", border: "hsl(142, 60%, 65%)", highlight: { background: "hsl(142, 71%, 86%)", border: "hsl(142, 60%, 55%)" } },
     font: { color: n.isCenter ? "#fff" : "hsl(220, 30%, 20%)" },
   }));
@@ -65,7 +77,13 @@ function buildVisDatasets(graphData: LawGraphData) {
     id: e.id,
     from: e.source,
     to: e.target,
-    label: e.relationType === "child_law" ? "하위" : e.relationType === "delegation" ? "위임" : e.relationType === "reference" ? "참조" : "",
+    label: e.relationType === "child_law"
+      ? "하위"
+      : e.relationType === "delegation"
+        ? "위임"
+        : e.relationType === "reference"
+          ? (e.paragraphNos?.length ? `참조 · ${e.paragraphNos[0]}` : "참조")
+          : "",
   }));
 
   return {
