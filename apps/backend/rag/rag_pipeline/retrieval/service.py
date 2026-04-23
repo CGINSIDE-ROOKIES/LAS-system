@@ -41,4 +41,3 @@ class RetrievalConfig:
     max_content_chars: int = 1200
     max_total_chars: int = 6000
     min_chunk_text_len: int = 100
-    buljik_penalty: float = 0.3
