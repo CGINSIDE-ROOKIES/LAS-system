@@ -12,6 +12,7 @@ interface LawGraphPanelProps {
   queryKey: number;
   isActive: boolean;
   onNodeSelect: (node: GraphNode | null) => void;
+  onGraphDataChange?: (data: LawGraphData | null) => void;
 }
 
 type PanelState = "idle" | "loading" | "success" | "empty" | "plan_failed" | "error";
@@ -92,7 +93,7 @@ function buildVisDatasets(graphData: LawGraphData) {
   };
 }
 
-export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect }: LawGraphPanelProps) {
+export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onGraphDataChange }: LawGraphPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const networkRef = useRef<Network | null>(null);
   const [state, setState] = useState<PanelState>("idle");
@@ -113,6 +114,7 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect }: L
 
     setState("loading");
     setGraphData(null);
+    onGraphDataChange?.(null);
     onNodeSelect(null);
 
     queryGraph(lastQuery, controller.signal)
@@ -125,6 +127,7 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect }: L
         }
         lastSuccessKey.current = queryKey;  // 성공 시에만 기록
         setGraphData(data);
+        onGraphDataChange?.(data);
         setState("success");
       })
       .catch((err) => {
