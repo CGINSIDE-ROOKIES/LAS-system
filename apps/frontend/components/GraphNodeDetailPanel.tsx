@@ -18,6 +18,12 @@ const RELATION_LABEL: Record<string, string> = {
   structure: "구조",
 };
 
+function formatParagraphNo(raw: string): string {
+  const n = parseInt(raw, 10);
+  if (!isNaN(n)) return `제${n}항`;
+  return raw.startsWith("제") ? raw : `제${raw}항`;
+}
+
 function edgeCounterpartLabel(e: GraphEdge, nodeId: string, nodes: GraphNode[]): string {
   const otherId = e.source === nodeId ? e.target : e.source;
   const other = nodes.find((n) => n.id === otherId);
@@ -78,7 +84,7 @@ export function GraphNodeDetailPanel({ node, edges, nodes }: GraphNodeDetailPane
                   key={p}
                   className="rounded bg-primary/8 px-1.5 py-0.5 text-[10px] text-primary"
                 >
-                  {p}
+                  {formatParagraphNo(p)}
                 </span>
               ))}
             </div>

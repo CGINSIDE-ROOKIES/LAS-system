@@ -83,7 +83,7 @@ function buildVisDatasets(graphData: LawGraphData) {
       : e.relationType === "delegation"
         ? "위임"
         : e.relationType === "reference"
-          ? (e.paragraphNos?.length ? `참조 · ${e.paragraphNos[0]}` : "참조")
+          ? (e.paragraphNos?.length ? `참조 · 제${parseInt(e.paragraphNos[0], 10) || e.paragraphNos[0]}항` : "참조")
           : "",
   }));
 
