@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from src.common.io_utils import (
     _iter_jsonl,
@@ -478,6 +481,8 @@ def collect_list_refs_for_law_name(
     seen: set[tuple[str, str, str]] = set()
     filtered_out = 0
     exclude_doc_kinds = exclude_doc_kinds or set()
+    page = 0
+    items: list[dict[str, Any]] = []
 
     for page in range(1, max_pages + 1):
         payload = fetch_list_page(
@@ -520,6 +525,16 @@ def collect_list_refs_for_law_name(
 
         if len(items) < display:
             break
+
+    if page == max_pages and len(items) >= display:
+        logger.warning(
+            "collect_list_refs_for_law_name: max_pages(%d) 도달 — 결과가 상한에 걸렸을 수 있습니다. "
+            "law=%s, target=%s, 마지막 페이지 결과=%d",
+            max_pages,
+            law_name,
+            target,
+            len(items),
+        )
 
     return refs, filtered_out
 

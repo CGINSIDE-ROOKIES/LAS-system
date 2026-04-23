@@ -1,11 +1,55 @@
 import { useState } from "react";
+import { SimpleMarkdown } from "./SimpleMarkdown";
 import { FileText, BookOpen, ExternalLink, ThumbsUp, ThumbsDown, ChevronDown, FilterX, Scale } from "lucide-react";
+import { renderMarkdown } from "@/lib/render-markdown";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { submitFeedback } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useSettings } from "@/hooks/useSettings";
+
+const CITATIONS_DEFAULT_SHOW = 3;
+
+function CitationsBlock({ citations }: { citations: { article: string; content: string }[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? citations : citations.slice(0, CITATIONS_DEFAULT_SHOW);
+  const hasMore = citations.length > CITATIONS_DEFAULT_SHOW;
+
+  return (
+    <Collapsible defaultOpen>
+      <div className="rounded-lg border-2 border-legal-citation-border bg-legal-citation p-4">
+        <CollapsibleTrigger className="flex w-full items-center justify-between mb-1">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-primary">
+            <BookOpen className="h-3.5 w-3.5" />
+            근거 조문
+          </div>
+          <ChevronDown className="h-3.5 w-3.5 text-primary transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="space-y-2 mt-3">
+            {shown.map((c, i) => (
+              <div key={i} className="rounded-md border border-border bg-card p-3">
+                <div className="mb-1 text-xs font-semibold text-primary">{c.article}</div>
+                <p className="text-xs leading-relaxed text-legal-citation-foreground whitespace-pre-wrap line-clamp-6">{c.content}</p>
+              </div>
+            ))}
+            {hasMore && (
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                className="w-full pt-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+              >
+                {expanded ? "접기" : `+${citations.length - CITATIONS_DEFAULT_SHOW}개 더 보기`}
+              </button>
+            )}
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  );
+}
 
 interface AnswerCardProps {
   data: {
@@ -23,6 +67,7 @@ export function AnswerCard({ data, qaId }: AnswerCardProps) {
   const [thumbsUp, setThumbsUp] = useState<boolean | null>(null);
   const [comment, setComment] = useState("");
   const [showComment, setShowComment] = useState(false);
+  const { showCitations } = useSettings();
 
   const handleFeedback = async (value: boolean) => {
     if (thumbsUp === value) return;
@@ -82,36 +127,16 @@ export function AnswerCard({ data, qaId }: AnswerCardProps) {
       )}
       {/* 답변 요약 */}
       <div className="rounded-lg border border-border bg-card p-4">
-        <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-primary">
+        <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-primary">
           <FileText className="h-3.5 w-3.5" />
           답변 요약
         </div>
-        <p className="text-sm font-medium leading-relaxed text-foreground">{data.summary}</p>
+        <SimpleMarkdown>{data.summary}</SimpleMarkdown>
       </div>
 
       {/* 근거 조문 */}
-      {!data.isIrrelevant && data.citations.length > 0 && (
-        <Collapsible defaultOpen>
-          <div className="rounded-lg border-2 border-legal-citation-border bg-legal-citation p-4">
-            <CollapsibleTrigger className="flex w-full items-center justify-between mb-1">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-primary">
-                <BookOpen className="h-3.5 w-3.5" />
-                근거 조문
-              </div>
-              <ChevronDown className="h-3.5 w-3.5 text-primary transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <div className="space-y-2 mt-3">
-                {data.citations.map((c, i) => (
-                  <div key={i} className="rounded-md border border-border bg-card p-3">
-                    <div className="mb-1 text-xs font-semibold text-primary">{c.article}</div>
-                    <p className="text-xs leading-relaxed text-legal-citation-foreground whitespace-pre-wrap line-clamp-6">{c.content}</p>
-                  </div>
-                ))}
-              </div>
-            </CollapsibleContent>
-          </div>
-        </Collapsible>
+      {showCitations && !data.isIrrelevant && data.citations.length > 0 && (
+        <CitationsBlock citations={data.citations} />
       )}
 
       {/* 관련 문서 */}

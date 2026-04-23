@@ -1,14 +1,15 @@
 services:
   opensearch:
-    image: opensearchproject/opensearch:3
+    image: 'opensearch-nori:latest'  # Dockerfile.opensearch-nori로 빌드한 이미지 fetch
+    pull_policy: never  # Coolify 등 CI에서 docker.io에 fetch 시도 방지 - 자주 그럼
     container_name: legal-pipeline-opensearch
     restart: unless-stopped
     environment:
       discovery.type: single-node
-      DISABLE_INSTALL_DEMO_CONFIG: "true"
-      DISABLE_SECURITY_PLUGIN: "true"
-      OPENSEARCH_JAVA_OPTS: -Xms1g -Xmx1g
-      bootstrap.memory_lock: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: 'true'
+      DISABLE_SECURITY_PLUGIN: 'true'
+      OPENSEARCH_JAVA_OPTS: '-Xms1g -Xmx1g'
+      bootstrap.memory_lock: 'true'
     ulimits:
       memlock:
         soft: -1
@@ -17,28 +18,20 @@ services:
         soft: 65536
         hard: 65536
     ports:
-      - "9200:9200"
-      - "9600:9600"
+      - '9200:9200'
+      - '9600:9600'
     volumes:
-      - /home/cg-rookies/docker-volumes/opensearch_storage:/usr/share/opensearch/data
-      - /home/cg-rookies/docker-volumes/opensearch_plugins:/usr/share/opensearch/plugins
-    entrypoint:
-      - /bin/bash
-      - -lc
-    command: >
-      if [ ! -d /usr/share/opensearch/plugins/analysis-nori ]; then
-        /usr/share/opensearch/bin/opensearch-plugin install --batch analysis-nori;
-      fi;
-      exec /usr/share/opensearch/opensearch-docker-entrypoint.sh
+      - '/home/cg-rookies/docker-volumes/opensearch_storage:/usr/share/opensearch/data'
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      test:
+        - CMD-SHELL
+        - 'curl -sf http://localhost:9200/_cluster/health || exit 1'
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 60s
-
   opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:3
+    image: 'opensearchproject/opensearch-dashboards:3'
     container_name: legal-pipeline-opensearch-dashboards
     restart: unless-stopped
     depends_on:
@@ -46,11 +39,13 @@ services:
         condition: service_healthy
     environment:
       OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
-      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: 'true'
     ports:
-      - "5601:5601"
+      - '5601:5601'
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:5601/api/status || exit 1"]
+      test:
+        - CMD-SHELL
+        - 'curl -sf http://localhost:5601/api/status || exit 1'
       interval: 10s
       timeout: 5s
       retries: 10

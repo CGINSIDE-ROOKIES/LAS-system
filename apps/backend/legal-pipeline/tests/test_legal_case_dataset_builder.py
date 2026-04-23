@@ -371,7 +371,6 @@ def test_build_legal_case_records_uses_per_type_chunking(tmp_path):
         f"detc(max_chars=1600)는 expc(max_chars=1100)보다 chunk 수가 같거나 적어야 함: "
         f"detc={len(detc_chunks)}, expc={len(expc_chunks)}"
     )
-
     # 각 chunk가 해당 유형의 max_chars를 초과하지 않는지 확인 (overlap 때문에 약간 초과 가능)
     detc_cfg = CHUNKING_CONFIG["detc"]
     expc_cfg = CHUNKING_CONFIG["expc"]
@@ -379,3 +378,120 @@ def test_build_legal_case_records_uses_per_type_chunking(tmp_path):
         assert len(r["text"]) <= detc_cfg["max_chars"] * 1.1
     for r in expc_chunks:
         assert len(r["text"]) <= expc_cfg["max_chars"] * 1.1
+
+
+# ---------------------------------------------------------------------------
+# verified_law_case_relations 필터 회귀 테스트
+# ---------------------------------------------------------------------------
+
+
+def _make_canonical_jsonl(tmp_path, canonical_case_id: str, target: str, source_law_names: list[str], detail_path: str) -> None:
+    from src.common.io_utils import _write_jsonl
+    root_dir = tmp_path / "raw" / "02_related_legal_docs" / source_law_names[0]
+    _write_jsonl(
+        root_dir / "canonical_cases.jsonl",
+        [
+            {
+                "id": canonical_case_id,
+                "canonical_case_id": canonical_case_id,
+                "canonical_id": canonical_case_id,
+                "target": target,
+                "doc_type_label": "법령해석례",
+                "doc_id": canonical_case_id.split("::")[-1],
+                "title": "테스트 안건",
+                "doc_number": "23-001",
+                "root_law_name": source_law_names[0],
+                "source_law_names": source_law_names,
+                "source_law_uids": [f"uid-{n}" for n in source_law_names],
+                "source_hit_count": len(source_law_names),
+                "detail_available": True,
+                "detail_payload_path": detail_path,
+            }
+        ],
+    )
+
+
+def test_verified_law_case_relations_filters_to_verified_only(tmp_path):
+    """verified_law_case_relations 전달 시 오염된 source_law_names 대신 검증된 법령만 사용."""
+    from src.common.io_utils import _write_json
+
+    detail_path = tmp_path / "raw" / "02_related_legal_docs" / "파견근로자 보호 등에 관한 법률" / "canonical" / "expc" / "case_expc_1__detail.json"
+    _write_json(
+        detail_path,
+        {
+            "법령해석": {
+                "법령해석례일련번호": "1",
+                "제목": "테스트 안건",
+                "문서번호": "23-001",
+                "회신일자": "2023.01.01",
+                "이유": "본문 내용 " * 30,
+            }
+        },
+    )
+
+    # source_law_names에 8개 법령이 오염되어 있는 상황
+    contaminated_laws = [
+        "파견근로자 보호 등에 관한 법률", "근로기준법", "남녀고용평등법",
+        "기간제법", "최저임금법", "하도급거래법", "노동조합법", "산재보험법",
+    ]
+    _make_canonical_jsonl(
+        tmp_path, "case::expc::1", "expc",
+        contaminated_laws, str(detail_path),
+    )
+
+    # verified_law_case_relations에는 하나만 포함
+    verified_relations = [
+        {
+            "relation_model": "law_to_case",
+            "canonical_case_id": "case::expc::1",
+            "law_name": "파견근로자 보호 등에 관한 법률",
+            "source_law_uid": "uid-파견",
+        }
+    ]
+
+    records = build_legal_case_records(
+        raw_related_base_dir=tmp_path / "raw" / "02_related_legal_docs",
+        verified_law_case_relations=verified_relations,
+    )
+
+    assert records, "레코드가 생성되어야 함"
+    record = records[0]
+    # 검증된 법령 1개만 포함
+    assert record["related_law_names"] == ["파견근로자 보호 등에 관한 법률"]
+    assert len(record["related_law_names"]) == 1
+    # preamble 텍스트에 오염된 법령명 미포함
+    assert "근로기준법" not in record["text"]
+    assert "참조 법령:" in record["text"]
+    assert "관련 법령 검색 hit" not in record["text"]
+
+
+def test_verified_law_case_relations_none_preserves_existing_behavior(tmp_path):
+    """verified_law_case_relations=None 이면 기존 source_law_names 동작 유지 (backwards compatibility)."""
+    from src.common.io_utils import _write_json
+
+    detail_path = tmp_path / "raw" / "02_related_legal_docs" / "근로기준법" / "canonical" / "expc" / "case_expc_2__detail.json"
+    _write_json(
+        detail_path,
+        {
+            "법령해석": {
+                "법령해석례일련번호": "2",
+                "제목": "테스트 안건2",
+                "문서번호": "23-002",
+                "회신일자": "2023.01.01",
+                "이유": "본문 내용2 " * 30,
+            }
+        },
+    )
+    _make_canonical_jsonl(
+        tmp_path, "case::expc::2", "expc",
+        ["근로기준법", "최저임금법"], str(detail_path),
+    )
+
+    # verified_law_case_relations 전달 안 함 → 기존 source_law_names 그대로
+    records = build_legal_case_records(
+        raw_related_base_dir=tmp_path / "raw" / "02_related_legal_docs",
+        verified_law_case_relations=None,
+    )
+
+    assert records
+    assert records[0]["related_law_names"] == ["근로기준법", "최저임금법"]

@@ -92,7 +92,7 @@ def search_bm25(
     top_k: int,
     *,
     opensearch_url: str,
-    index_name: str,
+    index_name: str | list[str],
     timeout: int,
     api_key: str | None = None,
     username: str | None = None,
@@ -126,7 +126,9 @@ def search_bm25(
         search_text_field=(search_text_field.strip() or "search_text"),
     )
 
-    url = f"{opensearch_url.rstrip('/')}/{urllib.parse.quote(index_name)}/_search"
+    indices = index_name if isinstance(index_name, list) else [index_name]
+    index_path = ",".join(urllib.parse.quote(i, safe="") for i in indices if i)
+    url = f"{opensearch_url.rstrip('/')}/{index_path}/_search"
     res = http_json("POST", url, payload, headers, timeout)
     if not isinstance(res, dict):
         raise RetrievalError(f"OpenSearch 응답 형식 오류: dict가 아님 (type={type(res).__name__})")

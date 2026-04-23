@@ -101,4 +101,32 @@
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--border)) transparent;
   }
+
+  .prose-answer h2 {
+    @apply text-sm font-bold mt-4 mb-1;
+  }
+  .prose-answer h3 {
+    @apply text-xs font-semibold mt-3 mb-1 text-primary;
+  }
+  .prose-answer p {
+    @apply text-sm leading-relaxed;
+  }
+  .prose-answer p + p {
+    @apply mt-2;
+  }
+  .prose-answer ul {
+    @apply list-disc pl-4 my-1 space-y-0.5 text-sm;
+  }
+  .prose-answer ol {
+    @apply list-decimal pl-4 my-1 space-y-0.5 text-sm;
+  }
+  .prose-answer strong {
+    @apply font-semibold;
+  }
+  .prose-answer em {
+    @apply italic;
+  }
+  .prose-answer > *:first-child {
+    @apply mt-0;
+  }
 }

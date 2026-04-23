@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from src.common.io_utils import _iter_jsonl, _read_json, _write_jsonl
 from src.common.law_meta import build_law_uid
@@ -408,6 +411,8 @@ def _merge_relation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             dict.fromkeys(list(current.get("_referenced_case_numbers", [])) + list(row.get("_referenced_case_numbers", [])))
         )
         current["relation_confidence"] = max(float(current.get("relation_confidence") or 0), float(row.get("relation_confidence") or 0))
+        if row.get("body_verified") is True:
+            current["body_verified"] = True
         if not current.get("evidence_preview") and row.get("evidence_preview"):
             current["evidence_preview"] = row.get("evidence_preview")
         if not current.get("source_file_path") and row.get("source_file_path"):
@@ -437,6 +442,34 @@ def _merge_relation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 _LAW_LEVEL_RANK = {"법": 0, "시행령": 1, "시행규칙": 2}
 
 
+def _is_unverified_search_hit(row: dict[str, Any]) -> bool:
+    """body 미검증 search_hit-only law_to_case row 판별.
+
+    제거 기준:
+      - relation_model == "law_to_case"
+      - body_verified이 True가 아님 (False 또는 필드 없음 — legacy expanded row 포함)
+      - relation_types == ["search_hit"]
+
+    보조 검증: 위 조건이 참이면 confidence가 0.45여야 한다.
+    그렇지 않으면 confidence 체계 변경 가능성이 있으므로 경고를 남긴다.
+    """
+    if row.get("relation_model") != "law_to_case":
+        return False
+    if row.get("body_verified") is True:
+        return False
+    types = list(row.get("relation_types") or [])
+    if types != ["search_hit"]:
+        return False
+    conf = row.get("relation_confidence")
+    if conf != 0.45:
+        logger.warning(
+            "unverified search_hit row with unexpected confidence %s: %s",
+            conf,
+            row.get("id"),
+        )
+    return True
+
+
 def _classify_law_level(law_name: str | None) -> str:
     name = str(law_name or "")
     if "시행규칙" in name:
@@ -463,7 +496,8 @@ def _dedup_family_search_hits(rows: list[dict[str, Any]]) -> list[dict[str, Any]
             continue
         case_id = str(row.get("canonical_case_id") or row.get("canonical_id") or "").strip()
         root_uid = str(row.get("root_law_uid") or "").strip()
-        key = (case_id, root_uid)
+        root_law_name = str(row.get("root_law_name") or "").strip()
+        key = (case_id, root_uid if root_uid else root_law_name)
         search_hit_only.setdefault(key, []).append(row)
 
     for group_rows in search_hit_only.values():
@@ -504,7 +538,8 @@ def build_legal_relation_records(
                     )
                 )
 
-            return _dedup_family_search_hits(_merge_relation_rows(built_rows))
+            result = _dedup_family_search_hits(_merge_relation_rows(built_rows))
+            return [r for r in result if not _is_unverified_search_hit(r)]
 
     expanded_dir = Path(expanded_base_dir)
     if raw_related_base_dir is not None and expanded_dir == Path("data/expanded/03_expanded_related_docs"):
@@ -515,7 +550,8 @@ def build_legal_relation_records(
     for path in sorted(expanded_dir.rglob("relation_records.jsonl")):
         rows.extend(list(_iter_jsonl(path)))
     if rows:
-        return _merge_relation_rows(rows)
+        result = _merge_relation_rows(rows)
+        return [r for r in result if not _is_unverified_search_hit(r)]
 
     return []
 

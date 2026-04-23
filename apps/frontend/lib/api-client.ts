@@ -78,6 +78,10 @@ export interface AskRequest {
   question: string;
   doc_types?: string[];
   law_filter?: string[];
+  answer_detail?: string;
+  top_k?: number;
+  previous_question?: string;
+  previous_answer?: string;
 }
 
 export interface RetrievedDoc {
@@ -139,15 +143,52 @@ export async function submitFeedback(
   if (!res.ok) await throwApiError(res);
 }
 
-export async function ask(request: AskRequest): Promise<AskResponse> {
+export async function ask(request: AskRequest, signal?: AbortSignal): Promise<AskResponse> {
   const res = await fetch(`${getApiBaseUrl()}/api/v1/qa/ask`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
+    signal,
   });
   if (!res.ok) await throwApiError(res);
   return res.json();
 }
+
+export async function getSuggestions(request: {
+  question: string;
+  answer: string;
+  intent?: string;
+}): Promise<string[]> {
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/api/v1/qa/suggestions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.suggestions) ? data.suggestions : [];
+  } catch {
+    return [];
+  }
+}
+
+// ── Graph ─────────────────────────────────────────────────────────────────────
+
+export type { GraphQueryResponse } from "./graph-types";
+
+export async function queryGraph(query: string, signal?: AbortSignal): Promise<import("./graph-types").GraphQueryResponse> {
+  const res = await fetch(`${getApiBaseUrl()}/api/v1/graph/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+    signal,
+  });
+  if (!res.ok) await throwApiError(res);
+  return res.json();
+}
+
+// ── Q&A stream ────────────────────────────────────────────────────────────────
 
 export async function* askStream(
   request: AskRequest,

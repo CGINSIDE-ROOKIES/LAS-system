@@ -233,6 +233,7 @@ apps/backend/doc-processor/tests/python-hwpx-docs/
 apps/backend/legal-pipeline/data/
 apps/backend/legal-pipeline/.local/
 apps/backend/legal-pipeline/CODEX.md
+apps/backend/legal-pipeline/scripts/experiment*.py
 
 # rag
 apps/backend/rag/docs/
