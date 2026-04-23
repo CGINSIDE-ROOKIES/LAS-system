@@ -313,7 +313,15 @@ def build_case_to_case_relation_records(
 
 def build_case_reference_audit_records(
     raw_related_base_dir: str | Path = "data/raw/02_related_legal_docs",
+    *,
+    include_body_regex: bool = True,
 ) -> list[dict[str, Any]]:
+    """audit 레코드를 생성한다.
+
+    include_body_regex=True (기본): body_text 정규식 검색 포함 — 최대 커버리지
+    include_body_regex=False: structured_field만 사용 — export graph(use_body_regex_fallback=False)와
+                              동일 기준으로 비교할 때 사용
+    """
     canonical_rows, doc_number_index, _ = _iter_case_reference_candidates(raw_related_base_dir)
     if not canonical_rows:
         return []
@@ -336,7 +344,11 @@ def build_case_reference_audit_records(
         source_doc_number = parsed.get("doc_number") or row.get("doc_number")
         body_text = str(parsed.get("body_text") or "").strip()
 
-        referenced_case_rows = _merge_referenced_case_numbers(parsed, body_text, source_doc_number)
+        referenced_case_rows = _merge_referenced_case_numbers(
+            parsed,
+            body_text if include_body_regex else "",
+            source_doc_number,
+        )
         for ref_row in referenced_case_rows:
             referenced_case_number = str(ref_row.get("case_number") or "").strip()
             normalized_ref = _normalize_case_number(referenced_case_number)
@@ -371,6 +383,7 @@ def build_case_reference_audit_records(
                 {
                     "id": f"case_ref_audit::{source_canonical_case_id}::{normalized_ref}",
                     "audit_type": "case_reference_resolution",
+                    "audit_includes_body_regex": include_body_regex,
                     "source_canonical_case_id": source_canonical_case_id,
                     "source_target": source_target,
                     "source_title": parsed.get("title"),
