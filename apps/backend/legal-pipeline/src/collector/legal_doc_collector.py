@@ -509,6 +509,7 @@ def collect_list_refs_for_law_name(
     refs: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
     filtered_out = 0
+    expc_keyword_filtered = 0
     exclude_doc_kinds = exclude_doc_kinds or set()
     page = 0
     items: list[dict[str, Any]] = []
@@ -540,6 +541,7 @@ def collect_list_refs_for_law_name(
 
             if target == "expc" and not _is_relevant_expc_item(item, law_name):
                 filtered_out += 1
+                expc_keyword_filtered += 1
                 continue
 
             ref = build_doc_ref(target, law_name, item)
@@ -567,6 +569,13 @@ def collect_list_refs_for_law_name(
             law_name,
             target,
             len(items),
+        )
+
+    if expc_keyword_filtered:
+        logger.info(
+            "collect_list_refs_for_law_name: expc keyword filter dropped=%d law=%s",
+            expc_keyword_filtered,
+            law_name,
         )
 
     return refs, filtered_out
