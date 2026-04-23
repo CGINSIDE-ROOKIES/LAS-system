@@ -20,7 +20,7 @@ The older low-level surface was easy to use from Python, but awkward for LLMs:
 
 - parser entrypoints returned full `WorkflowState`
 - edit models were split into `ParagraphTextEdit` and `RunTextEdit`
-- annotations inferred target kind from the unit id
+- annotations inferred target kind from the id
 - validation failures raised exceptions instead of returning repairable payloads
 
 The new API keeps the same underlying parser/editor logic, but presents a
@@ -82,14 +82,14 @@ Use one edit model only:
 
 ```python
 class TextEdit(BaseModel):
-    target_kind: Literal["paragraph", "run"]
-    target_unit_id: str
+    target_kind: Literal["paragraph", "run", "cell"]
+    target_id: str
     expected_text: str
     new_text: str
     reason: str = ""
 ```
 
-This replaces the need for separate public run and paragraph edit DTOs.
+This replaces the need for separate public paragraph, run, and cell edit DTOs.
 
 Validation and apply models:
 
@@ -105,8 +105,10 @@ Validation issue codes:
 - `target_kind_mismatch`
 - `text_mismatch`
 - `mixed_content_not_supported`
+- `paragraph_count_mismatch`
 - `unsupported_source_doc_type`
 - `output_path_conflicts_with_source`
+- `native_source_required`
 
 ### Annotations
 
@@ -115,7 +117,7 @@ Use one annotation model only:
 ```python
 class TextAnnotation(BaseModel):
     target_kind: Literal["paragraph", "run"]
-    target_unit_id: str
+    target_id: str
     selected_text: str | None = None
     occurrence_index: int | None = None
     label: str
@@ -243,7 +245,7 @@ from doc_processor.api import GetDocumentContextRequest, get_document_context
 context = get_document_context(
     GetDocumentContextRequest(
         source_path="sample.docx",
-        unit_ids=["s1.p22"],
+        target_ids=["p_15cb9ef0efc99b82"],
         before=1,
         after=1,
         include_runs=True,
@@ -251,9 +253,9 @@ context = get_document_context(
 )
 
 for paragraph in context.paragraphs:
-    print(paragraph.unit_id, paragraph.text)
+    print(paragraph.node_id, paragraph.text)
     for run in paragraph.runs:
-        print(" ", run.unit_id, repr(run.text))
+        print(" ", run.node_id, repr(run.text))
 ```
 
 ### List Editable Targets
@@ -264,14 +266,14 @@ from doc_processor.api import ListEditableTargetsRequest, list_editable_targets
 targets = list_editable_targets(
     ListEditableTargetsRequest(
         source_path="sample.docx",
-        unit_ids=["s1.p22"],
+        target_ids=["p_15cb9ef0efc99b82"],
         target_kinds=["run"],
         include_child_runs=True,
     )
 )
 
 for target in targets.targets:
-    print(target.target_kind, target.target_unit_id, repr(target.current_text))
+    print(target.target_kind, target.target_id, repr(target.current_text))
 ```
 
 ### Validate Edits
@@ -285,7 +287,7 @@ validation = validate_text_edits(
         edits=[
             TextEdit(
                 target_kind="paragraph",
-                target_unit_id="s1.p22",
+                target_id="p_15cb9ef0efc99b82",
                 expected_text="① 이 계약의 계약기간은 계약체결일로부터 개시하여, 출판물의 첫 발행일로부터 ___년까지로 한다. ",
                 new_text="① 이 계약의 계약기간은 계약체결일로부터 시작하여, 출판물의 첫 발행일로부터 ___년까지로 한다. ",
                 reason="용어를 더 자연스럽게 수정",
@@ -310,7 +312,7 @@ result = apply_text_edits(
         edits=[
             TextEdit(
                 target_kind="paragraph",
-                target_unit_id="s1.p21",
+                target_id="p_7a8d9f2c0b1e3a45",
                 expected_text="제3조 (계약기간 등)",
                 new_text="제3조 (계약 기간 등)",
                 reason="표기 통일",
@@ -337,7 +339,7 @@ review = render_review_html(
         annotations=[
             TextAnnotation(
                 target_kind="paragraph",
-                target_unit_id="s1.p22",
+                target_id="p_15cb9ef0efc99b82",
                 selected_text="계약기간",
                 label="Risk",
                 color="#FFDD88",
@@ -378,7 +380,7 @@ tool invocation payloads.
 ```json
 {
   "source_path": "sample.hwpx",
-  "unit_ids": ["s1.p22"],
+  "target_ids": ["p_15cb9ef0efc99b82"],
   "before": 1,
   "after": 1,
   "include_runs": true
@@ -393,7 +395,7 @@ tool invocation payloads.
   "edits": [
     {
       "target_kind": "paragraph",
-      "target_unit_id": "s1.p22",
+      "target_id": "p_15cb9ef0efc99b82",
       "expected_text": "① 이 계약의 계약기간은 계약체결일로부터 개시하여, 출판물의 첫 발행일로부터 ___년까지로 한다. ",
       "new_text": "① 이 계약의 계약기간은 계약체결일로부터 시작하여, 출판물의 첫 발행일로부터 ___년까지로 한다. ",
       "reason": "용어 수정"
@@ -411,7 +413,7 @@ tool invocation payloads.
   "edits": [
     {
       "target_kind": "paragraph",
-      "target_unit_id": "s1.p21",
+      "target_id": "p_7a8d9f2c0b1e3a45",
       "expected_text": "제3조 (계약기간 등)",
       "new_text": "제3조 (계약 기간 등)",
       "reason": "표기 통일"
@@ -429,7 +431,7 @@ tool invocation payloads.
   "annotations": [
     {
       "target_kind": "paragraph",
-      "target_unit_id": "s1.p22",
+      "target_id": "p_15cb9ef0efc99b82",
       "selected_text": "계약기간",
       "label": "Risk",
       "color": "#FFDD88",
@@ -450,7 +452,7 @@ If validation returns `text_mismatch`:
 
 If validation returns `target_kind_mismatch`:
 
-1. keep the same `target_unit_id`
+1. keep the same `target_id`
 2. switch `target_kind` to the correct kind
 3. retry validation
 
