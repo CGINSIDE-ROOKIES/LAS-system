@@ -82,6 +82,7 @@ const Index = () => {
                       node={selectedGraphNode}
                       edges={graphData?.edges ?? []}
                       nodes={graphData?.nodes ?? []}
+                      onClose={() => setSelectedGraphNode(null)}
                     />
                   )}
                 </div>
