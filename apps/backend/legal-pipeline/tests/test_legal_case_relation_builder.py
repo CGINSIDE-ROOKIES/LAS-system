@@ -442,3 +442,136 @@ def test_build_case_to_case_relation_records_logs_expc_mapping_stats(tmp_path, c
     assert stat_logs, "mapping stats info 로그가 기록되어야 한다"
     assert "success" in stat_logs[0]
     assert "no_candidate" in stat_logs[0]
+
+
+def test_build_case_to_case_relation_records_sets_root_law_uid(tmp_path):
+    """case_to_case 레코드에 root_law_uid가 null 없이 설정된다 (이슈 F)."""
+    raw_dir = tmp_path / "raw" / "02_related_legal_docs"
+    root = raw_dir / "근로기준법"
+
+    source_detail_path = root / "canonical" / "prec" / "case_prec_123456__detail.json"
+    _write_json(
+        source_detail_path,
+        {
+            "판례일련번호": "123456",
+            "사건번호": "2019다12345",
+            "선고일자": "2019.05.30",
+            "참조판례": "대법원 2018. 4. 20. 선고 2018다12345 판결",
+            "판례내용": "이 사건은 근로기준법 제43조를 적용하여 2018다12345 판결의 법리를 따랐다.",
+        },
+    )
+    target_detail_path = root / "canonical" / "prec" / "case_prec_777777__detail.json"
+    _write_json(
+        target_detail_path,
+        {"판례일련번호": "777777", "사건번호": "2018다12345", "판례내용": "선행 판결"},
+    )
+
+    _write_jsonl(
+        root / "canonical_cases.jsonl",
+        [
+            {
+                "id": "case::prec::123456",
+                "canonical_case_id": "case::prec::123456",
+                "canonical_id": "case::prec::123456",
+                "target": "prec",
+                "doc_id": "123456",
+                "doc_number": "2019다12345",
+                "root_law_name": "근로기준법",
+                "source_law_names": ["근로기준법"],
+                "source_law_uids": ["law-001"],
+                "detail_available": True,
+                "detail_payload_path": str(source_detail_path),
+            },
+            {
+                "id": "case::prec::777777",
+                "canonical_case_id": "case::prec::777777",
+                "canonical_id": "case::prec::777777",
+                "target": "prec",
+                "doc_id": "777777",
+                "doc_number": "2018다12345",
+                "root_law_name": "근로기준법",
+                "source_law_names": ["근로기준법"],
+                "source_law_uids": ["law-001"],
+                "detail_available": True,
+                "detail_payload_path": str(target_detail_path),
+            },
+        ],
+    )
+
+    records = build_case_to_case_relation_records(raw_related_base_dir=raw_dir)
+
+    assert len(records) == 1
+    record = records[0]
+    assert record["root_law_name"] == "근로기준법"
+    assert record["root_law_uid"] is not None, "root_law_uid가 null이면 Neo4j 그래프 edge 누락 발생"
+    assert "근로기준법" in record["root_law_uid"]
+
+
+def test_build_case_to_case_relation_records_deduplicates_bidirectional(tmp_path):
+    """이슈 N: A→B와 B→A가 동시에 생성될 때 하나만 유지된다."""
+    raw_dir = tmp_path / "raw" / "02_related_legal_docs"
+    root = raw_dir / "근로기준법"
+
+    # source A references B via structured field
+    detail_a = root / "canonical" / "prec" / "case_prec_AAA__detail.json"
+    _write_json(
+        detail_a,
+        {
+            "판례일련번호": "AAA",
+            "사건번호": "2019다111",
+            "참조판례": "대법원 2018. 1. 1. 선고 2018다222 판결",
+            "판례내용": "선행 2018다222 판결 참조.",
+        },
+    )
+    # source B references A via structured field (creates reverse edge)
+    detail_b = root / "canonical" / "prec" / "case_prec_BBB__detail.json"
+    _write_json(
+        detail_b,
+        {
+            "판례일련번호": "BBB",
+            "사건번호": "2018다222",
+            "참조판례": "대법원 2019. 5. 1. 선고 2019다111 판결",
+            "판례내용": "후속 2019다111 판결을 인용.",
+        },
+    )
+
+    _write_jsonl(
+        root / "canonical_cases.jsonl",
+        [
+            {
+                "id": "case::prec::AAA",
+                "canonical_case_id": "case::prec::AAA",
+                "canonical_id": "case::prec::AAA",
+                "target": "prec",
+                "doc_id": "AAA",
+                "doc_number": "2019다111",
+                "root_law_name": "근로기준법",
+                "source_law_names": ["근로기준법"],
+                "detail_available": True,
+                "detail_payload_path": str(detail_a),
+            },
+            {
+                "id": "case::prec::BBB",
+                "canonical_case_id": "case::prec::BBB",
+                "canonical_id": "case::prec::BBB",
+                "target": "prec",
+                "doc_id": "BBB",
+                "doc_number": "2018da222",
+                "root_law_name": "근로기준법",
+                "source_law_names": ["근로기준법"],
+                "detail_available": True,
+                "detail_payload_path": str(detail_b),
+            },
+        ],
+    )
+
+    records = build_case_to_case_relation_records(raw_related_base_dir=raw_dir)
+
+    # 양방향이 생성됐더라도 최종 결과는 1건이어야 함
+    pairs = {
+        (r["source_canonical_case_id"], r["target_canonical_case_id"])
+        for r in records
+    }
+    # 정방향, 역방향이 동시에 존재해서는 안 됨
+    for src, tgt in list(pairs):
+        assert (tgt, src) not in pairs, "양방향 중복 레코드가 dedup 없이 포함됨"

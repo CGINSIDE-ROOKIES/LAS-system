@@ -9,6 +9,7 @@ Observed relation examples from the current dataset:
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,24 @@ from src.parser.legal_case_parser import (
     find_related_law_names,
 )
 from src.parser.law_reference_parser import parse_law_article_references
+
+
+_RELATIVE_LAW_WORDS = frozenset(["동법", "동조", "법", "령"])
+
+
+def _is_valid_law_name(name: str) -> bool:
+    """의미 없는 법령명 파편을 걸러낸다 (파서 노이즈)."""
+    stripped = name.strip()
+    if not stripped:
+        return False
+    # "동법", "동조" 등 지시 상대 참조 단어
+    if stripped in _RELATIVE_LAW_WORDS:
+        return False
+    # " 법"으로 끝나는 파편 (조사/접속사 + 법): "따라 법", "경우 법", "이란 법" 등
+    # 단, "에 관한" / "관련" 이 포함된 정식 법률명은 허용
+    if stripped.endswith(" 법") and "에 관한" not in stripped and "관련" not in stripped:
+        return False
+    return True
 
 
 def _normalize_space(text: str) -> str:
@@ -163,9 +182,17 @@ def build_law_to_law_relation_records(
         family_law_names = [row["law_name"] for row in laws]
         uid_by_name = {row["law_name"]: row["law_uid"] for row in laws}
         law_meta_by_name = {row["law_name"]: row for row in laws}
-        root_law_uid = uid_by_name.get(root_law_name) or build_strict_law_uid(
-            law_meta_by_name.get(root_law_name, {}).get("law_id"),
-            law_meta_by_name.get(root_law_name, {}).get("mst"),
+        # Normalized lookup: directory restoration loses ·/ㆍ → match by stripping spaces and dots
+        _norm = lambda n: n.replace("ㆍ", "").replace("·", "").replace(" ", "")
+        uid_by_normalized = {_norm(row["law_name"]): row["law_uid"] for row in laws}
+        meta_by_normalized = {_norm(row["law_name"]): row for row in laws}
+        root_law_uid = (
+            uid_by_name.get(root_law_name)
+            or uid_by_normalized.get(_norm(root_law_name))
+            or build_strict_law_uid(
+                (meta_by_normalized.get(_norm(root_law_name)) or {}).get("law_id"),
+                (meta_by_normalized.get(_norm(root_law_name)) or {}).get("mst"),
+            )
         )
         family_alias_map = _family_laws_by_alias(root_law_name, laws)
 
@@ -246,6 +273,8 @@ def build_law_to_law_relation_records(
                         )
 
                 for target_law_name, target_refs in sorted(refs_by_target.items()):
+                    if not _is_valid_law_name(target_law_name):
+                        continue
                     target_meta = law_meta_by_name.get(target_law_name)
                     target_law_uid = uid_by_name.get(target_law_name) if target_meta else None
                     target_article_refs = article_refs_map.get(target_law_name, [])

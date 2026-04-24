@@ -1,5 +1,8 @@
 from src.common.io_utils import _write_json
-from src.export.law_to_law_relation_builder import build_law_to_law_relation_records
+from src.export.law_to_law_relation_builder import (
+    _is_valid_law_name,
+    build_law_to_law_relation_records,
+)
 
 
 def test_build_law_to_law_relation_records_extracts_explicit_law_and_article_refs(tmp_path):
@@ -166,3 +169,100 @@ def test_build_law_to_law_relation_records_recovers_noisy_scope_reference_as_fam
     assert row["article_keys"] == ["48"]
     assert row["resolution_status"] == "resolved"
     assert "relative_reference" in row["relation_types"]
+
+
+class TestIsValidLawName:
+    """이슈 K: 의미 없는 법령명 파편 필터."""
+
+    def test_rejects_single_char_variants(self):
+        assert _is_valid_law_name("동법") is False
+
+    def test_rejects_particle_fragment_ending_with_space_법(self):
+        assert _is_valid_law_name("따라 법") is False
+        assert _is_valid_law_name("경우 법") is False
+        assert _is_valid_law_name("이란 법") is False
+        assert _is_valid_law_name("란 법") is False
+        assert _is_valid_law_name("투자설명서상 법") is False
+        assert _is_valid_law_name("하수급인에게 법") is False
+
+    def test_allows_real_law_names(self):
+        assert _is_valid_law_name("근로기준법") is True
+        assert _is_valid_law_name("민법") is True  # 2글자지만 실제 법령명
+        assert _is_valid_law_name("체육시설의 설치·이용에 관한 법률") is True
+        assert _is_valid_law_name("근로자퇴직급여 보장법") is True
+
+    def test_allows_에관한_ending_law(self):
+        assert _is_valid_law_name("건강 및 안전에 관한 법") is True
+
+
+def test_build_law_to_law_records_root_law_uid_with_middle_dot_directory(tmp_path):
+    """이슈 J: 디렉토리명 복원 시 중점 소실로 root_law_uid가 null이 되는 버그 수정."""
+    # 디렉토리명은 _safe_filename 으로 생성 → ·(U+00B7) → _
+    normalized_dir = (
+        tmp_path / "normalized" / "01_current_law"
+        / "남녀고용평등과_일_가정_양립_지원에_관한_법률"
+    )
+
+    # 페이로드의 law_name은 ·(또는 ㆍ) 포함
+    _write_json(
+        normalized_dir / "남녀고용평등과_일_가정_양립_지원에_관한_법률__parsed_law.json",
+        {
+            "law_name": "남녀고용평등과 일·가정 양립 지원에 관한 법률",
+            "law_id": "003881",
+            "mst": "271000",
+            "ef_yd": "20250101",
+            "kind_name": "법률",
+            "classified_level": "법",
+            "articles": [
+                {
+                    "article_key": "19",
+                    "article_no": "제19조",
+                    "article_no_display": "제19조",
+                    "article_title": "육아휴직",
+                    # 법령명 명시 참조 → same_law_reference row 생성
+                    "article_text_raw": "남녀고용평등과 일·가정 양립 지원에 관한 법률 제20조에 따른 육아휴직을 보장한다.",
+                }
+            ],
+        },
+    )
+
+    rows = build_law_to_law_relation_records(tmp_path / "normalized" / "01_current_law")
+
+    # same_law_reference 행이 생성되며 root_law_uid가 null이 아니어야 한다
+    assert len(rows) >= 1
+    assert all(row["root_law_uid"] is not None for row in rows), \
+        "root_law_uid null: 디렉토리명 복원 시 중점 소실 버그"
+
+
+def test_build_law_to_law_records_filters_noisy_external_law_names(tmp_path):
+    """이슈 K: 파서가 추출한 의미 없는 법령명 파편이 law_to_law에 포함되지 않아야 한다."""
+    normalized_dir = (
+        tmp_path / "normalized" / "01_current_law" / "근로기준법"
+    )
+
+    _write_json(
+        normalized_dir / "근로기준법__parsed_law.json",
+        {
+            "law_name": "근로기준법",
+            "law_id": "001872",
+            "mst": "269390",
+            "ef_yd": "20250101",
+            "kind_name": "법률",
+            "classified_level": "법",
+            "articles": [
+                {
+                    "article_key": "1",
+                    "article_no": "제1조",
+                    "article_no_display": "제1조",
+                    "article_title": "목적",
+                    # "따라 법 제3조" 형태의 파편이 포함된 텍스트
+                    "article_text_raw": "이 법은 민법 제750조 및 따라 법 제3조에 따른다.",
+                }
+            ],
+        },
+    )
+
+    rows = build_law_to_law_relation_records(tmp_path / "normalized" / "01_current_law")
+
+    law_names = {row["law_name"] for row in rows}
+    assert "따라 법" not in law_names, '"따라 법" 파편이 법령 관계에 포함됨'

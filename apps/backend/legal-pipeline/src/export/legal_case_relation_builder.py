@@ -10,6 +10,7 @@ from typing import Any
 _log = logging.getLogger(__name__)
 
 from src.common.io_utils import _safe_filename
+from src.common.law_meta import build_law_uid
 from src.export.legal_case_dataset_builder import (
     _iter_canonical_case_rows,
     _load_detail_payload,
@@ -213,6 +214,7 @@ def build_case_to_case_relation_records(
                     "referenced_case_number": target_row.get("doc_number"),
                     "reference_sources": ["html_scraping"],
                     "root_law_name": row.get("root_law_name"),
+                    "root_law_uid": build_law_uid(None, None, row.get("root_law_name")) if row.get("root_law_name") else None,
                     "root_law_names": row.get("root_law_names") or [],
                     "related_law_names": row.get("source_law_names") or [],
                     "source_law_name": (row.get("source_law_names") or [None])[0],
@@ -303,6 +305,7 @@ def build_case_to_case_relation_records(
                 "referenced_case_number": referenced_case_number,
                 "reference_sources": list(ref_row.get("reference_sources") or []),
                 "root_law_name": row.get("root_law_name"),
+                "root_law_uid": build_law_uid(None, None, row.get("root_law_name")) if row.get("root_law_name") else None,
                 "root_law_names": row.get("root_law_names") or [],
                 "related_law_names": row.get("source_law_names") or [],
                 "source_law_name": (row.get("source_law_names") or [None])[0],
@@ -321,7 +324,29 @@ def build_case_to_case_relation_records(
     if any(expc_mapping_stats.values()):
         _log.info("expc->prec mapping stats: %s", expc_mapping_stats)
 
-    return [records_by_id[key] for key in sorted(records_by_id)]
+    rows = [records_by_id[key] for key in sorted(records_by_id)]
+    return _dedup_bidirectional_c2c(rows)
+
+
+def _dedup_bidirectional_c2c(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """case_to_case 양방향 중복(A→B, B→A)을 제거하고 한 방향만 유지한다.
+
+    정렬된 (min_cid, max_cid) 쌍 기준으로 먼저 등장한 레코드를 보존한다.
+    """
+    seen_pairs: set[tuple[str, str]] = set()
+    deduped: list[dict[str, Any]] = []
+    for row in rows:
+        src = str(row.get("source_canonical_case_id") or "").strip()
+        tgt = str(row.get("target_canonical_case_id") or "").strip()
+        if not src or not tgt:
+            deduped.append(row)
+            continue
+        canonical_pair = (min(src, tgt), max(src, tgt))
+        if canonical_pair in seen_pairs:
+            continue
+        seen_pairs.add(canonical_pair)
+        deduped.append(row)
+    return deduped
 
 
 def build_case_reference_audit_records(
