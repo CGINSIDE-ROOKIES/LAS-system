@@ -6,7 +6,7 @@ import { LawReferencePanel } from "@/components/LawReferencePanel";
 import { LawGraphPanel } from "@/components/LawGraphPanel";
 import { GraphNodeDetailPanel } from "@/components/GraphNodeDetailPanel";
 import { cn } from "@/lib/utils";
-import type { GraphNode } from "@/lib/graph-types";
+import type { GraphNode, LawGraphData } from "@/lib/graph-types";
 
 const Index = () => {
   const [citations, setCitations] = useState<Citation[]>([]);
@@ -14,6 +14,7 @@ const Index = () => {
   const [graphQuery, setGraphQuery] = useState<string>("");
   const [graphQuerySeq, setGraphQuerySeq] = useState<number>(0);
   const [selectedGraphNode, setSelectedGraphNode] = useState<GraphNode | null>(null);
+  const [graphData, setGraphData] = useState<LawGraphData | null>(null);
 
   const handleQuestionSubmit = (question: string) => {
     setGraphQuery(question);
@@ -25,6 +26,7 @@ const Index = () => {
     setGraphQuery("");
     setGraphQuerySeq(0);
     setSelectedGraphNode(null);
+    setGraphData(null);
   };
 
   return (
@@ -73,9 +75,15 @@ const Index = () => {
                     queryKey={graphQuerySeq}
                     isActive={rightTab === "graph"}
                     onNodeSelect={setSelectedGraphNode}
+                    onGraphDataChange={setGraphData}
                   />
                   {selectedGraphNode && (
-                    <GraphNodeDetailPanel node={selectedGraphNode} />
+                    <GraphNodeDetailPanel
+                      node={selectedGraphNode}
+                      edges={graphData?.edges ?? []}
+                      nodes={graphData?.nodes ?? []}
+                      onClose={() => setSelectedGraphNode(null)}
+                    />
                   )}
                 </div>
               )}
