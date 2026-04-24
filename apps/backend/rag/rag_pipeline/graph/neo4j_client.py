@@ -32,7 +32,7 @@ class Neo4jClient:
             ) from exc
 
         self._driver = GraphDatabase.driver(uri, auth=(user, password))
-        logger.info("Neo4j 연결: %s (user=%s)", uri, user)
+        logger.debug("Neo4j 연결: %s (user=%s)", uri, user)
 
     @classmethod
     def from_env(cls) -> "Neo4jClient":

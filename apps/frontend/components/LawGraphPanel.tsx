@@ -12,6 +12,7 @@ interface LawGraphPanelProps {
   queryKey: number;
   isActive: boolean;
   onNodeSelect: (node: GraphNode | null) => void;
+  onGraphDataChange?: (data: LawGraphData | null) => void;
 }
 
 type PanelState = "idle" | "loading" | "success" | "empty" | "plan_failed" | "error";
@@ -48,6 +49,18 @@ const VIS_OPTIONS: Options = {
   },
 };
 
+function lawNodeColor(lawType: string | undefined) {
+  switch (lawType) {
+    case "시행령":
+      return { background: "hsl(217, 75%, 86%)", border: "hsl(217, 55%, 65%)", highlight: { background: "hsl(217, 75%, 79%)", border: "hsl(217, 55%, 55%)" } };
+    case "시행규칙":
+      return { background: "hsl(217, 55%, 82%)", border: "hsl(217, 40%, 62%)", highlight: { background: "hsl(217, 55%, 75%)", border: "hsl(217, 40%, 52%)" } };
+    case "법":
+    default:
+      return { background: "hsl(217, 91%, 92%)", border: "hsl(217, 60%, 70%)", highlight: { background: "hsl(217, 91%, 85%)", border: "hsl(217, 60%, 60%)" } };
+  }
+}
+
 function buildVisDatasets(graphData: LawGraphData) {
   const visNodes = graphData.nodes.map((n) => ({
     id: n.id,
@@ -56,16 +69,22 @@ function buildVisDatasets(graphData: LawGraphData) {
     color: n.isCenter
       ? { background: "hsl(217, 91%, 50%)", border: "hsl(217, 91%, 40%)", highlight: { background: "hsl(217, 91%, 45%)", border: "hsl(217, 91%, 35%)" } }
       : n.kind === "law"
-        ? { background: "hsl(217, 91%, 92%)", border: "hsl(217, 60%, 70%)", highlight: { background: "hsl(217, 91%, 85%)", border: "hsl(217, 60%, 60%)" } }
+        ? lawNodeColor(n.lawType)
         : { background: "hsl(142, 71%, 93%)", border: "hsl(142, 60%, 65%)", highlight: { background: "hsl(142, 71%, 86%)", border: "hsl(142, 60%, 55%)" } },
-    font: { color: n.isCenter ? "#fff" : "hsl(220, 30%, 20%)" },
+    font: { color: n.isCenter ? "hsl(217, 91%, 30%)" : "hsl(220, 30%, 20%)", size: n.isCenter ? 13 : 12 },
   }));
 
   const visEdges = graphData.edges.map((e) => ({
     id: e.id,
     from: e.source,
     to: e.target,
-    label: e.relationType === "child_law" ? "하위" : e.relationType === "delegation" ? "위임" : e.relationType === "reference" ? "참조" : "",
+    label: e.relationType === "child_law"
+      ? "하위"
+      : e.relationType === "delegation"
+        ? "위임"
+        : e.relationType === "reference"
+          ? (e.paragraphNos?.length ? `참조 · 제${parseInt(e.paragraphNos[0], 10) || e.paragraphNos[0]}항` : "참조")
+          : "",
   }));
 
   return {
@@ -74,7 +93,7 @@ function buildVisDatasets(graphData: LawGraphData) {
   };
 }
 
-export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect }: LawGraphPanelProps) {
+export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onGraphDataChange }: LawGraphPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const networkRef = useRef<Network | null>(null);
   const [state, setState] = useState<PanelState>("idle");
@@ -95,6 +114,7 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect }: L
 
     setState("loading");
     setGraphData(null);
+    onGraphDataChange?.(null);
     onNodeSelect(null);
 
     queryGraph(lastQuery, controller.signal)
@@ -107,6 +127,7 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect }: L
         }
         lastSuccessKey.current = queryKey;  // 성공 시에만 기록
         setGraphData(data);
+        onGraphDataChange?.(data);
         setState("success");
       })
       .catch((err) => {
