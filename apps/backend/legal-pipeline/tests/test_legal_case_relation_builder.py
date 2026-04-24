@@ -507,12 +507,11 @@ def test_build_case_to_case_relation_records_sets_root_law_uid(tmp_path):
     assert "근로기준법" in record["root_law_uid"]
 
 
-def test_build_case_to_case_relation_records_deduplicates_bidirectional(tmp_path):
-    """이슈 N: A→B와 B→A가 동시에 생성될 때 하나만 유지된다."""
+def test_build_case_to_case_relation_records_preserves_bidirectional_edges(tmp_path):
+    """상호 인용(A→B, B→A)은 각각 독립된 사실이므로 두 엣지 모두 보존된다."""
     raw_dir = tmp_path / "raw" / "02_related_legal_docs"
     root = raw_dir / "근로기준법"
 
-    # source A references B via structured field
     detail_a = root / "canonical" / "prec" / "case_prec_AAA__detail.json"
     _write_json(
         detail_a,
@@ -523,7 +522,6 @@ def test_build_case_to_case_relation_records_deduplicates_bidirectional(tmp_path
             "판례내용": "선행 2018다222 판결 참조.",
         },
     )
-    # source B references A via structured field (creates reverse edge)
     detail_b = root / "canonical" / "prec" / "case_prec_BBB__detail.json"
     _write_json(
         detail_b,
@@ -556,7 +554,7 @@ def test_build_case_to_case_relation_records_deduplicates_bidirectional(tmp_path
                 "canonical_id": "case::prec::BBB",
                 "target": "prec",
                 "doc_id": "BBB",
-                "doc_number": "2018da222",
+                "doc_number": "2018다222",
                 "root_law_name": "근로기준법",
                 "source_law_names": ["근로기준법"],
                 "detail_available": True,
@@ -567,11 +565,10 @@ def test_build_case_to_case_relation_records_deduplicates_bidirectional(tmp_path
 
     records = build_case_to_case_relation_records(raw_related_base_dir=raw_dir)
 
-    # 양방향이 생성됐더라도 최종 결과는 1건이어야 함
     pairs = {
         (r["source_canonical_case_id"], r["target_canonical_case_id"])
         for r in records
     }
-    # 정방향, 역방향이 동시에 존재해서는 안 됨
-    for src, tgt in list(pairs):
-        assert (tgt, src) not in pairs, "양방향 중복 레코드가 dedup 없이 포함됨"
+    # 상호 인용이므로 정방향·역방향 엣지가 모두 존재해야 함
+    assert ("case::prec::AAA", "case::prec::BBB") in pairs, "A→B 엣지 누락"
+    assert ("case::prec::BBB", "case::prec::AAA") in pairs, "B→A 엣지 누락 (상호 인용은 별개 사실)"

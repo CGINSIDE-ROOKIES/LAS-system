@@ -324,29 +324,7 @@ def build_case_to_case_relation_records(
     if any(expc_mapping_stats.values()):
         _log.info("expc->prec mapping stats: %s", expc_mapping_stats)
 
-    rows = [records_by_id[key] for key in sorted(records_by_id)]
-    return _dedup_bidirectional_c2c(rows)
-
-
-def _dedup_bidirectional_c2c(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """case_to_case 양방향 중복(A→B, B→A)을 제거하고 한 방향만 유지한다.
-
-    정렬된 (min_cid, max_cid) 쌍 기준으로 먼저 등장한 레코드를 보존한다.
-    """
-    seen_pairs: set[tuple[str, str]] = set()
-    deduped: list[dict[str, Any]] = []
-    for row in rows:
-        src = str(row.get("source_canonical_case_id") or "").strip()
-        tgt = str(row.get("target_canonical_case_id") or "").strip()
-        if not src or not tgt:
-            deduped.append(row)
-            continue
-        canonical_pair = (min(src, tgt), max(src, tgt))
-        if canonical_pair in seen_pairs:
-            continue
-        seen_pairs.add(canonical_pair)
-        deduped.append(row)
-    return deduped
+    return [records_by_id[key] for key in sorted(records_by_id)]
 
 
 def build_case_reference_audit_records(
