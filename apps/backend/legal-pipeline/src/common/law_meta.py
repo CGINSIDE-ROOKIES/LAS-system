@@ -80,6 +80,8 @@ def normalize_identifier_token(value: Any) -> str:
         return "unknown"
 
     text = text.replace("::", "-")
+    # U+318D (Korean interpunct ㆍ) → U+00B7 (middle dot ·) 통일
+    text = text.replace("ㆍ", "·")
     text = re.sub(r"\s+", "_", text)
     text = re.sub(r"[\\/]+", "-", text)
     return text

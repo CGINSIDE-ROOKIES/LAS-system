@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
+import logging
 import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+_log = logging.getLogger(__name__)
+
 from src.common.io_utils import _safe_filename
+from src.common.law_meta import build_law_uid
 from src.export.legal_case_dataset_builder import (
     _iter_canonical_case_rows,
     _load_detail_payload,
@@ -140,6 +145,7 @@ def build_case_to_case_relation_records(
             doc_id_index[did].append(cr)
 
     records_by_id: dict[str, dict[str, Any]] = {}
+    expc_mapping_stats: dict[str, int] = {"success": 0, "no_candidate": 0, "ambiguous": 0}
 
     for row in canonical_rows:
         source_canonical_case_id = str(
@@ -162,8 +168,13 @@ def build_case_to_case_relation_records(
                     and str(c.get("canonical_case_id") or c.get("canonical_id") or c.get("id") or "").strip()
                     != source_canonical_case_id
                 ]
-                if len(candidates) != 1:
+                if len(candidates) == 0:
+                    expc_mapping_stats["no_candidate"] += 1
                     continue
+                if len(candidates) > 1:
+                    expc_mapping_stats["ambiguous"] += 1
+                    continue
+                expc_mapping_stats["success"] += 1
                 target_row = candidates[0]
                 target_cid = str(
                     target_row.get("canonical_case_id") or target_row.get("canonical_id") or target_row.get("id") or ""
@@ -203,6 +214,7 @@ def build_case_to_case_relation_records(
                     "referenced_case_number": target_row.get("doc_number"),
                     "reference_sources": ["html_scraping"],
                     "root_law_name": row.get("root_law_name"),
+                    "root_law_uid": build_law_uid(None, None, row.get("root_law_name")) if row.get("root_law_name") else None,
                     "root_law_names": row.get("root_law_names") or [],
                     "related_law_names": row.get("source_law_names") or [],
                     "source_law_name": (row.get("source_law_names") or [None])[0],
@@ -293,6 +305,7 @@ def build_case_to_case_relation_records(
                 "referenced_case_number": referenced_case_number,
                 "reference_sources": list(ref_row.get("reference_sources") or []),
                 "root_law_name": row.get("root_law_name"),
+                "root_law_uid": build_law_uid(None, None, row.get("root_law_name")) if row.get("root_law_name") else None,
                 "root_law_names": row.get("root_law_names") or [],
                 "related_law_names": row.get("source_law_names") or [],
                 "source_law_name": (row.get("source_law_names") or [None])[0],
@@ -308,12 +321,23 @@ def build_case_to_case_relation_records(
             record["text"] = record["embedding_text"]
             records_by_id[relation_id] = record
 
+    if any(expc_mapping_stats.values()):
+        _log.info("expc->prec mapping stats: %s", expc_mapping_stats)
+
     return [records_by_id[key] for key in sorted(records_by_id)]
 
 
 def build_case_reference_audit_records(
     raw_related_base_dir: str | Path = "data/raw/02_related_legal_docs",
+    *,
+    include_body_regex: bool = True,
 ) -> list[dict[str, Any]]:
+    """audit 레코드를 생성한다.
+
+    include_body_regex=True (기본): body_text 정규식 검색 포함 — 최대 커버리지
+    include_body_regex=False: structured_field만 사용 — export graph(use_body_regex_fallback=False)와
+                              동일 기준으로 비교할 때 사용
+    """
     canonical_rows, doc_number_index, _ = _iter_case_reference_candidates(raw_related_base_dir)
     if not canonical_rows:
         return []
@@ -336,7 +360,11 @@ def build_case_reference_audit_records(
         source_doc_number = parsed.get("doc_number") or row.get("doc_number")
         body_text = str(parsed.get("body_text") or "").strip()
 
-        referenced_case_rows = _merge_referenced_case_numbers(parsed, body_text, source_doc_number)
+        referenced_case_rows = _merge_referenced_case_numbers(
+            parsed,
+            body_text if include_body_regex else "",
+            source_doc_number,
+        )
         for ref_row in referenced_case_rows:
             referenced_case_number = str(ref_row.get("case_number") or "").strip()
             normalized_ref = _normalize_case_number(referenced_case_number)
@@ -371,6 +399,7 @@ def build_case_reference_audit_records(
                 {
                     "id": f"case_ref_audit::{source_canonical_case_id}::{normalized_ref}",
                     "audit_type": "case_reference_resolution",
+                    "audit_includes_body_regex": include_body_regex,
                     "source_canonical_case_id": source_canonical_case_id,
                     "source_target": source_target,
                     "source_title": parsed.get("title"),

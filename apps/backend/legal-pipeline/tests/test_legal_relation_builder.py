@@ -339,3 +339,62 @@ def test_non_law_to_case_always_kept():
             "relation_confidence": 0.45,
         }
         assert _is_unverified_search_hit(row) is False, f"{model} should not be flagged"
+
+
+def test_build_legal_relation_records_logs_dropped_in_fallback_path(tmp_path, caplog):
+    """expanded fallback 경로에서 unverified search_hit 제거 시 warning 로그가 남는다."""
+    import logging
+
+    expanded_dir = tmp_path / "expanded" / "03_expanded_related_docs" / "근로기준법"
+    _write_jsonl(
+        expanded_dir / "relation_records.jsonl",
+        [
+            {
+                "id": "relation::case::prec::111::001",
+                "canonical_case_id": "case::prec::111",
+                "relation_model": "law_to_case",
+                "relation_types": ["search_hit"],
+                "body_verified": None,
+                "relation_confidence": 0.45,
+                "target": "prec",
+                "law_name": "근로기준법",
+                "source_law_name": "근로기준법",
+            },
+            {
+                "id": "relation::case::prec::222::001",
+                "canonical_case_id": "case::prec::222",
+                "relation_model": "law_to_case",
+                "relation_types": ["search_hit", "cited_law"],
+                "body_verified": True,
+                "target": "prec",
+                "law_name": "근로기준법",
+                "source_law_name": "근로기준법",
+            },
+        ],
+    )
+
+    with caplog.at_level(logging.WARNING, logger="src.export.legal_relation_builder"):
+        records = build_legal_relation_records(
+            expanded_base_dir=tmp_path / "expanded" / "03_expanded_related_docs"
+        )
+
+    assert len(records) == 1
+    assert records[0]["canonical_case_id"] == "case::prec::222"
+
+    drop_warnings = [m for m in caplog.messages if "dropped=" in m and "path=fallback" in m]
+    assert drop_warnings, "dropped 건수 warning이 기록되어야 한다"
+    assert "dropped=1" in drop_warnings[0]
+
+
+def test_build_legal_relation_records_logs_warning_when_raw_has_no_data(tmp_path, caplog):
+    """raw_related_base_dir을 전달했으나 데이터가 없을 때 fallback 진입 warning이 남는다."""
+    import logging
+
+    empty_raw_dir = tmp_path / "raw" / "02_related_legal_docs"
+    empty_raw_dir.mkdir(parents=True)
+
+    with caplog.at_level(logging.WARNING, logger="src.export.legal_relation_builder"):
+        build_legal_relation_records(raw_related_base_dir=empty_raw_dir)
+
+    fallback_warnings = [m for m in caplog.messages if "raw path had no data" in m]
+    assert fallback_warnings, "raw 데이터 없을 때 fallback 진입 warning이 기록되어야 한다"

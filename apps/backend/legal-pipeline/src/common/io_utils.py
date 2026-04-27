@@ -8,6 +8,7 @@ from typing import Any, Iterable, Iterator
 
 def _safe_filename(text: str) -> str:
     text = text.strip()
+    text = text.replace("ㆍ", "·")  # U+318D (Korean interpunct) → U+00B7 (middle dot), both → _
     text = re.sub(r"[^\w가-힣.-]+", "_", text)
     text = re.sub(r"_+", "_", text)
     return text.strip("_") or "unnamed"
