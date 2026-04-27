@@ -1,3 +1,4 @@
+import { shortenLawName } from "@/lib/graph-adapter";
 import type { GraphEdge, GraphEdgeRelationType, GraphNode } from "@/lib/graph-types";
 
 interface GraphNodeDetailPanelProps {
@@ -30,9 +31,10 @@ function formatParagraphNo(raw: string): string {
 function getNodeLabel(nodeId: string, nodes: GraphNode[]): string {
   const found = nodes.find((n) => n.id === nodeId);
   if (!found) return nodeId;
+  const lawName = found.lawName ? shortenLawName(found.lawName) : undefined;
   return found.articleNo
-    ? `${found.lawName ?? ""} ${found.articleNo}`.trim()
-    : (found.lawName ?? found.label);
+    ? `${lawName ?? ""} ${found.articleNo}`.trim()
+    : (lawName ?? found.label);
 }
 
 export function GraphNodeDetailPanel({ node, edges, nodes, onClose }: GraphNodeDetailPanelProps) {
@@ -83,7 +85,9 @@ export function GraphNodeDetailPanel({ node, edges, nodes, onClose }: GraphNodeD
       <div className="flex-1 overflow-y-auto scrollbar-thin bg-muted/30 px-4 pb-3">
         {/* 법령명 */}
         {node.lawName && (
-          <p className="text-xs font-semibold text-foreground">{node.lawName}</p>
+          <p className="text-xs font-semibold text-foreground" title={node.lawName}>
+            {shortenLawName(node.lawName)}
+          </p>
         )}
 
         {/* 조문번호 */}
