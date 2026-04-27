@@ -44,9 +44,9 @@ _ALLOWED_RELS = frozenset({
 })
 # `[:TYPE]` 및 `[r:TYPE]`, `[r:TYPE*]` 등 변수·범위 포함 패턴 모두 캡처 (P1)
 _REL_RE = re.compile(r"\[(?:\w+\s*:\s*|:)(\w+)")
-# `*]` 또는 `*N..` 패턴: 상한 없는 가변 길이 경로 탐지
-# 허용: `*1..3`, `*..3` / 차단: `*]`, `*1..`, `*N`
-_UNBOUNDED_VAR_LEN_RE = re.compile(r"\*(?:\d+\.\.|\.\.)?]|\*\d*]")
+# 가변 길이 관계 패턴 전체 캡처: 타입 있음/없음, 변수 있음/없음 통합
+# 예) [*], [r*], [:TYPE*], [r:TYPE*1..3] → * 이후 범위 문자열을 group(1)으로 캡처
+_VAR_LEN_RE = re.compile(r"\[\w*(?::\w+)?\*([^\]]*)]")
 
 
 class CypherGuardError(ValueError):
@@ -77,25 +77,25 @@ class CypherGuard:
 
     @staticmethod
     def _validate_var_length(cypher: str) -> None:
-        # `[r:TYPE*N..M]` 패턴에서 상한 M 추출, 없거나 초과하면 차단
-        for m in re.finditer(r"\*(\d*)\.\.(\d*)]", cypher):
-            upper_str = m.group(2)
-            if not upper_str:
+        # 타입 있음/없음, 변수 있음/없음 모든 가변 길이 패턴 통합 검사
+        for m in _VAR_LEN_RE.finditer(cypher):
+            spec = m.group(1)  # * 이후 문자열: "", "3", "1..3", "1..", "..3"
+            if ".." in spec:
+                upper_str = spec.split("..")[-1]
+                if not upper_str:
+                    raise CypherGuardError(
+                        "unbounded variable-length path (*N..) is not allowed; "
+                        f"use *1..{CypherGuard._MAX_VAR_LEN_DEPTH}"
+                    )
+                if int(upper_str) > CypherGuard._MAX_VAR_LEN_DEPTH:
+                    raise CypherGuardError(
+                        f"variable-length path depth {upper_str} exceeds max "
+                        f"{CypherGuard._MAX_VAR_LEN_DEPTH}"
+                    )
+            else:
+                # "" (*단독) 또는 "3" (*N 단독) → 상한 없음
                 raise CypherGuardError(
-                    "unbounded variable-length path (*N..) is not allowed; "
-                    f"use *1..{CypherGuard._MAX_VAR_LEN_DEPTH}"
-                )
-            if int(upper_str) > CypherGuard._MAX_VAR_LEN_DEPTH:
-                raise CypherGuardError(
-                    f"variable-length path depth {upper_str} exceeds max "
-                    f"{CypherGuard._MAX_VAR_LEN_DEPTH}"
-                )
-        # `[r:TYPE*]` 또는 `[r:TYPE*N]` (상한 없는 단독 숫자) 차단
-        for m in re.finditer(r"\[(?:\w+\s*:\s*|:)\w+(\*(?:\d+)?)]", cypher):
-            spec = m.group(1)  # e.g. "*" or "*3"
-            if ".." not in spec:
-                raise CypherGuardError(
-                    f"unbounded variable-length path '{spec}' is not allowed; "
+                    f"unbounded variable-length path '*{spec}' is not allowed; "
                     f"use *1..{CypherGuard._MAX_VAR_LEN_DEPTH}"
                 )
 
