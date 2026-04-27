@@ -44,6 +44,9 @@ _ALLOWED_RELS = frozenset({
 })
 # `[:TYPE]` 및 `[r:TYPE]`, `[r:TYPE*]` 등 변수·범위 포함 패턴 모두 캡처 (P1)
 _REL_RE = re.compile(r"\[(?:\w+\s*:\s*|:)(\w+)")
+# `*]` 또는 `*N..` 패턴: 상한 없는 가변 길이 경로 탐지
+# 허용: `*1..3`, `*..3` / 차단: `*]`, `*1..`, `*N`
+_UNBOUNDED_VAR_LEN_RE = re.compile(r"\*(?:\d+\.\.|\.\.)?]|\*\d*]")
 
 
 class CypherGuardError(ValueError):
@@ -52,6 +55,8 @@ class CypherGuardError(ValueError):
 
 class CypherGuard:
     """실행 전 Cypher 안전성 검증 (injection/allowlist)."""
+
+    _MAX_VAR_LEN_DEPTH = 5
 
     @staticmethod
     def validate(cypher: str) -> None:
@@ -67,6 +72,32 @@ class CypherGuard:
                 raise CypherGuardError(f"forbidden relationship type: {rel}")
         if "MATCH" not in upper:
             raise CypherGuardError("query must contain at least one MATCH clause")
+        # 상한 없는 가변 길이 경로 차단 (순환 그래프에서 무한 탐색 방지)
+        CypherGuard._validate_var_length(cypher)
+
+    @staticmethod
+    def _validate_var_length(cypher: str) -> None:
+        # `[r:TYPE*N..M]` 패턴에서 상한 M 추출, 없거나 초과하면 차단
+        for m in re.finditer(r"\*(\d*)\.\.(\d*)]", cypher):
+            upper_str = m.group(2)
+            if not upper_str:
+                raise CypherGuardError(
+                    "unbounded variable-length path (*N..) is not allowed; "
+                    f"use *1..{CypherGuard._MAX_VAR_LEN_DEPTH}"
+                )
+            if int(upper_str) > CypherGuard._MAX_VAR_LEN_DEPTH:
+                raise CypherGuardError(
+                    f"variable-length path depth {upper_str} exceeds max "
+                    f"{CypherGuard._MAX_VAR_LEN_DEPTH}"
+                )
+        # `[r:TYPE*]` 또는 `[r:TYPE*N]` (상한 없는 단독 숫자) 차단
+        for m in re.finditer(r"\[(?:\w+\s*:\s*|:)\w+(\*(?:\d+)?)]", cypher):
+            spec = m.group(1)  # e.g. "*" or "*3"
+            if ".." not in spec:
+                raise CypherGuardError(
+                    f"unbounded variable-length path '{spec}' is not allowed; "
+                    f"use *1..{CypherGuard._MAX_VAR_LEN_DEPTH}"
+                )
 
 
 # ── 시스템 프롬프트 ────────────────────────────────────────────────────────────
@@ -90,6 +121,8 @@ _SYSTEM_PROMPT = """\
   - MATCH/OPTIONAL MATCH/WHERE/RETURN/ORDER BY/LIMIT/WITH만 허용
   - CREATE/MERGE/SET/DELETE/DETACH/DROP/CALL/LOAD/UNION/apoc.* 절대 금지
   - 파라미터는 반드시 $law_name, $article_no 형식 사용 (값 직접 삽입 금지)
+  - 가변 길이 경로 사용 시 반드시 상한 명시: *1..5 형식 (예: [:REFERS_TO_ARTICLE*1..3])
+    상한 없는 * 또는 *N.. 는 절대 금지 (그래프 순환으로 무한 탐색 발생)
   - 반드시 아래 JSON 형식만 출력 (설명/코드블록/마크다운 금지):
     {"cypher": "...", "params": {"law_name": "..."}}
 
