@@ -202,6 +202,7 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
         graphDataRef.current = merged;
         isExpandRef.current = true;   // fit 억제
         setGraphData(merged);
+        onGraphDataChange?.(merged);
       })
       .catch(() => {
         // 실패 시 expandedNodes에서 제거해 재시도 가능하게 유지
