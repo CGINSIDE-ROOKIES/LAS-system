@@ -1,4 +1,4 @@
-import type { GraphEdge, GraphNode } from "@/lib/graph-types";
+import type { GraphEdge, GraphEdgeRelationType, GraphNode } from "@/lib/graph-types";
 
 interface GraphNodeDetailPanelProps {
   node: GraphNode;
@@ -19,21 +19,20 @@ const RELATION_LABEL: Record<string, string> = {
   structure: "구조",
 };
 
+const RELATION_ORDER: GraphEdgeRelationType[] = ["child_law", "delegation", "reference", "structure"];
+
 function formatParagraphNo(raw: string): string {
   const n = parseInt(raw, 10);
   if (!isNaN(n)) return `제${n}항`;
   return raw.startsWith("제") ? raw : `제${raw}항`;
 }
 
-function edgeCounterpartLabel(e: GraphEdge, nodeId: string, nodes: GraphNode[]): string {
-  const otherId = e.source === nodeId ? e.target : e.source;
-  const other = nodes.find((n) => n.id === otherId);
-  if (!other) return e.detail ?? "";
-  const direction = e.source === nodeId ? "→" : "←";
-  const name = other.articleNo
-    ? `${other.lawName ?? ""} ${other.articleNo}`.trim()
-    : (other.lawName ?? other.label);
-  return `${direction} ${name}`;
+function getNodeLabel(nodeId: string, nodes: GraphNode[]): string {
+  const found = nodes.find((n) => n.id === nodeId);
+  if (!found) return nodeId;
+  return found.articleNo
+    ? `${found.lawName ?? ""} ${found.articleNo}`.trim()
+    : (found.lawName ?? found.label);
 }
 
 export function GraphNodeDetailPanel({ node, edges, nodes, onClose }: GraphNodeDetailPanelProps) {
@@ -41,9 +40,10 @@ export function GraphNodeDetailPanel({ node, edges, nodes, onClose }: GraphNodeD
     (e) => e.source === node.id || e.target === node.id
   );
 
-  const refEdgesWithParagraphs = connectedEdges.filter(
-    (e) => e.relationType === "reference" && e.paragraphNos?.length
-  );
+  const grouped = RELATION_ORDER.flatMap((type) => {
+    const matching = connectedEdges.filter((e) => e.relationType === type);
+    return matching.length ? [{ type, edges: matching }] : [];
+  });
 
   return (
     <div className="shrink-0 border-t border-border max-h-[45%] flex flex-col">
@@ -91,41 +91,37 @@ export function GraphNodeDetailPanel({ node, edges, nodes, onClose }: GraphNodeD
           <p className="mt-0.5 text-xs text-muted-foreground">{node.articleNo}</p>
         )}
 
-        {/* 참조 항 정보 */}
-        {refEdgesWithParagraphs.length > 0 && (
-          <div className="mt-2 border-t border-border/60 pt-2">
-            <p className="text-[10px] font-medium text-muted-foreground mb-1">참조 항</p>
-            {refEdgesWithParagraphs.map((e) => (
-              <div key={e.id} className="flex flex-wrap gap-1">
-                {e.paragraphNos!.map((p) => (
-                  <span
-                    key={p}
-                    className="rounded bg-primary/8 px-1.5 py-0.5 text-[10px] text-primary"
-                  >
-                    {formatParagraphNo(p)}
-                  </span>
-                ))}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* 연결 관계 목록 */}
-        {connectedEdges.length > 0 && (
-          <div className="mt-2 border-t border-border/60 pt-2">
-            <p className="text-[10px] font-medium text-muted-foreground mb-1">연결 관계</p>
-            <div className="flex flex-col gap-0.5">
-              {connectedEdges.map((e) => (
-                <div key={e.id} className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                  <span className="rounded bg-muted px-1 py-0.5 text-[9px] font-medium shrink-0">
-                    {RELATION_LABEL[e.relationType] ?? e.relationType}
-                  </span>
-                  <span className="truncate">{edgeCounterpartLabel(e, node.id, nodes)}</span>
+        {/* 관계 타입별 그룹 */}
+        {grouped.map(({ type, edges: groupEdges }) => (
+          <div key={type} className="mt-2 border-t border-border/60 pt-2">
+            <p className="text-[10px] font-medium text-muted-foreground mb-1">
+              {RELATION_LABEL[type] ?? type}
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {groupEdges.map((e) => (
+                <div key={e.id}>
+                  <div className="flex items-center gap-1 text-[10px] text-muted-foreground min-w-0">
+                    <span className="truncate shrink min-w-0">{getNodeLabel(e.source, nodes)}</span>
+                    <span className="shrink-0 text-muted-foreground/50">→</span>
+                    <span className="truncate shrink min-w-0">{getNodeLabel(e.target, nodes)}</span>
+                  </div>
+                  {e.paragraphNos?.length ? (
+                    <div className="flex flex-wrap gap-1 mt-0.5">
+                      {e.paragraphNos.map((p) => (
+                        <span
+                          key={p}
+                          className="rounded bg-primary/8 px-1.5 py-0.5 text-[10px] text-primary"
+                        >
+                          {formatParagraphNo(p)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
           </div>
-        )}
+        ))}
       </div>
     </div>
   );
