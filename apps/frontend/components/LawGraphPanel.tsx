@@ -3,8 +3,8 @@ import { Network as NetworkIcon, Loader2, AlertCircle, BarChart3 } from "lucide-
 import { DataSet } from "vis-data";
 import { Network } from "vis-network";
 import type { Options } from "vis-network";
-import { queryGraph } from "@/lib/api-client";
-import { buildVisDatasets, toGraphData } from "@/lib/graph-adapter";
+import { expandNode, queryGraph } from "@/lib/api-client";
+import { buildVisDatasets, expandResponseToGraphParts, mergeGraphData, toGraphData } from "@/lib/graph-adapter";
 import type { GraphNode, LawGraphData } from "@/lib/graph-types";
 
 interface LawGraphPanelProps {
@@ -60,6 +60,12 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
   // click handler stale closure 방지용 ref
   const graphDataRef = useRef<LawGraphData | null>(null);
   const onNodeSelectRef = useRef(onNodeSelect);
+  // expand 시 fit 억제 플래그
+  const isExpandRef = useRef(false);
+  // 이미 expand된 노드 ID 추적 (새 질의 시 초기화)
+  const expandedNodesRef = useRef<Set<string>>(new Set());
+  // expand 핸들러 (최신 상태를 ref로 유지하여 click handler stale closure 방지)
+  const handleExpandRef = useRef<(node: GraphNode) => void>(() => {});
 
   const [state, setState] = useState<PanelState>("idle");
   const [graphData, setGraphData] = useState<LawGraphData | null>(null);
@@ -96,6 +102,11 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
       const nodeId = params.nodes[0] as string;
       const found = graphDataRef.current?.nodes.find((n) => n.id === nodeId) ?? null;
       onNodeSelectRef.current(found);
+
+      // 법령 노드 + hop < 2 + 미확장 → expand
+      if (found?.kind === "law" && (found.hop ?? 0) < 2 && !expandedNodesRef.current.has(nodeId)) {
+        handleExpandRef.current(found);
+      }
     });
 
     return () => {
@@ -118,6 +129,7 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
     setState("loading");
     setGraphData(null);
     graphDataRef.current = null;
+    expandedNodesRef.current = new Set();
     onGraphDataChange?.(null);
     onNodeSelectRef.current(null);
 
@@ -147,7 +159,8 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
     return () => { controller.abort(); };
   }, [isActive, queryKey, lastQuery, onGraphDataChange]);
 
-  // graphData 변경 시 DataSet 갱신 — 새 질의는 clear 후 교체, expand는 add만
+  // graphData 변경 시 DataSet 전체 갱신
+  // expand 시 setGraphData(merged)로 진입하므로 clear+add 방식으로 동기화
   useEffect(() => {
     if (!graphData || !nodesDataSetRef.current || !edgesDataSetRef.current) return;
 
@@ -156,8 +169,41 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
     edgesDataSetRef.current.clear();
     nodesDataSetRef.current.add(nodes.get());
     edgesDataSetRef.current.add(edges.get());
-    networkRef.current?.fit();
+
+    // expand 시에는 뷰포트 유지, 새 질의에만 fit
+    if (!isExpandRef.current) {
+      networkRef.current?.fit();
+    }
+    isExpandRef.current = false;
   }, [graphData]);
+
+  // expand 핸들러 — 렌더마다 최신 상태를 ref에 동기화
+  handleExpandRef.current = (node: GraphNode) => {
+    if (!node.lawName) return;
+    expandedNodesRef.current.add(node.id);
+
+    // 클릭된 노드를 로딩 색상으로 표시
+    nodesDataSetRef.current?.update({ id: node.id, color: { background: "hsl(217, 80%, 78%)", border: "hsl(217, 60%, 58%)" } });
+
+    expandNode(node.lawName)
+      .then((resp) => {
+        const current = graphDataRef.current;
+        if (!current) return;
+
+        const { nodes: newNodes, edges: newEdges } = expandResponseToGraphParts(resp, node.id);
+        const merged = mergeGraphData(current, newNodes, newEdges, node.hop ?? 0);
+
+        graphDataRef.current = merged;
+        isExpandRef.current = true;   // fit 억제
+        setGraphData(merged);
+      })
+      .catch(() => {
+        // 실패 시 expandedNodes에서 제거해 재시도 가능하게 유지
+        expandedNodesRef.current.delete(node.id);
+        // 원래 색상 복원 (DataSet 갱신 없이 노드 색상만 원복)
+        nodesDataSetRef.current?.update({ id: node.id, color: undefined });
+      });
+  };
 
   return (
     <div className="flex h-full flex-col">

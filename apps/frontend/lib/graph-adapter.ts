@@ -1,5 +1,5 @@
 import { DataSet } from "vis-data";
-import type { GraphEdge, GraphEdgeRelationType, GraphNode, GraphQueryResponse, LawGraphData } from "./graph-types";
+import type { GraphEdge, GraphEdgeRelationType, GraphExpandResponse, GraphNode, GraphQueryResponse, LawGraphData, LawRef } from "./graph-types";
 
 // ── vis-network 색상 헬퍼 ─────────────────────────────────────────────────────
 
@@ -16,17 +16,26 @@ function lawNodeColor(lawType: string | undefined) {
 }
 
 export function buildVisDatasets(graphData: LawGraphData) {
-  const visNodes = graphData.nodes.map((n) => ({
-    id: n.id,
-    label: n.label,
-    size: n.isCenter ? 28 : 18,
-    color: n.isCenter
-      ? { background: "hsl(217, 91%, 50%)", border: "hsl(217, 91%, 40%)", highlight: { background: "hsl(217, 91%, 45%)", border: "hsl(217, 91%, 35%)" } }
-      : n.kind === "law"
-        ? lawNodeColor(n.lawType)
-        : { background: "hsl(142, 71%, 93%)", border: "hsl(142, 60%, 65%)", highlight: { background: "hsl(142, 71%, 86%)", border: "hsl(142, 60%, 55%)" } },
-    font: { color: n.isCenter ? "hsl(217, 91%, 30%)" : "hsl(220, 30%, 20%)", size: n.isCenter ? 13 : 12 },
-  }));
+  const visNodes = graphData.nodes.map((n) => {
+    const isGhosted = (n.hop ?? 0) >= 2;
+    return {
+      id: n.id,
+      label: n.label,
+      size: n.isCenter ? 28 : 18,
+      color: n.isCenter
+        ? { background: "hsl(217, 91%, 50%)", border: "hsl(217, 91%, 40%)", highlight: { background: "hsl(217, 91%, 45%)", border: "hsl(217, 91%, 35%)" } }
+        : isGhosted
+          ? { background: "hsl(217, 40%, 95%)", border: "hsl(217, 30%, 82%)", highlight: { background: "hsl(217, 40%, 90%)", border: "hsl(217, 30%, 75%)" } }
+          : n.kind === "law"
+            ? lawNodeColor(n.lawType)
+            : { background: "hsl(142, 71%, 93%)", border: "hsl(142, 60%, 65%)", highlight: { background: "hsl(142, 71%, 86%)", border: "hsl(142, 60%, 55%)" } },
+      font: {
+        color: n.isCenter ? "hsl(217, 91%, 30%)" : isGhosted ? "hsl(220, 20%, 65%)" : "hsl(220, 30%, 20%)",
+        size: n.isCenter ? 13 : 12,
+      },
+      borderDashes: isGhosted ? [4, 2] : false,
+    };
+  });
 
   const visEdges = graphData.edges.map((e) => ({
     id: e.id,
@@ -69,6 +78,41 @@ export function mergeGraphData(
     nodes: [...existing.nodes, ...addedNodes],
     edges: [...existing.edges, ...addedEdges],
   };
+}
+
+// ── expand API 응답 → GraphNode[], GraphEdge[] 변환 ───────────────────────────
+
+function _addLawRef(
+  ref: LawRef,
+  relationType: GraphEdgeRelationType,
+  sourceNodeId: string,
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  seenIds: Set<string>,
+) {
+  if (!ref.law_name) return;
+  const id = ref.law_uid ?? `law:${ref.law_name}`;
+  if (!seenIds.has(id)) {
+    seenIds.add(id);
+    nodes.push({ id, label: ref.law_name, kind: "law", lawName: ref.law_name, lawType: ref.classified_level ?? undefined });
+  }
+  // 같은 소스-타겟이라도 관계 타입이 다르면 별도 엣지
+  edges.push({ id: `${sourceNodeId}->${id}::${relationType}`, source: sourceNodeId, target: id, relationType });
+}
+
+export function expandResponseToGraphParts(
+  resp: GraphExpandResponse,
+  sourceNodeId: string,
+): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+  const seenIds = new Set<string>();
+
+  for (const ref of resp.child_laws) _addLawRef(ref, "child_law", sourceNodeId, nodes, edges, seenIds);
+  for (const ref of resp.delegated_laws) _addLawRef(ref, "delegation", sourceNodeId, nodes, edges, seenIds);
+  for (const ref of resp.referred_laws) _addLawRef(ref, "reference", sourceNodeId, nodes, edges, seenIds);
+
+  return { nodes, edges };
 }
 
 export function toGraphData(resp: GraphQueryResponse): LawGraphData | null {
