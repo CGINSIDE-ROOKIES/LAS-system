@@ -67,9 +67,7 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
   const containerRef = useRef<HTMLDivElement>(null);
   const networkRef = useRef<Network | null>(null);
   // DataSet을 ref로 관리 — expand 시 add()로 증분 추가
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const nodesDataSetRef = useRef<DataSet<any> | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const edgesDataSetRef = useRef<DataSet<any> | null>(null);
   // click handler stale closure 방지용 ref
   const graphDataRef = useRef<LawGraphData | null>(null);
