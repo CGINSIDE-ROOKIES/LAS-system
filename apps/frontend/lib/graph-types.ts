@@ -8,6 +8,7 @@ export type GraphNode = {
   lawType?: string;    // "법" | "시행령" | "시행규칙" | "규정" 등
   articleNo?: string;
   isCenter?: boolean;
+  hop?: number;        // 0=중심, 1=1차확장, 2=2차확장(expand 불가)
 };
 
 export type GraphEdgeRelationType = "child_law" | "delegation" | "reference" | "structure";
