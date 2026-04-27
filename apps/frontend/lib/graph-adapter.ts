@@ -91,7 +91,7 @@ function _addLawRef(
   seenIds: Set<string>,
 ) {
   if (!ref.law_name) return;
-  const id = ref.law_uid ?? `law:${ref.law_name}`;
+  const id = `law:${ref.law_name}`;
   if (!seenIds.has(id)) {
     seenIds.add(id);
     nodes.push({ id, label: ref.law_name, kind: "law", lawName: ref.law_name, lawType: ref.classified_level ?? undefined });
@@ -156,30 +156,27 @@ export function toGraphData(resp: GraphQueryResponse): LawGraphData | null {
     switch (relationType) {
       case "child_law": {
         const name = row.child_law_name as string | null;
-        const uid = row.child_law_uid as string | null;
         const level = row.classified_level as string | null;
         if (!name) continue;
-        const id = uid ?? `law:${name}`;
+        const id = `law:${name}`;
         targetNode = { id, label: name, kind: "law", lawName: name, lawType: level ?? undefined };
         break;
       }
       case "delegation": {
         const name = row.target_law_name as string | null;
-        const uid = row.target_law_uid as string | null;
         const level = row.classified_level as string | null;
         if (!name) continue;
-        const id = uid ?? `law:${name}`;
+        const id = `law:${name}`;
         targetNode = { id, label: name, kind: "law", lawName: name, lawType: level ?? undefined };
         break;
       }
       case "reference": {
         const refType = row.ref_type as string | null;
         const refName = row.ref_name as string | null;
-        const refUid = row.ref_uid as string | null;
         const refArticleNo = row.ref_article_no as string | null;
         if (!refName) continue;
         if (refType === "article" && refArticleNo) {
-          const id = refUid ?? `article:${refName}:${refArticleNo}`;
+          const id = `article:${refName}:${refArticleNo}`;
           const srcArticleNo = row.src_article_no as string | null;
           const paragraphNos = row.ref_paragraph_nos as string[] | null;
           targetNode = {
@@ -193,16 +190,15 @@ export function toGraphData(resp: GraphQueryResponse): LawGraphData | null {
           edgeParagraphNos = paragraphNos ?? undefined;
         } else {
           const level = row.ref_classified_level as string | null;
-          const id = refUid ?? `law:${refName}`;
+          const id = `law:${refName}`;
           targetNode = { id, label: refName, kind: "law", lawName: refName, lawType: level ?? undefined };
         }
         break;
       }
       case "structure": {
         const articleNo = row.article_no as string | null;
-        const articleUid = row.article_uid as string | null;
         if (!articleNo) continue;
-        const id = articleUid ?? `article:${resp.law_name}:${articleNo}`;
+        const id = `article:${resp.law_name}:${articleNo}`;
         targetNode = {
           id,
           label: articleNo,
