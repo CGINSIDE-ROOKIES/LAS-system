@@ -38,3 +38,16 @@ export type GraphQueryResponse = {
   results: Record<string, unknown>[];
   cypher?: string;
 };
+
+export type LawRef = {
+  law_name: string;
+  law_uid: string | null;
+  classified_level: string | null;
+};
+
+export type GraphExpandResponse = {
+  law_name: string;
+  child_laws: LawRef[];
+  delegated_laws: LawRef[];
+  referred_laws: LawRef[];
+};
