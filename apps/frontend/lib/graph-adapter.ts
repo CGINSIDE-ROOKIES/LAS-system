@@ -56,6 +56,26 @@ export function buildVisDatasets(graphData: LawGraphData) {
   };
 }
 
+// ── 법령명 약칭 ────────────────────────────────────────────────────────────────
+
+const LAW_ABBREV: Record<string, string> = {
+  "기간제 및 단시간근로자 보호 등에 관한 법률": "기간제법",
+  "파견근로자 보호 등에 관한 법률": "파견근로자법",
+  "근로자퇴직급여 보장법": "퇴직급여법",
+  "남녀고용평등과 일·가정 양립 지원에 관한 법률": "남녀고용평등법",
+  "하도급거래 공정화에 관한 법률": "하도급법",
+};
+
+export function shortenLawName(name: string): string {
+  // ㆍ(U+318D) → ·(U+00B7) 정규화 — Neo4j 저장값과 매핑 키 불일치 방지
+  const normalized = name.replace(/ㆍ/g, "·");
+  if (LAW_ABBREV[normalized]) return LAW_ABBREV[normalized];
+  for (const [full, abbr] of Object.entries(LAW_ABBREV)) {
+    if (normalized.startsWith(full)) return normalized.replace(full, abbr);
+  }
+  return normalized;
+}
+
 // ── 그래프 병합 (expand 시 증분 추가) ─────────────────────────────────────────
 
 export function mergeGraphData(
@@ -66,12 +86,16 @@ export function mergeGraphData(
 ): LawGraphData {
   const seenNodes = new Set(existing.nodes.map((n) => n.id));
   const seenEdges = new Set(existing.edges.map((e) => e.id));
+  // ID가 달라도 동일 source+target+relationType이면 중복 — 초기 질의와 expand 엣지 ID 형식 불일치 방어
+  const seenEdgeKeys = new Set(existing.edges.map((e) => `${e.source}::${e.target}::${e.relationType}`));
 
   const addedNodes = newNodes
     .filter((n) => !seenNodes.has(n.id))
     .map((n) => ({ ...n, hop: sourceHop + 1 }));
 
-  const addedEdges = newEdges.filter((e) => !seenEdges.has(e.id));
+  const addedEdges = newEdges.filter(
+    (e) => !seenEdges.has(e.id) && !seenEdgeKeys.has(`${e.source}::${e.target}::${e.relationType}`),
+  );
 
   return {
     ...existing,
