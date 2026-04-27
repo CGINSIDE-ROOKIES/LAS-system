@@ -180,6 +180,8 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
   // expand 핸들러 — 렌더마다 최신 상태를 ref에 동기화
   handleExpandRef.current = (node: GraphNode) => {
     if (!node.lawName) return;
+    // 호출 시점의 queryKey 캡처 — 응답 도착 시 세대 검증에 사용
+    const capturedQueryKey = lastSuccessKey.current;
     expandedNodesRef.current.add(node.id);
 
     // 클릭된 노드를 로딩 색상으로 표시
@@ -189,6 +191,10 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
       .then((resp) => {
         const current = graphDataRef.current;
         if (!current) return;
+        // stale 응답 차단: 새 질의가 시작됐으면 무시
+        if (lastSuccessKey.current !== capturedQueryKey) return;
+        // 고아 엣지 방지: sourceNode가 현재 그래프에 없으면 무시
+        if (!current.nodes.some((n) => n.id === node.id)) return;
 
         const { nodes: newNodes, edges: newEdges } = expandResponseToGraphParts(resp, node.id);
         const merged = mergeGraphData(current, newNodes, newEdges, node.hop ?? 0);
@@ -200,7 +206,7 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
       .catch(() => {
         // 실패 시 expandedNodes에서 제거해 재시도 가능하게 유지
         expandedNodesRef.current.delete(node.id);
-        // 원래 색상 복원 (DataSet 갱신 없이 노드 색상만 원복)
+        // 원래 색상 복원
         nodesDataSetRef.current?.update({ id: node.id, color: undefined });
       });
   };

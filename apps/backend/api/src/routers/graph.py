@@ -101,19 +101,22 @@ class GraphExpandResponse(BaseModel):
 
 
 # COLLECT로 관계별 리스트를 각각 수집 — OPTIONAL MATCH 카르테시안 곱 방지
+# [0..$limit] 슬라이싱으로 관계별 최대 건수를 제한해 대규모 fan-out 방지
 _EXPAND_CYPHER = """\
 MATCH (l:Law {law_name: $law_name})
 OPTIONAL MATCH (l)-[:HAS_CHILD_LAW]->(child:Law)
 WITH l,
-  COLLECT(DISTINCT {law_name: child.law_name, law_uid: child.law_uid, classified_level: child.classified_level}) AS child_laws
+  COLLECT(DISTINCT {law_name: child.law_name, law_uid: child.law_uid, classified_level: child.classified_level})[0..$limit] AS child_laws
 OPTIONAL MATCH (l)-[:DELEGATES_TO_LAW]->(delegated:Law)
 WITH l, child_laws,
-  COLLECT(DISTINCT {law_name: delegated.law_name, law_uid: delegated.law_uid, classified_level: delegated.classified_level}) AS delegated_laws
+  COLLECT(DISTINCT {law_name: delegated.law_name, law_uid: delegated.law_uid, classified_level: delegated.classified_level})[0..$limit] AS delegated_laws
 OPTIONAL MATCH (l)-[:REFERS_TO_LAW]->(referred:Law)
 WITH child_laws, delegated_laws,
-  COLLECT(DISTINCT {law_name: referred.law_name, law_uid: referred.law_uid, classified_level: referred.classified_level}) AS referred_laws
+  COLLECT(DISTINCT {law_name: referred.law_name, law_uid: referred.law_uid, classified_level: referred.classified_level})[0..$limit] AS referred_laws
 RETURN child_laws, delegated_laws, referred_laws
 """
+
+_EXPAND_LIMIT = 50
 
 
 def _parse_law_refs(items: list[dict]) -> list[LawRef]:
@@ -139,7 +142,7 @@ def graph_expand(
     관계 타입: HAS_CHILD_LAW(하위), DELEGATES_TO_LAW(위임), REFERS_TO_LAW(참조)
     """
     try:
-        rows = neo4j.run_query(_EXPAND_CYPHER, {"law_name": request.law_name})
+        rows = neo4j.run_query(_EXPAND_CYPHER, {"law_name": request.law_name, "limit": _EXPAND_LIMIT})
     except Neo4jClientError:
         logger.error("graph_expand Neo4j 실패", exc_info=True)
         return JSONResponse(
