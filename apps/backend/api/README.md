@@ -64,6 +64,8 @@ LLM_MAX_TOKENS=4096
 | `DELETE` | `/api/v1/qa/history/{id}` | 히스토리 단건 삭제 |
 | `DELETE` | `/api/v1/qa/history` | 히스토리 다건 삭제 |
 | `POST` | `/api/v1/qa/{id}/feedback` | 답변 피드백 제출 (👍/👎) |
+| `POST` | `/api/v1/graph/query` | 자연어 질의 → 법령 그래프 조회 (LLM 사용) |
+| `POST` | `/api/v1/graph/expand` | 법령 노드 클릭 시 연결 법령 직접 조회 (LLM 불필요) |
 
 ### POST /api/v1/qa/ask
 
@@ -100,6 +102,54 @@ data: {"type": "error", "code": "LLM_ERROR", "error": "..."}
 data: {"type": "error", "code": "PIPELINE_ERROR", "error": "..."}
 ```
 
+### POST /api/v1/graph/query
+
+자연어 질의를 LLM이 Cypher로 변환해 Neo4j를 조회한다. `GRAPH_QUERY_MODE=llm_free` 환경변수가 필요하다.
+
+요청:
+```json
+{
+  "question": "근로기준법 하위법령은?"
+}
+```
+
+응답:
+```json
+{
+  "law_name": "근로기준법",
+  "article_no": null,
+  "relation_type": "child_law",
+  "results": [
+    { "child_law_name": "근로기준법 시행령", "classified_level": "시행령" }
+  ],
+  "cypher": "MATCH ..."
+}
+```
+
+### POST /api/v1/graph/expand
+
+법령 노드 클릭 시 연결된 법령 간 관계를 직접 조회한다. LLM 없이 Neo4j Cypher를 직접 실행한다.
+관계 타입: `HAS_CHILD_LAW`(하위), `DELEGATES_TO_LAW`(위임), `REFERS_TO_LAW`(참조). 관계별 최대 50건.
+
+요청:
+```json
+{
+  "law_name": "근로기준법"
+}
+```
+
+응답:
+```json
+{
+  "law_name": "근로기준법",
+  "child_laws": [
+    { "law_name": "근로기준법 시행령", "law_uid": "...", "classified_level": "시행령" }
+  ],
+  "delegated_laws": [],
+  "referred_laws": []
+}
+```
+
 ## 에러 코드
 
 ### 공통(JSON)
@@ -112,6 +162,7 @@ data: {"type": "error", "code": "PIPELINE_ERROR", "error": "..."}
 | `LLM_TIMEOUT` | 504 | LLM 요청 타임아웃 |
 | `LLM_ERROR` | 502 | LLM 호출/응답 파싱 오류 |
 | `PIPELINE_ERROR` | 503 | 기타 retrieval 파이프라인 오류 |
+| `GRAPH_EXPAND_ERROR` | 503 | 그래프 확장 조회 중 Neo4j 오류 |
 | `INTERNAL_ERROR` | 500 | 서버 내부 오류 |
 
 ### 스트리밍(SSE)
