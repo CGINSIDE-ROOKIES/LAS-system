@@ -5,6 +5,7 @@ export type GraphNode = {
   label: string;
   kind: GraphNodeKind;
   lawName?: string;
+  lawType?: string;    // "법" | "시행령" | "시행규칙" | "규정" 등
   articleNo?: string;
   isCenter?: boolean;
 };
@@ -17,6 +18,8 @@ export type GraphEdge = {
   target: string;
   relationType: GraphEdgeRelationType;
   label?: string;
+  detail?: string;         // "제3조 → 제5조" 형태 관계 요약
+  paragraphNos?: string[]; // ["제1항", "제2항"]
 };
 
 export type LawGraphData = {

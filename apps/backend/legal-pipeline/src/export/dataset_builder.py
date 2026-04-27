@@ -1209,10 +1209,15 @@ def build_relation_records(
 
 def build_case_reference_audit_records(
     raw_related_base_dir: str | Path = "data/raw/02_related_legal_docs",
+    *,
+    include_body_regex: bool = True,
 ) -> list[dict[str, Any]]:
     from src.export.legal_case_relation_builder import build_case_reference_audit_records as _build_case_reference_audit_records
 
-    return _build_case_reference_audit_records(raw_related_base_dir=raw_related_base_dir)
+    return _build_case_reference_audit_records(
+        raw_related_base_dir=raw_related_base_dir,
+        include_body_regex=include_body_regex,
+    )
 
 
 def build_and_write_datasets(
@@ -1232,6 +1237,7 @@ def build_and_write_datasets(
     include_appendix_bundle_text_in_payload: bool = True,
     write_legacy_appendix_datasets: bool = True,
     include_law_to_law_relations: bool = True,
+    audit_include_body_regex: bool = True,
 ) -> dict[str, Any]:
     output_dir = Path(output_dir)
 
@@ -1260,6 +1266,7 @@ def build_and_write_datasets(
     )
     case_reference_audit_records = build_case_reference_audit_records(
         raw_related_base_dir=raw_related_base_dir,
+        include_body_regex=audit_include_body_regex,
     )
 
     appendix_manifest: dict[str, Any] | None = None

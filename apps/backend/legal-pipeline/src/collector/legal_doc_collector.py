@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -362,6 +363,34 @@ def should_exclude_doc_item(item: dict[str, Any], exclude_doc_kinds: set[str]) -
     return any(kind in doc_kind for kind in exclude_doc_kinds)
 
 
+_EXPC_SUFFIX_RE = re.compile(r"\s+시행(?:령|규칙|규정)?$|\s+규칙$")
+
+
+def _extract_expc_keyword(law_name: str) -> str:
+    """법령명에서 expc 사전 필터용 핵심 키워드를 추출한다.
+
+    시행령/시행규칙 접미사를 제거한 뒤 첫 어절을 반환한다.
+    예: "근로기준법 시행령" → "근로기준법"
+        "남녀고용평등과 일·가정 양립 지원에 관한 법률" → "남녀고용평등과"
+    """
+    base = _EXPC_SUFFIX_RE.sub("", law_name).strip()
+    tokens = (base or law_name).split()
+    return tokens[0] if tokens else law_name
+
+
+def _is_relevant_expc_item(item: dict[str, Any], law_name: str) -> bool:
+    """expc 목록 항목의 안건명에 law_name 핵심 키워드가 포함되는지 확인한다.
+
+    API search=2 쿼리는 넓은 범위를 반환하므로, 안건명 기반 사전 필터로
+    후속 다운로드·정제 비용을 줄인다.
+    """
+    title = str(item.get("안건명") or "").strip()
+    if not title:
+        return True  # 제목 없는 항목은 통과시켜 하위 단계에서 처리
+    keyword = _extract_expc_keyword(law_name)
+    return keyword in title
+
+
 
 def build_doc_ref(
     target: str,
@@ -480,6 +509,7 @@ def collect_list_refs_for_law_name(
     refs: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
     filtered_out = 0
+    expc_keyword_filtered = 0
     exclude_doc_kinds = exclude_doc_kinds or set()
     page = 0
     items: list[dict[str, Any]] = []
@@ -509,6 +539,11 @@ def collect_list_refs_for_law_name(
                 filtered_out += 1
                 continue
 
+            if target == "expc" and not _is_relevant_expc_item(item, law_name):
+                filtered_out += 1
+                expc_keyword_filtered += 1
+                continue
+
             ref = build_doc_ref(target, law_name, item)
             if list_path is not None:
                 ref["source_file_path"] = str(list_path)
@@ -534,6 +569,13 @@ def collect_list_refs_for_law_name(
             law_name,
             target,
             len(items),
+        )
+
+    if expc_keyword_filtered:
+        logger.info(
+            "collect_list_refs_for_law_name: expc keyword filter dropped=%d law=%s",
+            expc_keyword_filtered,
+            law_name,
         )
 
     return refs, filtered_out

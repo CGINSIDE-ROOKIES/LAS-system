@@ -539,8 +539,19 @@ def build_legal_relation_records(
                 )
 
             result = _dedup_family_search_hits(_merge_relation_rows(built_rows))
-            return [r for r in result if not _is_unverified_search_hit(r)]
+            filtered = [r for r in result if not _is_unverified_search_hit(r)]
+            dropped = len(result) - len(filtered)
+            if dropped:
+                logger.warning(
+                    "build_legal_relation_records: unverified_search_hit dropped=%d path=raw",
+                    dropped,
+                )
+            return filtered
 
+    if raw_related_base_dir is not None:
+        logger.warning(
+            "build_legal_relation_records: raw path had no data, using expanded fallback"
+        )
     expanded_dir = Path(expanded_base_dir)
     if raw_related_base_dir is not None and expanded_dir == Path("data/expanded/03_expanded_related_docs"):
         raw_dir = Path(raw_related_base_dir)
@@ -551,7 +562,14 @@ def build_legal_relation_records(
         rows.extend(list(_iter_jsonl(path)))
     if rows:
         result = _merge_relation_rows(rows)
-        return [r for r in result if not _is_unverified_search_hit(r)]
+        filtered = [r for r in result if not _is_unverified_search_hit(r)]
+        dropped = len(result) - len(filtered)
+        if dropped:
+            logger.warning(
+                "build_legal_relation_records: unverified_search_hit dropped=%d path=fallback",
+                dropped,
+            )
+        return filtered
 
     return []
 
