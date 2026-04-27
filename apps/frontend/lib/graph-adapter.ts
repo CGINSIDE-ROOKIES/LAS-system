@@ -159,7 +159,7 @@ export function toGraphData(resp: GraphQueryResponse): LawGraphData | null {
         const level = row.classified_level as string | null;
         if (!name) continue;
         const id = `law:${name}`;
-        targetNode = { id, label: name, kind: "law", lawName: name, lawType: level ?? undefined };
+        targetNode = { id, label: name, kind: "law", lawName: name, lawType: level ?? undefined, hop: 1 };
         break;
       }
       case "delegation": {
@@ -167,7 +167,7 @@ export function toGraphData(resp: GraphQueryResponse): LawGraphData | null {
         const level = row.classified_level as string | null;
         if (!name) continue;
         const id = `law:${name}`;
-        targetNode = { id, label: name, kind: "law", lawName: name, lawType: level ?? undefined };
+        targetNode = { id, label: name, kind: "law", lawName: name, lawType: level ?? undefined, hop: 1 };
         break;
       }
       case "reference": {
@@ -185,13 +185,14 @@ export function toGraphData(resp: GraphQueryResponse): LawGraphData | null {
             kind: "article",
             lawName: refName,
             articleNo: refArticleNo,
+            hop: 1,
           };
           edgeDetail = srcArticleNo && refArticleNo ? `${srcArticleNo} → ${refArticleNo}` : undefined;
           edgeParagraphNos = paragraphNos ?? undefined;
         } else {
           const level = row.ref_classified_level as string | null;
           const id = `law:${refName}`;
-          targetNode = { id, label: refName, kind: "law", lawName: refName, lawType: level ?? undefined };
+          targetNode = { id, label: refName, kind: "law", lawName: refName, lawType: level ?? undefined, hop: 1 };
         }
         break;
       }
@@ -205,6 +206,7 @@ export function toGraphData(resp: GraphQueryResponse): LawGraphData | null {
           kind: "article",
           lawName: resp.law_name,
           articleNo,
+          hop: 1,
         };
         break;
       }

@@ -7,6 +7,20 @@ import { expandNode, queryGraph } from "@/lib/api-client";
 import { buildVisDatasets, expandResponseToGraphParts, mergeGraphData, toGraphData } from "@/lib/graph-adapter";
 import type { GraphNode, LawGraphData } from "@/lib/graph-types";
 
+function applyReferenceFilter(graphData: LawGraphData, showReference: boolean): LawGraphData {
+  if (showReference) return graphData;
+  const visibleEdges = graphData.edges.filter((e) => e.relationType !== "reference");
+  const connectedIds = new Set([
+    graphData.centerNodeId,
+    ...visibleEdges.flatMap((e) => [e.source, e.target]),
+  ]);
+  return {
+    ...graphData,
+    nodes: graphData.nodes.filter((n) => connectedIds.has(n.id)),
+    edges: visibleEdges,
+  };
+}
+
 interface LawGraphPanelProps {
   lastQuery: string;
   queryKey: number;
@@ -60,6 +74,7 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
   // click handler stale closure 방지용 ref
   const graphDataRef = useRef<LawGraphData | null>(null);
   const onNodeSelectRef = useRef(onNodeSelect);
+  const selectedNodeIdRef = useRef<string | null>(null);
   // expand 시 fit 억제 플래그
   const isExpandRef = useRef(false);
   // 이미 expand된 노드 ID 추적 (새 질의 시 초기화)
@@ -69,6 +84,7 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
 
   const [state, setState] = useState<PanelState>("idle");
   const [graphData, setGraphData] = useState<LawGraphData | null>(null);
+  const [showReference, setShowReference] = useState(false);
   const lastSuccessKey = useRef<number>(-1);
   const requestToken = useRef<number>(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -96,10 +112,12 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
 
     network.on("click", (params) => {
       if (params.nodes.length === 0) {
+        selectedNodeIdRef.current = null;
         onNodeSelectRef.current(null);
         return;
       }
       const nodeId = params.nodes[0] as string;
+      selectedNodeIdRef.current = nodeId;
       const found = graphDataRef.current?.nodes.find((n) => n.id === nodeId) ?? null;
       onNodeSelectRef.current(found);
 
@@ -130,6 +148,7 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
     setGraphData(null);
     graphDataRef.current = null;
     expandedNodesRef.current = new Set();
+    selectedNodeIdRef.current = null;
     onGraphDataChange?.(null);
     onNodeSelectRef.current(null);
 
@@ -159,23 +178,29 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
     return () => { controller.abort(); };
   }, [isActive, queryKey, lastQuery, onGraphDataChange]);
 
-  // graphData 변경 시 DataSet 전체 갱신
-  // expand 시 setGraphData(merged)로 진입하므로 clear+add 방식으로 동기화
+  // graphData/showReference 변경 시 DataSet 전체 갱신
   useEffect(() => {
     if (!graphData || !nodesDataSetRef.current || !edgesDataSetRef.current) return;
 
-    const { nodes, edges } = buildVisDatasets(graphData);
+    const filtered = applyReferenceFilter(graphData, showReference);
+    const { nodes, edges } = buildVisDatasets(filtered);
     nodesDataSetRef.current.clear();
     edgesDataSetRef.current.clear();
     nodesDataSetRef.current.add(nodes.get());
     edgesDataSetRef.current.add(edges.get());
 
-    // expand 시에는 뷰포트 유지, 새 질의에만 fit
+    // 토글로 선택 노드가 숨겨졌으면 선택 초기화
+    if (selectedNodeIdRef.current && !filtered.nodes.some((n) => n.id === selectedNodeIdRef.current)) {
+      selectedNodeIdRef.current = null;
+      onNodeSelectRef.current(null);
+    }
+
+    // expand 시에는 뷰포트 유지, 새 질의/토글에는 fit
     if (!isExpandRef.current) {
       networkRef.current?.fit();
     }
     isExpandRef.current = false;
-  }, [graphData]);
+  }, [graphData, showReference]);
 
   // expand 핸들러 — 렌더마다 최신 상태를 ref에 동기화
   handleExpandRef.current = (node: GraphNode) => {
@@ -220,6 +245,19 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onG
           <h2 className="text-sm font-semibold text-foreground">법령 관계 그래프</h2>
           {state === "loading" && (
             <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          )}
+          {state === "success" && (
+            <button
+              type="button"
+              onClick={() => setShowReference((v) => !v)}
+              className={`ml-auto rounded border px-2 py-0.5 text-[10px] transition-colors ${
+                showReference
+                  ? "border-primary/30 bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              참조 {showReference ? "ON" : "OFF"}
+            </button>
           )}
         </div>
       </div>
