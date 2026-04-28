@@ -24,7 +24,7 @@ _SYSTEM_PROMPT = """\
 당신은 법률 질문 분석기입니다.
 반드시 아래 형식의 JSON만 출력하세요. 설명, 코드 블록(```), 마크다운 없이 {{ 로 시작하는 순수 JSON만 출력하세요.
 
-{{"law_names": [...], "suggested_laws": [...], "intent": "...", "is_legal": true/false, "normalized_query": "..."}}
+{{"law_names": [...], "suggested_laws": [...], "intent": "...", "is_legal": true/false, "normalized_query": "...", "hypothetical_doc": "..."}}
 
 - law_names: [현재 질문]에 법령명이 명시된 경우만 추출. [이전 질문]에 나온 법령명은 포함하지 말 것. 추론하거나 유추하지 말 것. 없으면 []
 - suggested_laws: 법령명 미명시이지만 질문 맥락에서 명확히 추론 가능한 주요 법령. 불명확하거나 law_names에 이미 있으면 []
@@ -39,6 +39,10 @@ _SYSTEM_PROMPT = """\
   · 오타·잘못된 법령명을 교정 (예: "근로기쥰법" → "근로기준법")
   · 원문이 이미 표준 법률 용어면 그대로 반환
   · is_legal=false이면 빈 문자열 반환
+- hypothetical_doc: intent가 "normative"일 때만 작성. 질문에 답하는 실제 법령 조문과 유사한 형식의 텍스트를 1~2문장으로 생성.
+  · 예: "사용자는 근로자를 해고하려면 적어도 30일 전에 예고하여야 한다. 다만, 수습 사용한 날부터 3개월 이내인 근로자에게는 그러하지 아니하다."
+  · 정확한 조문을 모르면 질문 맥락에서 예상되는 조문 내용을 법령 문체로 작성
+  · intent가 "normative"가 아니면 반드시 빈 문자열 ""
 
 인식 가능한 법령 목록:
 {law_list}
@@ -58,6 +62,7 @@ class QueryParseResult:
     normalized_query: str = ""
     suggested_laws: list[str] = field(default_factory=list)
     parser_fallback: bool = False
+    hypothetical_doc: str = ""
 
 
 @dataclass
@@ -164,6 +169,7 @@ def _parse_llm_output(text: str) -> QueryParseResult:
         is_legal=bool(data.get("is_legal", True)),
         normalized_query=str(data.get("normalized_query") or "").strip(),
         suggested_laws=suggested_laws,
+        hypothetical_doc=str(data.get("hypothetical_doc") or "").strip(),
     )
 
 

@@ -233,6 +233,7 @@ class RagPipeline:
         law_names: list[str] | None,
         intent: str | None = None,
         search_query: str | None = None,
+        hypothetical_doc: str | None = None,
         trace: Any | None = None,
         top_k: int | None = None,
     ) -> tuple[list[dict[str, Any]], str, str, bool]:
@@ -264,6 +265,13 @@ class RagPipeline:
             enforce = self._cfg.enforce_min_law_contexts
 
         effective_search_query = search_query or question
+        # normative intent이고 hypothetical_doc이 있으면 임베딩에 가상 조문 텍스트를 사용한다.
+        # BM25는 키워드 매칭 특성상 normalized_query(effective_search_query)를 그대로 유지한다.
+        embed_text = (
+            hypothetical_doc
+            if intent == "normative" and hypothetical_doc
+            else effective_search_query
+        )
 
         t0 = time.perf_counter()
         retrieval_span = start_span(
@@ -278,7 +286,7 @@ class RagPipeline:
         )
         try:
             vector = embed_query(
-                effective_search_query,
+                embed_text,
                 rcfg.embedding_model,
                 api_key=rcfg.embedding_api_key,
                 api_base_url=rcfg.embedding_api_base_url,
@@ -515,6 +523,7 @@ class RagPipeline:
         law_names: list[str] | None = None,
         intent: str | None = None,
         search_query: str | None = None,
+        hypothetical_doc: str | None = None,
         trace: Any | None = None,
         previous_question: str | None = None,
         previous_answer: str | None = None,
@@ -533,7 +542,8 @@ class RagPipeline:
             )
         try:
             llm_rows, context_text, law_context_status = self._prepare_generation(
-                question, doc_types=doc_types, law_names=law_names, intent=intent, search_query=search_query, trace=trace, top_k=top_k,
+                question, doc_types=doc_types, law_names=law_names, intent=intent,
+                search_query=search_query, hypothetical_doc=hypothetical_doc, trace=trace, top_k=top_k,
             )
             if not llm_rows:
                 logger.info("run: 검색 결과 0건 — LLM 호출 생략")
@@ -591,6 +601,7 @@ class RagPipeline:
         law_names: list[str] | None = None,
         intent: str | None = None,
         search_query: str | None = None,
+        hypothetical_doc: str | None = None,
         trace: Any | None = None,
         previous_question: str | None = None,
         previous_answer: str | None = None,
@@ -613,7 +624,8 @@ class RagPipeline:
             )
         try:
             llm_rows, context_text, law_context_status = self._prepare_generation(
-                question, doc_types=doc_types, law_names=law_names, intent=intent, search_query=search_query, trace=trace, top_k=top_k,
+                question, doc_types=doc_types, law_names=law_names, intent=intent,
+                search_query=search_query, hypothetical_doc=hypothetical_doc, trace=trace, top_k=top_k,
             )
             if not llm_rows:
                 logger.info("stream: 검색 결과 0건 — LLM 호출 생략")
@@ -697,10 +709,12 @@ class RagPipeline:
         law_names: list[str] | None,
         intent: str | None,
         search_query: str | None = None,
+        hypothetical_doc: str | None = None,
         trace: Any | None = None,
         top_k: int | None = None,
     ) -> tuple[list[dict[str, Any]], str, str]:
         llm_rows, context_text, law_context_status, _ = self._retrieve(
-            question, doc_types=doc_types, law_names=law_names, intent=intent, search_query=search_query, trace=trace, top_k=top_k,
+            question, doc_types=doc_types, law_names=law_names, intent=intent,
+            search_query=search_query, hypothetical_doc=hypothetical_doc, trace=trace, top_k=top_k,
         )
         return llm_rows, context_text, law_context_status

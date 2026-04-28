@@ -80,8 +80,8 @@ def _resolve_query_filters(
         end_span(span, level="ERROR")
         raise
     logger.info(
-        "query_parser: law_names=%r suggested_laws=%r intent=%r is_legal=%r parser_fallback=%r normalized_query=%r",
-        parsed.law_names, parsed.suggested_laws, parsed.intent, parsed.is_legal, parsed.parser_fallback, parsed.normalized_query,
+        "query_parser: law_names=%r suggested_laws=%r intent=%r is_legal=%r parser_fallback=%r normalized_query=%r hypothetical_doc=%r",
+        parsed.law_names, parsed.suggested_laws, parsed.intent, parsed.is_legal, parsed.parser_fallback, parsed.normalized_query, parsed.hypothetical_doc[:80] if parsed.hypothetical_doc else "",
     )
     end_span(
         span,
@@ -92,6 +92,7 @@ def _resolve_query_filters(
             "is_legal": parsed.is_legal,
             "parser_fallback": parsed.parser_fallback,
             "normalized_query": parsed.normalized_query,
+            "hypothetical_doc": parsed.hypothetical_doc,
         },
         level="DEFAULT",
     )
@@ -285,6 +286,7 @@ def ask(
         law_names=effective_law_names,
         intent=parsed.intent,
         search_query=parsed.normalized_query or None,
+        hypothetical_doc=parsed.hypothetical_doc or None,
         trace=trace,
         previous_question=request.previous_question,
         previous_answer=request.previous_answer,
@@ -354,6 +356,7 @@ def ask_stream(
                 law_names=effective_law_names,
                 intent=parsed.intent,
                 search_query=parsed.normalized_query or None,
+                hypothetical_doc=parsed.hypothetical_doc or None,
                 trace=trace,
                 previous_question=request.previous_question,
                 previous_answer=request.previous_answer,
