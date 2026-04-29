@@ -29,7 +29,7 @@ FEW_SHOT_EXAMPLES: list[tuple[str, str]] = [
     # ── 구어체 정규화 + suggested_laws ───────────────────────────────────────
     (
         "월급 안주면 어떻게 해",
-        '{"law_names": [], "suggested_laws": ["근로기준법"], "intent": "normative", "is_legal": true, "normalized_query": "임금 미지급 시 제재 및 구제", "hypothetical_doc": "임금을 지급하지 아니한 사용자는 3년 이하의 징역 또는 3천만원 이하의 벌금에 처한다."}',
+        '{"law_names": [], "suggested_laws": ["근로기준법"], "intent": "normative", "is_legal": true, "normalized_query": "임금 미지급 시 제재 및 구제", "hypothetical_doc": "임금은 통화로 직접 근로자에게 그 전액을 매월 1회 이상 일정한 날짜를 정하여 지급하여야 한다."}',
     ),
     (
         "근로기쥰법 연차",
@@ -39,6 +39,11 @@ FEW_SHOT_EXAMPLES: list[tuple[str, str]] = [
     (
         "하도급 현장 근로자 임금 체불",
         '{"law_names": [], "suggested_laws": [], "intent": "normative", "is_legal": true, "normalized_query": "하도급 현장 근로자 임금 체불 구제", "hypothetical_doc": "도급사업의 사업주는 하수급인이 사용한 근로자에게 임금을 지급하지 못한 경우 그 하수급인과 연대하여 책임을 진다."}',
+    ),
+    # ── hypothetical_doc 빈 문자열 반환 케이스 (산입 범위 등 세부 규정은 구체적 조문 작성 불가) ──
+    (
+        "최저임금 계산할 때 식대나 교통비도 포함되나요",
+        '{"law_names": ["최저임금법"], "suggested_laws": [], "intent": "normative", "is_legal": true, "normalized_query": "최저임금 산입 범위 식대 교통비", "hypothetical_doc": ""}',
     ),
     # ── case_law ─────────────────────────────────────────────────────────────
     (
