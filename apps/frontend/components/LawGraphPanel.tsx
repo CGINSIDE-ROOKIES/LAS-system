@@ -3,15 +3,30 @@ import { Network as NetworkIcon, Loader2, AlertCircle, BarChart3 } from "lucide-
 import { DataSet } from "vis-data";
 import { Network } from "vis-network";
 import type { Options } from "vis-network";
-import { queryGraph } from "@/lib/api-client";
-import { toGraphData } from "@/lib/graph-adapter";
+import { expandNode, queryGraph } from "@/lib/api-client";
+import { buildVisDatasets, expandResponseToGraphParts, mergeGraphData, toGraphData } from "@/lib/graph-adapter";
 import type { GraphNode, LawGraphData } from "@/lib/graph-types";
+
+function applyReferenceFilter(graphData: LawGraphData, showReference: boolean): LawGraphData {
+  if (showReference) return graphData;
+  const visibleEdges = graphData.edges.filter((e) => e.relationType !== "reference");
+  const connectedIds = new Set([
+    graphData.centerNodeId,
+    ...visibleEdges.flatMap((e) => [e.source, e.target]),
+  ]);
+  return {
+    ...graphData,
+    nodes: graphData.nodes.filter((n) => connectedIds.has(n.id)),
+    edges: visibleEdges,
+  };
+}
 
 interface LawGraphPanelProps {
   lastQuery: string;
   queryKey: number;
   isActive: boolean;
   onNodeSelect: (node: GraphNode | null) => void;
+  onGraphDataChange?: (data: LawGraphData | null) => void;
 }
 
 type PanelState = "idle" | "loading" | "success" | "empty" | "plan_failed" | "error";
@@ -48,46 +63,80 @@ const VIS_OPTIONS: Options = {
   },
 };
 
-function buildVisDatasets(graphData: LawGraphData) {
-  const visNodes = graphData.nodes.map((n) => ({
-    id: n.id,
-    label: n.label,
-    size: n.isCenter ? 28 : 18,
-    color: n.isCenter
-      ? { background: "hsl(217, 91%, 50%)", border: "hsl(217, 91%, 40%)", highlight: { background: "hsl(217, 91%, 45%)", border: "hsl(217, 91%, 35%)" } }
-      : n.kind === "law"
-        ? { background: "hsl(217, 91%, 92%)", border: "hsl(217, 60%, 70%)", highlight: { background: "hsl(217, 91%, 85%)", border: "hsl(217, 60%, 60%)" } }
-        : { background: "hsl(142, 71%, 93%)", border: "hsl(142, 60%, 65%)", highlight: { background: "hsl(142, 71%, 86%)", border: "hsl(142, 60%, 55%)" } },
-    font: { color: n.isCenter ? "#fff" : "hsl(220, 30%, 20%)" },
-  }));
-
-  const visEdges = graphData.edges.map((e) => ({
-    id: e.id,
-    from: e.source,
-    to: e.target,
-    label: e.relationType === "child_law" ? "하위" : e.relationType === "delegation" ? "위임" : e.relationType === "reference" ? "참조" : "",
-  }));
-
-  return {
-    nodes: new DataSet(visNodes),
-    edges: new DataSet(visEdges),
-  };
-}
-
-export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect }: LawGraphPanelProps) {
+export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect, onGraphDataChange }: LawGraphPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const networkRef = useRef<Network | null>(null);
+  // DataSet을 ref로 관리 — expand 시 add()로 증분 추가
+  const nodesDataSetRef = useRef<DataSet<any> | null>(null);
+  const edgesDataSetRef = useRef<DataSet<any> | null>(null);
+  // click handler stale closure 방지용 ref
+  const graphDataRef = useRef<LawGraphData | null>(null);
+  const onNodeSelectRef = useRef(onNodeSelect);
+  const selectedNodeIdRef = useRef<string | null>(null);
+  // expand 시 fit 억제 플래그
+  const isExpandRef = useRef(false);
+  // 이미 expand된 노드 ID 추적 (새 질의 시 초기화)
+  const expandedNodesRef = useRef<Set<string>>(new Set());
+  // expand 핸들러 (최신 상태를 ref로 유지하여 click handler stale closure 방지)
+  const handleExpandRef = useRef<(node: GraphNode) => void>(() => {});
+
   const [state, setState] = useState<PanelState>("idle");
   const [graphData, setGraphData] = useState<LawGraphData | null>(null);
-  const lastSuccessKey = useRef<number>(-1);  // 성공한 queryKey만 기록
-  const requestToken = useRef<number>(0);     // 요청 순서 토큰
+  const [showReference, setShowReference] = useState(false);
+  const lastSuccessKey = useRef<number>(-1);
+  const requestToken = useRef<number>(0);
   const abortRef = useRef<AbortController | null>(null);
 
-  // 그래프 탭 활성화 + 새 질문(queryKey 변경)이 있을 때 API 호출
+  // onNodeSelect가 바뀌면 ref 동기화
+  useEffect(() => {
+    onNodeSelectRef.current = onNodeSelect;
+  }, [onNodeSelect]);
+
+  // Network 초기화 — 마운트 시 한 번만 생성, DataSet은 재사용
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const nodesDS = new DataSet<object>([]);
+    const edgesDS = new DataSet<object>([]);
+    nodesDataSetRef.current = nodesDS;
+    edgesDataSetRef.current = edgesDS;
+
+    const network = new Network(
+      containerRef.current,
+      { nodes: nodesDS, edges: edgesDS },
+      VIS_OPTIONS,
+    );
+    networkRef.current = network;
+
+    network.on("click", (params) => {
+      if (params.nodes.length === 0) {
+        selectedNodeIdRef.current = null;
+        onNodeSelectRef.current(null);
+        return;
+      }
+      const nodeId = params.nodes[0] as string;
+      selectedNodeIdRef.current = nodeId;
+      const found = graphDataRef.current?.nodes.find((n) => n.id === nodeId) ?? null;
+      onNodeSelectRef.current(found);
+
+      // 법령 노드 + hop < 2 + 미확장 → expand
+      if (found?.kind === "law" && (found.hop ?? 0) < 2 && !expandedNodesRef.current.has(nodeId)) {
+        handleExpandRef.current(found);
+      }
+    });
+
+    return () => {
+      network.destroy();
+      networkRef.current = null;
+      nodesDataSetRef.current = null;
+      edgesDataSetRef.current = null;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 새 질의 — API 호출 후 graphData 교체
   useEffect(() => {
     if (!isActive || !lastQuery || queryKey === lastSuccessKey.current) return;
 
-    // 이전 요청 중단
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -95,7 +144,11 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect }: L
 
     setState("loading");
     setGraphData(null);
-    onNodeSelect(null);
+    graphDataRef.current = null;
+    expandedNodesRef.current = new Set();
+    selectedNodeIdRef.current = null;
+    onGraphDataChange?.(null);
+    onNodeSelectRef.current(null);
 
     queryGraph(lastQuery, controller.signal)
       .then((resp) => {
@@ -105,8 +158,10 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect }: L
           setState("empty");
           return;
         }
-        lastSuccessKey.current = queryKey;  // 성공 시에만 기록
+        lastSuccessKey.current = queryKey;
+        graphDataRef.current = data;
         setGraphData(data);
+        onGraphDataChange?.(data);
         setState("success");
       })
       .catch((err) => {
@@ -119,33 +174,66 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect }: L
       });
 
     return () => { controller.abort(); };
-  }, [isActive, queryKey, lastQuery, onNodeSelect]);
+  }, [isActive, queryKey, lastQuery, onGraphDataChange]);
 
-  // graphData가 바뀔 때 vis-network 렌더링
+  // graphData/showReference 변경 시 DataSet 전체 갱신
   useEffect(() => {
-    if (!containerRef.current || !graphData) return;
+    if (!graphData || !nodesDataSetRef.current || !edgesDataSetRef.current) return;
 
-    networkRef.current?.destroy();
+    const filtered = applyReferenceFilter(graphData, showReference);
+    const { nodes, edges } = buildVisDatasets(filtered);
+    nodesDataSetRef.current.clear();
+    edgesDataSetRef.current.clear();
+    nodesDataSetRef.current.add(nodes.get());
+    edgesDataSetRef.current.add(edges.get());
 
-    const { nodes, edges } = buildVisDatasets(graphData);
-    const network = new Network(containerRef.current, { nodes, edges }, VIS_OPTIONS);
-    networkRef.current = network;
+    // 토글로 선택 노드가 숨겨졌으면 선택 초기화
+    if (selectedNodeIdRef.current && !filtered.nodes.some((n) => n.id === selectedNodeIdRef.current)) {
+      selectedNodeIdRef.current = null;
+      onNodeSelectRef.current(null);
+    }
 
-    network.on("click", (params) => {
-      if (params.nodes.length === 0) {
-        onNodeSelect(null);
-        return;
-      }
-      const nodeId = params.nodes[0] as string;
-      const found = graphData.nodes.find((n) => n.id === nodeId) ?? null;
-      onNodeSelect(found);
-    });
+    // expand 시에는 뷰포트 유지, 새 질의/토글에는 fit
+    if (!isExpandRef.current) {
+      networkRef.current?.fit();
+    }
+    isExpandRef.current = false;
+  }, [graphData, showReference]);
 
-    return () => {
-      network.destroy();
-      networkRef.current = null;
-    };
-  }, [graphData, onNodeSelect]);
+  // expand 핸들러 — 렌더마다 최신 상태를 ref에 동기화
+  handleExpandRef.current = (node: GraphNode) => {
+    if (!node.lawName) return;
+    // 호출 시점의 queryKey 캡처 — 응답 도착 시 세대 검증에 사용
+    const capturedQueryKey = lastSuccessKey.current;
+    expandedNodesRef.current.add(node.id);
+
+    // 클릭된 노드를 로딩 색상으로 표시
+    nodesDataSetRef.current?.update({ id: node.id, color: { background: "hsl(217, 80%, 78%)", border: "hsl(217, 60%, 58%)" } });
+
+    expandNode(node.lawName)
+      .then((resp) => {
+        const current = graphDataRef.current;
+        if (!current) return;
+        // stale 응답 차단: 새 질의가 시작됐으면 무시
+        if (lastSuccessKey.current !== capturedQueryKey) return;
+        // 고아 엣지 방지: sourceNode가 현재 그래프에 없으면 무시
+        if (!current.nodes.some((n) => n.id === node.id)) return;
+
+        const { nodes: newNodes, edges: newEdges } = expandResponseToGraphParts(resp, node.id);
+        const merged = mergeGraphData(current, newNodes, newEdges, node.hop ?? 0);
+
+        graphDataRef.current = merged;
+        isExpandRef.current = true;   // fit 억제
+        setGraphData(merged);
+        onGraphDataChange?.(merged);
+      })
+      .catch(() => {
+        // 실패 시 expandedNodes에서 제거해 재시도 가능하게 유지
+        expandedNodesRef.current.delete(node.id);
+        // 원래 색상 복원
+        nodesDataSetRef.current?.update({ id: node.id, color: undefined });
+      });
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -156,18 +244,30 @@ export function LawGraphPanel({ lastQuery, queryKey, isActive, onNodeSelect }: L
           {state === "loading" && (
             <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-muted-foreground" />
           )}
+          {state === "success" && (
+            <button
+              type="button"
+              onClick={() => setShowReference((v) => !v)}
+              className={`ml-auto rounded border px-2 py-0.5 text-[10px] transition-colors ${
+                showReference
+                  ? "border-primary/30 bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              참조 {showReference ? "ON" : "OFF"}
+            </button>
+          )}
         </div>
       </div>
 
       <div className="relative flex-1 overflow-hidden">
-        {/* vis-network 컨테이너 — success일 때만 표시 */}
+        {/* vis-network 컨테이너 — 항상 마운트, display로 표시/숨김 제어 */}
         <div
           ref={containerRef}
           className="absolute inset-0"
           style={{ display: state === "success" ? "block" : "none" }}
         />
 
-        {/* 상태별 안내 메시지 */}
         {state !== "success" && (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
             {state === "idle" && (

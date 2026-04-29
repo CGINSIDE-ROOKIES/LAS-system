@@ -20,6 +20,43 @@ _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 _VALID_RELATION_TYPES = frozenset({"child_law", "delegation", "reference", "structure"})
 
+# 별명 → 정식 법령명 매핑 (LLM이 줄임말로 추출했을 때 보정)
+
+# Neo4j에 저장된 실제 법령명 (표기 기준)
+# - 기간제: "기간제 및 단시간근로자 보호 등에 관한 법률" (단시간근로자 = 공백 없음)
+# - 남녀고용평등: "남녀고용평등과 일ㆍ가정 양립 지원에 관한 법률" (ㆍ = U+318D 가운뎃점)
+_LAW_NAME_ALIASES: dict[str, str] = {
+    # 근로기준법
+    "근기법": "근로기준법",
+    # 기간제법 — Neo4j 표기: "단시간근로자" (공백 없음)
+    "기간제법": "기간제 및 단시간근로자 보호 등에 관한 법률",
+    "기간제및단시간근로자법": "기간제 및 단시간근로자 보호 등에 관한 법률",
+    # 파견법
+    "파견법": "파견근로자 보호 등에 관한 법률",
+    "파견근로자법": "파견근로자 보호 등에 관한 법률",
+    # 남녀고용평등법 — Neo4j 표기: "일ㆍ가정" (U+318D 가운뎃점)
+    "남녀평등법": "남녀고용평등과 일ㆍ가정 양립 지원에 관한 법률",
+    "남녀고용평등법": "남녀고용평등과 일ㆍ가정 양립 지원에 관한 법률",
+    "일가정양립법": "남녀고용평등과 일ㆍ가정 양립 지원에 관한 법률",
+    # 퇴직급여법
+    "퇴직급여법": "근로자퇴직급여 보장법",
+    "퇴직금법": "근로자퇴직급여 보장법",
+    # 하도급법 — "에 관한" / "에 대한" 두 표기 모두 처리
+    "하도급법": "하도급거래 공정화에 관한 법률",
+    "하도급거래법": "하도급거래 공정화에 관한 법률",
+    "하도급거래공정화에대한법률": "하도급거래 공정화에 관한 법률",
+    # 건설산업기본법
+    "건설법": "건설산업기본법",
+}
+
+
+def _resolve_law_name_alias(law_name: str | None) -> str | None:
+    """줄임말·별명을 정식 법령명으로 변환한다."""
+    if not law_name:
+        return law_name
+    normalized = law_name.strip().replace(" ", "")
+    return _LAW_NAME_ALIASES.get(normalized, law_name)
+
 _SYSTEM_PROMPT = """\
 당신은 법령 그래프 질의 분석기입니다.
 반드시 아래 형식의 JSON만 출력하세요. 설명, 코드 블록(```), 마크다운 없이 {{ 로 시작하는 순수 JSON만 출력하세요.
@@ -64,44 +101,50 @@ ORDER BY child.law_name
 # T2: 위임 관계 (DELEGATES_TO_LAW)
 _CYPHER_DELEGATION = """
 MATCH (source:Law {law_name: $law_name})-[:DELEGATES_TO_LAW]->(target:Law)
-RETURN target.law_name AS target_law_name,
-       target.law_uid  AS target_law_uid
+RETURN target.law_name        AS target_law_name,
+       target.law_uid         AS target_law_uid,
+       target.classified_level AS classified_level
 ORDER BY target.law_name
 """.strip()
 
 # T3: 참조 관계 — 법 → 법 (REFERS_TO_LAW)
 _CYPHER_REFERENCE_LAW = """
 MATCH (source:Law {law_name: $law_name})-[:REFERS_TO_LAW]->(target:Law)
-RETURN 'law' AS ref_type,
-       target.law_name AS ref_name,
-       target.law_uid  AS ref_uid,
-       null            AS ref_article_no
+RETURN 'law'                   AS ref_type,
+       target.law_name         AS ref_name,
+       target.law_uid          AS ref_uid,
+       null                    AS ref_article_no,
+       target.classified_level AS ref_classified_level
 ORDER BY target.law_name
 """.strip()
 
 # T3b: 참조 관계 — 특정 조문 기준 (REFERS_TO_ARTICLE)
 # tgt_law를 함께 traverse해 어느 법령의 조문인지 반환한다.
+# Article 노드의 조문번호 필드명은 article_no_display (article_no 아님).
 _CYPHER_REFERENCE_ARTICLE = """
-MATCH (law:Law {law_name: $law_name})-[:HAS_ARTICLE]->(src:Article {article_no: $article_no})
-MATCH (src)-[:REFERS_TO_ARTICLE]->(tgt:Article)
+MATCH (law:Law {law_name: $law_name})-[:HAS_ARTICLE]->(src:Article {article_no_display: $article_no})
+MATCH (src)-[r:REFERS_TO_ARTICLE]->(tgt:Article)
 MATCH (tgt_law:Law)-[:HAS_ARTICLE]->(tgt)
-RETURN 'article' AS ref_type,
-       tgt.article_no   AS ref_article_no,
-       tgt.article_uid  AS ref_uid,
-       tgt_law.law_name AS ref_name
+RETURN 'article'                  AS ref_type,
+       tgt.article_no_display     AS ref_article_no,
+       tgt.article_uid            AS ref_uid,
+       tgt_law.law_name           AS ref_name,
+       src.article_no_display     AS src_article_no,
+       r.target_paragraph_nos     AS ref_paragraph_nos
 ORDER BY tgt_law.law_name,
-         toInteger(split(replace(tgt.article_no, '제', ''), '조')[0]),
-         tgt.article_no
+         toInteger(split(replace(tgt.article_no_display, '제', ''), '조')[0]),
+         tgt.article_no_display
 """.strip()
 
 # T4: 법령 조문 구조 (HAS_ARTICLE)
 # 조문번호를 숫자 기준으로 정렬한다 (문자열 정렬 시 제10조 < 제2조 오류 방지).
+# Article 노드의 조문번호 필드명은 article_no_display (article_no 아님).
 _CYPHER_STRUCTURE = """
 MATCH (law:Law {law_name: $law_name})-[:HAS_ARTICLE]->(article:Article)
-RETURN article.article_no  AS article_no,
-       article.article_uid AS article_uid
-ORDER BY toInteger(split(replace(article.article_no, '제', ''), '조')[0]),
-         article.article_no
+RETURN article.article_no_display AS article_no,
+       article.article_uid        AS article_uid
+ORDER BY toInteger(split(replace(article.article_no_display, '제', ''), '조')[0]),
+         article.article_no_display
 """.strip()
 
 
@@ -163,7 +206,7 @@ def _parse_slots(text: str) -> GraphQuerySlots:
     if relation_type not in _VALID_RELATION_TYPES:
         relation_type = None
     return GraphQuerySlots(
-        law_name=data.get("law_name") or None,
+        law_name=_resolve_law_name_alias(data.get("law_name") or None),
         article_no=data.get("article_no") or None,
         relation_type=relation_type,
     )

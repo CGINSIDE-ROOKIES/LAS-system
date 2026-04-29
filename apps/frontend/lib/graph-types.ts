@@ -5,8 +5,10 @@ export type GraphNode = {
   label: string;
   kind: GraphNodeKind;
   lawName?: string;
+  lawType?: string;    // "법" | "시행령" | "시행규칙" | "규정" 등
   articleNo?: string;
   isCenter?: boolean;
+  hop?: number;        // 0=중심, 1=1차확장, 2=2차확장(expand 불가)
 };
 
 export type GraphEdgeRelationType = "child_law" | "delegation" | "reference" | "structure";
@@ -17,6 +19,8 @@ export type GraphEdge = {
   target: string;
   relationType: GraphEdgeRelationType;
   label?: string;
+  detail?: string;         // "제3조 → 제5조" 형태 관계 요약
+  paragraphNos?: string[]; // ["제1항", "제2항"]
 };
 
 export type LawGraphData = {
@@ -33,4 +37,17 @@ export type GraphQueryResponse = {
   relation_type: string | null;
   results: Record<string, unknown>[];
   cypher?: string;
+};
+
+export type LawRef = {
+  law_name: string;
+  law_uid: string | null;
+  classified_level: string | null;
+};
+
+export type GraphExpandResponse = {
+  law_name: string;
+  child_laws: LawRef[];
+  delegated_laws: LawRef[];
+  referred_laws: LawRef[];
 };
