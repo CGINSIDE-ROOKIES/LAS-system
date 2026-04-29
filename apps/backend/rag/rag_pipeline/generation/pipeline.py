@@ -388,17 +388,30 @@ class RagPipeline:
                 non_law_col_rows = [r for i, r in enumerate(collection_rows) if i != law_idx]
                 non_law_col_names = [c for i, c in enumerate(effective_collections) if i != law_idx]
 
-                law_quota = max(1, round(effective_top_k * rcfg.normative_law_ratio))
+                law_max_quota = max(1, round(effective_top_k * rcfg.normative_law_ratio))
+                law_min_quota = max(1, round(effective_top_k * rcfg.law_slot_min_ratio))
+                qualifying_law = sum(
+                    1 for r in law_article_rows
+                    if float(r.get("score", 0) or 0) >= rcfg.law_slot_score_threshold
+                )
+                law_quota = max(law_min_quota, min(qualifying_law, law_max_quota))
                 case_quota = effective_top_k - law_quota
-                logger.info("normative slot: top_k=%d law_quota=%d case_quota=%d", effective_top_k, law_quota, case_quota)
+                logger.info(
+                    "normative slot: top_k=%d qualifying_law=%d law_quota=%d case_quota=%d",
+                    effective_top_k, qualifying_law, law_quota, case_quota,
+                )
 
-                law_slots = rank_rows(law_article_rows)[:law_quota]
+                bm25_law_rows = [r for r in bm25_rows if str(r.get("doc_type", "") or "") == "law"]
+                bm25_non_law_rows = [r for r in bm25_rows if str(r.get("doc_type", "") or "") != "law"]
+                law_fused = fuse_rrf(law_article_rows, bm25_law_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
+                law_slots = law_fused[:law_quota]
+
                 case_merged = (
                     fuse_rrf_multi(non_law_col_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k, backend_names=non_law_col_names)
                     if non_law_col_rows else []
                 )
-                case_fused = fuse_rrf(case_merged, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
-                case_slots = [r for r in case_fused if str(r.get("doc_type", "") or "") != "law"][:case_quota]
+                case_fused = fuse_rrf(case_merged, bm25_non_law_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
+                case_slots = case_fused[:case_quota]
 
                 rrf_rows = law_slots + case_slots
                 for i, row in enumerate(rrf_rows, start=1):
