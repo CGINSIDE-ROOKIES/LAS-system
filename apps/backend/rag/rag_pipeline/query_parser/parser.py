@@ -17,8 +17,11 @@ from .data.law_names import ALIAS_MAP, LAW_NAME_LIST
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PARSER_MODEL = "gemini-2.0-flash-lite"
+DEFAULT_PARSER_MODEL_GEMINI = "gemini-2.0-flash-lite"
+DEFAULT_PARSER_MODEL_OPENAI = "gpt-4o-mini"
+DEFAULT_PARSER_MODEL = DEFAULT_PARSER_MODEL_GEMINI  # backward compat
 _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+_OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
 _SYSTEM_PROMPT = """\
 당신은 법률 질문 분석기입니다.
@@ -39,9 +42,10 @@ _SYSTEM_PROMPT = """\
   · 오타·잘못된 법령명을 교정 (예: "근로기쥰법" → "근로기준법")
   · 원문이 이미 표준 법률 용어면 그대로 반환
   · is_legal=false이면 빈 문자열 반환
-- hypothetical_doc: intent가 "normative"일 때만 작성. 질문에 답하는 실제 법령 조문과 유사한 형식의 텍스트를 1~2문장으로 생성.
-  · 예: "사용자는 근로자를 해고하려면 적어도 30일 전에 예고하여야 한다. 다만, 수습 사용한 날부터 3개월 이내인 근로자에게는 그러하지 아니하다."
-  · 정확한 조문을 모르면 질문 맥락에서 예상되는 조문 내용을 법령 문체로 작성
+- hypothetical_doc: intent가 "normative"일 때만 작성. normalized_query를 의무·요건 조문 형식의 문장으로 변환하여 1~2문장으로 생성.
+  · 벌칙·제재 조문("~에 처한다")이 아닌, 해당 의무나 요건을 직접 규정하는 조문 형태로 작성
+  · 예: normalized_query가 "해고 사전 통보 기간"이면 → "사용자는 근로자를 해고하려면 적어도 30일 전에 예고하여야 한다."
+  · 조문 내용에 구체적인 요건·기준·숫자·조건이 없고 "법령에서 정하는 바에 따른다" 수준의 추상적 문장이 되면 빈 문자열 "" 반환
   · intent가 "normative"가 아니면 반드시 빈 문자열 ""
 
 인식 가능한 법령 목록:
@@ -70,29 +74,43 @@ class QueryParserConfig:
     """QueryParser 설정."""
 
     api_key: str
-    model: str = DEFAULT_PARSER_MODEL
+    model: str = DEFAULT_PARSER_MODEL_GEMINI
     timeout: int = 10
     strict_mode: bool = False
+    provider: str = "gemini"
+    url: str = ""
 
-    @property
-    def url(self) -> str:
-        return f"{_GEMINI_BASE_URL}/{self.model}:generateContent"
+    def __post_init__(self) -> None:
+        if not self.url:
+            if self.provider == "gemini":
+                self.url = f"{_GEMINI_BASE_URL}/{self.model}:generateContent"
+            else:
+                self.url = _OPENAI_CHAT_URL
 
     @classmethod
     def from_env(cls) -> QueryParserConfig:
-        """환경변수에서 설정을 읽어 QueryParserConfig를 생성한다.
-
-        모델 우선순위: QUERY_PARSER_MODEL → GEMINI_MODEL → DEFAULT_PARSER_MODEL
-        """
-        model = (
-            os.getenv("QUERY_PARSER_MODEL", "").strip()
-            or os.getenv("GEMINI_MODEL", "").strip()
-            or DEFAULT_PARSER_MODEL
-        )
-        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        """환경변수에서 설정을 읽어 QueryParserConfig를 생성한다."""
+        provider = os.getenv("LLM_PROVIDER", "gemini").strip()
+        if provider == "gemini":
+            model = (
+                os.getenv("QUERY_PARSER_MODEL", "").strip()
+                or os.getenv("GEMINI_MODEL", "").strip()
+                or DEFAULT_PARSER_MODEL_GEMINI
+            )
+            api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        else:
+            model = (
+                os.getenv("QUERY_PARSER_MODEL", "").strip()
+                or os.getenv("LLM_MODEL", "").strip()
+                or DEFAULT_PARSER_MODEL_OPENAI
+            )
+            api_key = (
+                os.getenv("LLM_API_KEY", "").strip()
+                or os.getenv("OPENAI_API_KEY", "").strip()
+            )
         strict = os.getenv("QUERY_PARSER_STRICT", "").strip().lower() in ("1", "true")
         timeout = int(os.getenv("QUERY_PARSER_TIMEOUT", "10").strip() or "10")
-        return cls(api_key=api_key, model=model, timeout=timeout, strict_mode=strict)
+        return cls(api_key=api_key, model=model, timeout=timeout, strict_mode=strict, provider=provider)
 
 
 # ── 프롬프트 빌더 ─────────────────────────────────────────────────────────────
@@ -200,9 +218,9 @@ class QueryParser:
 
         if not cfg.api_key:
             if cfg.strict_mode:
-                raise ValueError("GEMINI_API_KEY가 비어 있습니다.")
+                raise ValueError("LLM API key가 비어 있습니다.")
             if not self._api_key_missing_warned:
-                logger.warning("query_parser fallback: GEMINI_API_KEY 미설정으로 파서를 건너뜁니다.")
+                logger.warning("query_parser fallback: LLM API key 미설정으로 파서를 건너뜁니다.")
                 self._api_key_missing_warned = True
             return QueryParseResult(
                 law_names=[],
@@ -216,7 +234,7 @@ class QueryParser:
             # API 라우터도 sync endpoint로 동작해 일관성을 유지한다.
             raw_text, _ = generate_answer(
                 _build_prompt(query, previous_question),
-                provider="gemini",
+                provider=cfg.provider,
                 url=cfg.url,
                 model=cfg.model,
                 api_key=cfg.api_key,
