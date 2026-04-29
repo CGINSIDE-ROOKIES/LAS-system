@@ -220,6 +220,7 @@ class RagPipeline:
                     embedding_api_key=os.getenv("OPENAI_API_KEY") or None,
                     embedding_api_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
                     embedding_dimensions=int(d) if (d := os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "").strip()) else None,
+                    law_slot_score_threshold=float(os.getenv("LAW_SLOT_SCORE_THRESHOLD", "0.55").strip()),
                 ),
                 generation=GenerationConfig.from_env(),
             )
@@ -401,10 +402,8 @@ class RagPipeline:
                     effective_top_k, qualifying_law, law_quota, case_quota,
                 )
 
-                bm25_law_rows = [r for r in bm25_rows if str(r.get("doc_type", "") or "") == "law"]
-                bm25_non_law_rows = [r for r in bm25_rows if str(r.get("doc_type", "") or "") != "law"]
-                law_fused = fuse_rrf(law_article_rows, bm25_law_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
-                law_slots = law_fused[:law_quota]
+                bm25_non_law_rows = bm25_rows
+                law_slots = law_article_rows[:law_quota]
 
                 case_merged = (
                     fuse_rrf_multi(non_law_col_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k, backend_names=non_law_col_names)

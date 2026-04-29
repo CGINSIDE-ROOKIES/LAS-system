@@ -28,8 +28,17 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent.parent))
 load_dotenv()
 
+import re  # noqa: E402
+
 from rag_pipeline.generation.pipeline import RagPipeline  # noqa: E402
 from rag_pipeline.observability.langfuse_client import score_trace  # noqa: E402
+
+_ANSWERABLE_RE = re.compile(r'\n?\[ANSWERABLE:(yes|no)\]\s*$', re.IGNORECASE)
+
+
+def _strip_answerable(answer: str) -> str:
+    m = _ANSWERABLE_RE.search(answer)
+    return answer[:m.start()].rstrip() if m else answer
 from rag_pipeline.observability.tracing import get_trace_id, start_trace  # noqa: E402
 from rag_pipeline.query_parser import QueryParser  # noqa: E402
 
@@ -90,7 +99,7 @@ def collect_pipeline_results(
                 "expected_doc_type": row.get("expected_doc_type", ""),
                 "gold_law": gold_law,
                 "gold_article": row.get("gold_article", ""),
-                "answer": result.answer,
+                "answer": _strip_answerable(result.answer),
                 "contexts": [
                     doc["text"]
                     for doc in result.retrieved_docs
@@ -131,31 +140,58 @@ def run_ragas(results: list[dict], *, batch_size: int = 5, batch_sleep: float = 
     import time
     from openai import AsyncOpenAI, NotFoundError
     from ragas.cache import DiskCacheBackend
-    from ragas.embeddings import GoogleEmbeddings
+    from ragas.embeddings import OpenAIEmbeddings
     from ragas.llms import llm_factory
     from ragas.metrics.collections import AnswerRelevancy
     from ragas.metrics.collections import ContextPrecisionWithoutReference
     from ragas.metrics.collections import Faithfulness
 
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    api_key = (
+        os.getenv("LLM_API_KEY", "").strip()
+        or os.getenv("OPENAI_API_KEY", "").strip()
+    )
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY가 없습니다. apps/backend/rag/.env를 확인하세요.")
+        raise RuntimeError("LLM_API_KEY 또는 OPENAI_API_KEY가 없습니다. apps/backend/.env를 확인하세요.")
 
     ragas_model = (
-        os.getenv("RAGAS_GEMINI_MODEL", "").strip()
-        or os.getenv("GEMINI_MODEL", "").strip()
-        or "gemini-2.5-flash-lite"
+        os.getenv("RAGAS_MODEL", "").strip()
+        or os.getenv("LLM_MODEL", "").strip()
+        or "gpt-4o-mini"
     )
+    base_url = os.getenv("LLM_BASE_URL", "").strip() or os.getenv("OPENAI_BASE_URL", "").strip() or None
+    emb_model = os.getenv("RAGAS_EMBEDDING_MODEL", "").strip() or "text-embedding-3-small"
+
     cache = DiskCacheBackend(cache_dir=str(Path(__file__).parent.parent / "data/staging/.ragas_cache"))
-    # Gemini의 OpenAI 호환 엔드포인트 사용
-    client = AsyncOpenAI(
-        api_key=api_key,
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-    )
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
     ragas_llm = llm_factory(ragas_model, client=client, cache=cache, max_tokens=8192)
-    ragas_emb = GoogleEmbeddings(model="gemini-embedding-001", cache=cache)
+    ragas_emb = OpenAIEmbeddings(client, model=emb_model, cache=cache)
+
+    from ragas.metrics.collections.answer_relevancy.util import (
+        AnswerRelevanceInput, AnswerRelevanceOutput, AnswerRelevancePrompt,
+    )
+
+    class KoreanAnswerRelevancePrompt(AnswerRelevancePrompt):
+        instruction = (
+            "주어진 답변에서 질문을 생성하고, 답변이 불성실한지 여부를 판단하세요. "
+            "답변이 모호하거나 회피적이면 noncommittal=1, 실질적인 내용이 있으면 noncommittal=0을 반환하세요."
+        )
+        examples = [
+            (
+                AnswerRelevanceInput(response="근로기준법에 따라 사용자는 근로자를 해고하려면 적어도 30일 전에 예고하여야 합니다."),
+                AnswerRelevanceOutput(question="해고 예고 기간은 얼마나 되나요?", noncommittal=0),
+            ),
+            (
+                AnswerRelevanceInput(response="연장근로는 당사자 합의 시 1주에 12시간을 한도로 허용됩니다."),
+                AnswerRelevanceOutput(question="연장근로는 최대 몇 시간까지 가능한가요?", noncommittal=0),
+            ),
+            (
+                AnswerRelevanceInput(response="잘 모르겠습니다. 법령마다 다를 수 있어 확인이 필요합니다."),
+                AnswerRelevanceOutput(question="관련 법령의 규정이 어떻게 되나요?", noncommittal=1),
+            ),
+        ]
 
     relevancy_m = AnswerRelevancy(llm=ragas_llm, embeddings=ragas_emb)
+    relevancy_m.prompt = KoreanAnswerRelevancePrompt()
     precision_m = ContextPrecisionWithoutReference(llm=ragas_llm)
     faithfulness_m = Faithfulness(llm=ragas_llm)
 
@@ -198,7 +234,7 @@ def run_ragas(results: list[dict], *, batch_size: int = 5, batch_sleep: float = 
             raise RuntimeError(
                 "RAGAS 평가 모델을 찾지 못했습니다. "
                 f"현재 모델: {ragas_model}. "
-                "RAGAS_GEMINI_MODEL 또는 GEMINI_MODEL을 사용 가능한 모델로 바꿔주세요."
+                "RAGAS_MODEL 또는 LLM_MODEL을 사용 가능한 모델로 바꿔주세요."
             ) from exc
 
         for j, row in enumerate(batch):
@@ -229,7 +265,7 @@ def run_ragas(results: list[dict], *, batch_size: int = 5, batch_sleep: float = 
             raise RuntimeError(
                 "RAGAS 평가 모델을 찾지 못했습니다. "
                 f"현재 모델: {ragas_model}. "
-                "RAGAS_GEMINI_MODEL 또는 GEMINI_MODEL을 사용 가능한 모델로 바꿔주세요."
+                "RAGAS_MODEL 또는 LLM_MODEL을 사용 가능한 모델로 바꿔주세요."
             ) from exc
     else:
         print("  faithfulness 평가 대상 없음 (모든 answer_relevancy ≥ 0.6)")

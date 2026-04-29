@@ -39,7 +39,7 @@ class RetrievalConfig:
     min_law_contexts: int = 1
     normative_law_ratio: float = 0.6       # normative law 슬롯 최대 비율
     law_slot_min_ratio: float = 0.2        # normative law 슬롯 최소 비율
-    law_slot_score_threshold: float = 0.5  # law 슬롯 포함 기준 벡터 유사도 임계값
+    law_slot_score_threshold: float = 0.55  # law 슬롯 포함 기준 벡터 유사도 임계값
     max_content_chars: int = 1200
     max_total_chars: int = 6000
     min_chunk_text_len: int = 100
