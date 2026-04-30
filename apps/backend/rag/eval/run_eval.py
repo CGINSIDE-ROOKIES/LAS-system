@@ -63,9 +63,8 @@ def collect_pipeline_results(
         parser_intent = ""
         if query_parser is not None:
             parsed = query_parser.parse(query)
-            parser_law_names = "|".join(parsed.law_names)
-            parser_intent = parsed.intent or ""
             pipeline_intent = parsed.intent
+            parser_intent = parsed.intent or ""
             if not parsed.is_legal:
                 print(f"  → parser: is_legal=false, 스킵")
                 results.append({
@@ -78,18 +77,27 @@ def collect_pipeline_results(
                     "contexts": [],
                     "retrieved_doc_types": [],
                     "law_context_status": "irrelevant",
-                    "parser_law_names": parser_law_names,
+                    "parser_law_names": "",
                     "parser_intent": parser_intent,
                 })
                 continue
-            law_names = parsed.law_names or None
+            # API와 동일한 우선순위: law_names → suggested_laws → None
+            law_names = parsed.law_names or parsed.suggested_laws or None
+            parser_law_names = "|".join(law_names) if law_names else ""
             if law_names:
                 print(f"  → parser: law_names={law_names}")
 
         trace = start_trace("eval_run", input={"question": query, "intent": row.get("intent", "")})
         trace_id = get_trace_id(trace)
         try:
-            result = pipeline.run(query, law_names=law_names, intent=pipeline_intent, trace=trace)
+            result = pipeline.run(
+                query,
+                law_names=law_names,
+                intent=pipeline_intent,
+                search_query=(parsed.normalized_query or None) if query_parser else None,
+                hypothetical_doc=(parsed.hypothetical_doc or None) if query_parser else None,
+                trace=trace,
+            )
             retrieved_law_names = {doc.get("law_name", "") for doc in result.retrieved_docs}
             gold_law = row.get("gold_law", "")
             law_hit = int(bool(gold_law and gold_law in retrieved_law_names))

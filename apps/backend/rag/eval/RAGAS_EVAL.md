@@ -347,40 +347,36 @@ eval_set.csv
 - **normative prec -0.051**: 전체 prec는 상승했으나 normative만 하락. law_article 슬롯 비율(normative_law_ratio=0.6) 또는 BM25 normative 쿼리 품질 추가 검토 필요. n=22 소표본 노이즈 가능성도 있음
 - **law_hit 0.600 유지**: 인덱스 수정 이후에도 gold_law 포함율 변화 없음 — retrieval recall은 안정적
 
----
-
 ### 4-12. 종합 해석
 
 - **case_law rel 0.699 → 0.954** — intent 기반 필터 전략 적용 후 판례 질의 품질이 가장 크게 개선됨. 구조적 문제(law_names hard filter가 판례 retrieval 방해) 해소 확인
-- **normative missing 완전 해소** — 슬롯 기반 검색 전환(9차)으로 missing 4건 → 0건. normative rel 0.811 → 0.875. normative prec 비교는 평가 대상 n이 달라(20→22) 단순 비교 불가
-- **mixed prec 일관 하락** — 법령+판례 복합 질의에서 컨텍스트 비율 조정 전략 필요. 다음 개선 타겟
+- **normative missing 완전 해소** — 슬롯 기반 검색 전환(9차)으로 missing 4건 → 0건. normative rel 0.811 → 0.875
+- **mixed prec 일관 하락** — 법령+판례 복합 질의에서 컨텍스트 비율 조정 전략 필요. v2에서 계속 추적
 - **law_hit은 retrieval recall 보조 지표** — LLM 판단 없는 결정론적 수치. RAGAS 메트릭과 함께 추세 모니터링
 - LLM 판단 기반 메트릭 특성상 실행마다 노이즈 존재. 단일 수치보다 추세로 판단 필요
 
 ---
 
-## 5. 앞으로 기대되는 도출
+## 5. 완료된 작업 및 이관 사항
 
-### 단기 ✅ 완료
+### 탐색 단계에서 달성한 것
 
-- **intent별 점수 비교** → normative의 context_precision이 일관되게 최저임을 확인
-- **law_context_status 분포** → 현재 전 건 `ok` (missing 문제는 retrieval 순위 문제로 나타남)
-- **저점수 쿼리 목록** → 0점 건 확인 및 원인 파악 (어휘 불일치)
-- **intent 기반 필터 전략** ✅ → case_law rel +0.199 개선 확인 (4-8)
-- **RAGAS 강화** ✅ → faithfulness 메트릭, Langfuse score push, law_hit 지표 도입 (4-8)
-
-### 중기 (개선 적용 후 비교)
-
-| 개선 방향 | 기대 효과 측정 방법 |
+| 항목 | 결과 |
 |---|---|
-| ~~normative 슬롯 기반 검색~~ ✅ | normative missing 해소, rel 향상 확인 (9차) |
-| mixed 컨텍스트 비율 조정 | mixed context_precision 회복 여부 |
-| 동의어 사전 (기재사항 → 명시사항 등) | normative context_precision 변화 |
-| HyDE 도입 | context_precision + answer_relevancy 변화 |
+| intent 기반 필터 전략 | case_law rel 0.699 → 0.954 (+0.255) |
+| normative 슬롯 기반 검색 | missing 4건 → 0건, rel 0.811 → 0.875 |
+| OpenAI 임베딩 전환 | answer_relevancy 0.703 → 0.886, context_precision 0.526 → 0.698 |
+| RAGAS 강화 | faithfulness, law_hit, Langfuse score push 도입 |
+| eval_set v2 구축 | 28건 → 40건, 법령 커버리지 확대, gold_article 오류 수정 |
 
-동일 eval_set으로 반복 측정하여 **개선 전후를 수치로 비교**할 수 있게 됩니다.
+### v2로 이관하는 미결 과제
 
-### 장기
+- **mixed context_precision 개선** — 법령+판례 복합 질의 컨텍스트 비율 조정
+- **CI 파이프라인 연동** — 배포 전 자동 회귀 테스트
+- **eval_set ground_truth 추가** — context_recall, answer_correctness 측정 가능
 
-- CI 파이프라인 연동 → 배포 전 자동 회귀 테스트
-- eval_set에 `ground_truth` 컬럼 추가 → `context_recall`, `answer_correctness` 측정 가능
+### 보고서 종료 사유 (2026-04-30)
+
+이 파일의 측정 히스토리(1~10차)는 평가 모델 Gemini 기반, eval_set에 커버리지 외 법령(산업재해보상보험법) 포함, `run_eval.py` 버그(`suggested_laws` 미적용, `search_query`/`hypothetical_doc` 미전달) 상태에서 수집된 것입니다. 측정 간 일관성은 유지되어 개선 방향 도출에는 유효했으나, 절대 수치의 신뢰도에 한계가 있습니다.
+
+버그 수정 및 eval_set 정비 완료 시점에 보고서를 닫고, 신규 baseline부터 **`RAGAS_EVAL_v2.md`** 에서 이어갑니다.
