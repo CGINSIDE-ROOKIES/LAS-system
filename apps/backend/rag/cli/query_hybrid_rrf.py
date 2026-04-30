@@ -11,20 +11,14 @@ from __future__ import annotations
 
 import hashlib
 
-from retrieval_common import normalize_source_id
 
 
 # ── 문서 동일성 키 ────────────────────────────────────────────────────────────
 def _rrf_key(row: dict[str, object]) -> str:
-    """두 백엔드의 결과를 같은 문서인지 판별하기 위한 정규화 키를 반환한다.
-
-    source_id가 있으면 정규화(suffix 제거)해서 키로 사용하고,
-    없으면 텍스트 앞 800자의 SHA-1 해시를 fallback으로 사용한다.
-    """
+    """두 백엔드의 결과를 같은 문서인지 판별하기 위한 정규화 키를 반환한다."""
     sid = str(row.get("source_id", "") or "")
-    key = normalize_source_id(sid) if sid else ""
-    if key:
-        return key
+    if sid:
+        return sid
     text = str(row.get("text", "") or "")
     return f"text::{hashlib.sha1(text[:800].encode('utf-8')).hexdigest()}"
 
@@ -98,7 +92,6 @@ def fuse_rrf(
 
             sid = str(row.get("source_id", "") or "")
             key = _rrf_key(row)
-            sid_norm = normalize_source_id(sid) if sid else ""
 
             rrf_score = 1.0 / (rrf_k + rank)  # 이 백엔드에서의 RRF 기여 점수
             cur = merged.get(key)
@@ -106,7 +99,6 @@ def fuse_rrf(
                 # 처음 등장: 새 항목 생성
                 cur = {
                     "source_id_raw": sid,
-                    "source_id_normalized": sid_norm,
                     "doc_type": row.get("doc_type", ""),
                     "law_name": row.get("law_name", ""),
                     "text": row.get("text", ""),
@@ -119,8 +111,6 @@ def fuse_rrf(
                 # 두 번째 백엔드에서 source_id가 보완될 수 있으면 업데이트
                 if not str(cur.get("source_id_raw", "") or "") and sid:
                     cur["source_id_raw"] = sid
-                if not str(cur.get("source_id_normalized", "") or "") and sid_norm:
-                    cur["source_id_normalized"] = sid_norm
 
             # 기존 점수에 이번 백엔드 점수 누적
             cur["rrf_score"] = float(cur["rrf_score"]) + rrf_score
@@ -157,11 +147,7 @@ def fuse_rrf(
         if best_rank == 10**9:
             best_rank = 10**8  # sources가 비어있는 경우 안전값
 
-        source_id = str(
-            row.get("source_id_normalized", "")
-            or row.get("source_id_raw", "")
-            or ""
-        )
+        source_id = str(row.get("source_id_raw", "") or "")
         return (
             -float(row["rrf_score"]),  # 1순위: 점수 내림차순
             -source_count,  # 2순위: 등장 백엔드 수 내림차순
@@ -174,16 +160,12 @@ def fuse_rrf(
     # Top-k 추출 및 rank 부여
     out: list[dict[str, object]] = []
     for i, row in enumerate(ranked[: max(1, top_k)], start=1):
-        source_id_raw = str(row.get("source_id_raw", "") or "")
-        source_id_normalized = str(row.get("source_id_normalized", "") or "")
-        source_id = source_id_normalized or source_id_raw
+        source_id = str(row.get("source_id_raw", "") or "")
         out.append(
             {
                 "rank": i,
                 "score": round(float(row["rrf_score"]), 6),
                 "source_id": source_id,
-                "source_id_raw": source_id_raw,
-                "source_id_normalized": source_id_normalized,
                 "doc_type": row.get("doc_type", ""),
                 "law_name": row.get("law_name", ""),
                 "text": row.get("text", ""),
@@ -219,13 +201,11 @@ def fuse_rrf_multi(
                 continue
             sid = str(row.get("source_id", "") or "")
             key = _rrf_key(row)
-            sid_norm = normalize_source_id(sid) if sid else ""
             rrf_score = 1.0 / (rrf_k + rank)
             cur = merged.get(key)
             if cur is None:
                 cur = {
                     "source_id_raw": sid,
-                    "source_id_normalized": sid_norm,
                     "doc_type": row.get("doc_type", ""),
                     "law_name": row.get("law_name", ""),
                     "text": row.get("text", ""),
@@ -237,8 +217,6 @@ def fuse_rrf_multi(
             else:
                 if not str(cur.get("source_id_raw", "") or "") and sid:
                     cur["source_id_raw"] = sid
-                if not str(cur.get("source_id_normalized", "") or "") and sid_norm:
-                    cur["source_id_normalized"] = sid_norm
             cur["rrf_score"] = float(cur["rrf_score"]) + rrf_score
             cast_sources = cur["sources"]
             if isinstance(cast_sources, list):
@@ -267,24 +245,18 @@ def fuse_rrf_multi(
             source_count = len(backends)
         if best_rank == 10**9:
             best_rank = 10**8
-        source_id = str(
-            row.get("source_id_normalized", "") or row.get("source_id_raw", "") or ""
-        )
+        source_id = str(row.get("source_id_raw", "") or "")
         return (-float(row["rrf_score"]), -source_count, best_rank, source_id)
 
     ranked = sorted(merged.values(), key=_tie_break_sort_key)
     out: list[dict[str, object]] = []
     for i, row in enumerate(ranked[: max(1, top_k)], start=1):
-        source_id_raw = str(row.get("source_id_raw", "") or "")
-        source_id_normalized = str(row.get("source_id_normalized", "") or "")
-        source_id = source_id_normalized or source_id_raw
+        source_id = str(row.get("source_id_raw", "") or "")
         out.append(
             {
                 "rank": i,
                 "score": round(float(row["rrf_score"]), 6),
                 "source_id": source_id,
-                "source_id_raw": source_id_raw,
-                "source_id_normalized": source_id_normalized,
                 "doc_type": row.get("doc_type", ""),
                 "law_name": row.get("law_name", ""),
                 "text": row.get("text", ""),

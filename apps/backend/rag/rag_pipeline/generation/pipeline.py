@@ -28,6 +28,7 @@ from ..retrieval.ranking import (
     LAW_CONTEXT_OK,
     LAW_CONTEXT_SUPPLEMENTED,
     apply_law_boost,
+    filter_noise_chunks,
     rank_rows,
     select_rows_with_law_policy,
 )
@@ -219,6 +220,7 @@ class RagPipeline:
                     embedding_api_key=os.getenv("OPENAI_API_KEY") or None,
                     embedding_api_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
                     embedding_dimensions=int(d) if (d := os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "").strip()) else None,
+                    law_slot_score_threshold=float(os.getenv("LAW_SLOT_SCORE_THRESHOLD", "0.55").strip()),
                 ),
                 generation=GenerationConfig.from_env(),
             )
@@ -231,6 +233,8 @@ class RagPipeline:
         doc_types: list[str] | None,
         law_names: list[str] | None,
         intent: str | None = None,
+        search_query: str | None = None,
+        hypothetical_doc: str | None = None,
         trace: Any | None = None,
         top_k: int | None = None,
     ) -> tuple[list[dict[str, Any]], str, str, bool]:
@@ -261,6 +265,15 @@ class RagPipeline:
         else:
             enforce = self._cfg.enforce_min_law_contexts
 
+        effective_search_query = search_query or question
+        # normative intent이고 hypothetical_doc이 있으면 임베딩에 가상 조문 텍스트를 사용한다.
+        # BM25는 키워드 매칭 특성상 normalized_query(effective_search_query)를 그대로 유지한다.
+        embed_text = (
+            hypothetical_doc
+            if intent == "normative" and hypothetical_doc
+            else effective_search_query
+        )
+
         t0 = time.perf_counter()
         retrieval_span = start_span(
             trace, "retrieval",
@@ -274,7 +287,7 @@ class RagPipeline:
         )
         try:
             vector = embed_query(
-                question,
+                embed_text,
                 rcfg.embedding_model,
                 api_key=rcfg.embedding_api_key,
                 api_base_url=rcfg.embedding_api_base_url,
@@ -289,6 +302,14 @@ class RagPipeline:
         end_span(embed_span, output={"dim": len(vector)}, level="DEFAULT")
 
         # ── qdrant + opensearch 병렬 실행 ──────────────────────────────────────
+        # normative 쿼리에서 legal_relation 컬렉션은 그래프 탐색용 메타데이터라
+        # 코사인 유사도가 높게 나와 실제 법령 조문을 candidate pool에서 밀어낸다.
+        effective_collections = (
+            [c for c in rcfg.qdrant_collections if c != "legal_relation"]
+            if intent == "normative"
+            else rcfg.qdrant_collections
+        )
+
         def _qdrant_task(collection: str) -> list[dict[str, Any]]:
             return search_qdrant_with_vector(
                 vector, candidate_k,
@@ -305,7 +326,7 @@ class RagPipeline:
 
         def _bm25_task() -> list[dict[str, Any]]:
             return search_bm25(
-                question, candidate_k,
+                effective_search_query, candidate_k,
                 opensearch_url=rcfg.opensearch_url,
                 index_name=rcfg.opensearch_indices,
                 timeout=rcfg.timeout,
@@ -322,7 +343,7 @@ class RagPipeline:
         # span을 submit 전에 생성해야 실제 실행 시작 시각이 반영된다.
         qdrant_span = start_span(
             retrieval_span, "qdrant",
-            input={"collections": rcfg.qdrant_collections, "candidate_k": candidate_k},
+            input={"collections": effective_collections, "candidate_k": candidate_k},
         )
         opensearch_span = start_span(
             retrieval_span, "opensearch",
@@ -330,7 +351,7 @@ class RagPipeline:
         )
         qdrant_futures = [
             self._executor.submit(_qdrant_task, col)
-            for col in rcfg.qdrant_collections
+            for col in effective_collections
         ]
         bm25_future = self._executor.submit(_bm25_task) if rcfg.opensearch_url else None
 
@@ -360,25 +381,36 @@ class RagPipeline:
             input={"rrf_k": rcfg.rrf_k, "candidate_k": candidate_k, "auto_law_boost": rcfg.auto_law_boost},
         )
         try:
-            _is_normative_slot = intent == "normative" and "law_article" in rcfg.qdrant_collections
+            _is_normative_slot = intent == "normative" and "law_article" in effective_collections
             if _is_normative_slot:
                 # normative 슬롯 기반: law_article 슬롯 상위 고정 + case 슬롯 후순위
-                law_idx = rcfg.qdrant_collections.index("law_article")
+                law_idx = effective_collections.index("law_article")
                 law_article_rows = collection_rows[law_idx]
                 non_law_col_rows = [r for i, r in enumerate(collection_rows) if i != law_idx]
-                non_law_col_names = [c for i, c in enumerate(rcfg.qdrant_collections) if i != law_idx]
+                non_law_col_names = [c for i, c in enumerate(effective_collections) if i != law_idx]
 
-                law_quota = max(1, round(effective_top_k * rcfg.normative_law_ratio))
+                law_max_quota = max(1, round(effective_top_k * rcfg.normative_law_ratio))
+                law_min_quota = max(1, round(effective_top_k * rcfg.law_slot_min_ratio))
+                qualifying_law = sum(
+                    1 for r in law_article_rows
+                    if float(r.get("score", 0) or 0) >= rcfg.law_slot_score_threshold
+                )
+                law_quota = max(law_min_quota, min(qualifying_law, law_max_quota))
                 case_quota = effective_top_k - law_quota
-                logger.info("normative slot: top_k=%d law_quota=%d case_quota=%d", effective_top_k, law_quota, case_quota)
+                logger.info(
+                    "normative slot: top_k=%d qualifying_law=%d law_quota=%d case_quota=%d",
+                    effective_top_k, qualifying_law, law_quota, case_quota,
+                )
 
-                law_slots = rank_rows(law_article_rows)[:law_quota]
+                bm25_non_law_rows = bm25_rows
+                law_slots = law_article_rows[:law_quota]
+
                 case_merged = (
                     fuse_rrf_multi(non_law_col_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k, backend_names=non_law_col_names)
                     if non_law_col_rows else []
                 )
-                case_fused = fuse_rrf(case_merged, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
-                case_slots = [r for r in case_fused if str(r.get("doc_type", "") or "") != "law"][:case_quota]
+                case_fused = fuse_rrf(case_merged, bm25_non_law_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
+                case_slots = case_fused[:case_quota]
 
                 rrf_rows = law_slots + case_slots
                 for i, row in enumerate(rrf_rows, start=1):
@@ -388,7 +420,7 @@ class RagPipeline:
                     collection_rows,
                     rrf_k=rcfg.rrf_k,
                     top_k=candidate_k,
-                    backend_names=rcfg.qdrant_collections,
+                    backend_names=effective_collections,
                 )
                 # candidate_k 전체를 융합해야 law 보강 시 top_k 바깥 문서를 참조할 수 있음
                 rrf_rows = fuse_rrf(qdrant_rows, bm25_rows, rrf_k=rcfg.rrf_k, top_k=candidate_k)
@@ -402,6 +434,7 @@ class RagPipeline:
             end_span(fusion_span, output={"error": str(exc)}, level="ERROR")
             end_span(retrieval_span, level="ERROR")
             raise
+        rrf_rows = filter_noise_chunks(rrf_rows, min_text_len=rcfg.min_chunk_text_len)
         end_span(fusion_span, output={"fused_docs": len(rrf_rows)}, level="DEFAULT")
 
         # ── ranking ────────────────────────────────────────────────────────────
@@ -501,6 +534,8 @@ class RagPipeline:
         doc_types: list[str] | None = None,
         law_names: list[str] | None = None,
         intent: str | None = None,
+        search_query: str | None = None,
+        hypothetical_doc: str | None = None,
         trace: Any | None = None,
         previous_question: str | None = None,
         previous_answer: str | None = None,
@@ -519,7 +554,8 @@ class RagPipeline:
             )
         try:
             llm_rows, context_text, law_context_status = self._prepare_generation(
-                question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace, top_k=top_k,
+                question, doc_types=doc_types, law_names=law_names, intent=intent,
+                search_query=search_query, hypothetical_doc=hypothetical_doc, trace=trace, top_k=top_k,
             )
             if not llm_rows:
                 logger.info("run: 검색 결과 0건 — LLM 호출 생략")
@@ -576,6 +612,8 @@ class RagPipeline:
         doc_types: list[str] | None = None,
         law_names: list[str] | None = None,
         intent: str | None = None,
+        search_query: str | None = None,
+        hypothetical_doc: str | None = None,
         trace: Any | None = None,
         previous_question: str | None = None,
         previous_answer: str | None = None,
@@ -598,7 +636,8 @@ class RagPipeline:
             )
         try:
             llm_rows, context_text, law_context_status = self._prepare_generation(
-                question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace, top_k=top_k,
+                question, doc_types=doc_types, law_names=law_names, intent=intent,
+                search_query=search_query, hypothetical_doc=hypothetical_doc, trace=trace, top_k=top_k,
             )
             if not llm_rows:
                 logger.info("stream: 검색 결과 0건 — LLM 호출 생략")
@@ -681,10 +720,13 @@ class RagPipeline:
         doc_types: list[str] | None,
         law_names: list[str] | None,
         intent: str | None,
+        search_query: str | None = None,
+        hypothetical_doc: str | None = None,
         trace: Any | None = None,
         top_k: int | None = None,
     ) -> tuple[list[dict[str, Any]], str, str]:
         llm_rows, context_text, law_context_status, _ = self._retrieve(
-            question, doc_types=doc_types, law_names=law_names, intent=intent, trace=trace, top_k=top_k,
+            question, doc_types=doc_types, law_names=law_names, intent=intent,
+            search_query=search_query, hypothetical_doc=hypothetical_doc, trace=trace, top_k=top_k,
         )
         return llm_rows, context_text, law_context_status

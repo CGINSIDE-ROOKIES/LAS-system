@@ -175,13 +175,24 @@ export async function getSuggestions(request: {
 
 // ── Graph ─────────────────────────────────────────────────────────────────────
 
-export type { GraphQueryResponse } from "./graph-types";
+export type { GraphQueryResponse, GraphExpandResponse } from "./graph-types";
 
 export async function queryGraph(query: string, signal?: AbortSignal): Promise<import("./graph-types").GraphQueryResponse> {
   const res = await fetch(`${getApiBaseUrl()}/api/v1/graph/query`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query }),
+    signal,
+  });
+  if (!res.ok) await throwApiError(res);
+  return res.json();
+}
+
+export async function expandNode(lawName: string, signal?: AbortSignal): Promise<import("./graph-types").GraphExpandResponse> {
+  const res = await fetch(`${getApiBaseUrl()}/api/v1/graph/expand`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ law_name: lawName }),
     signal,
   });
   if (!res.ok) await throwApiError(res);
