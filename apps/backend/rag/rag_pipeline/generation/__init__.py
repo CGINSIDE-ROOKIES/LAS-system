@@ -1,7 +1,17 @@
 """generation 서비스 패키지 공개 API."""
 
 from .llm_client import generate_answer, stream_answer
-from .pipeline import DEFAULT_SYSTEM_PROMPT, RagPipeline, RagPipelineConfig, RagResult, build_user_prompt_with_limit
+from .pipeline import (
+    DEFAULT_SYSTEM_PROMPT,
+    LegalDbCitation,
+    LegalDbDocument,
+    LegalDbQueryFilters,
+    LegalDbQueryResult,
+    RagPipeline,
+    RagPipelineConfig,
+    RagResult,
+    build_user_prompt_with_limit,
+)
 from .service import GenerationConfig, GenerationResult, GenerationService
 
 __all__ = [
@@ -9,6 +19,10 @@ __all__ = [
     "GenerationConfig",
     "GenerationResult",
     "GenerationService",
+    "LegalDbCitation",
+    "LegalDbDocument",
+    "LegalDbQueryFilters",
+    "LegalDbQueryResult",
     "RagPipeline",
     "RagPipelineConfig",
     "RagResult",

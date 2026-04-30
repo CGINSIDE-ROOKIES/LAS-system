@@ -1,7 +1,7 @@
 """RAG 파이프라인 서비스.
 
 retrieval → context → prompt → generation 전체 흐름을 조립한다.
-API 레이어는 RagPipeline.run() / RagPipeline.stream()만 호출하면 된다.
+API 레이어는 RagPipeline.run() / RagPipeline.stream() / RagPipeline.query_legal_db()만 호출하면 된다.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any, Iterator, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +117,56 @@ class RagResult:
     answer: str
     retrieved_docs: list[dict[str, Any]]  # 컨텍스트에 사용된 문서 목록
     law_context_status: str               # ranking.LAW_CONTEXT_* 상수 중 하나
+
+
+class LegalDbDocument(TypedDict):
+    """LLM/tool-call friendly legal evidence document."""
+
+    rank: int | None
+    source_id: str
+    doc_type: str
+    law_name: str
+    article_no: str
+    score: int | float | str | None
+    snippet: str
+    text: str
+    citation: str
+
+
+class LegalDbCitation(TypedDict):
+    """Compact citation metadata for proof/rationale generation."""
+
+    rank: int | None
+    source_id: str
+    doc_type: str
+    law_name: str
+    article_no: str
+    citation: str
+
+
+class LegalDbQueryFilters(TypedDict):
+    """Echoed retrieval filters for graph/tool observability."""
+
+    doc_types: list[str] | None
+    law_names: list[str] | None
+    intent: str | None
+    top_k: int
+    search_query: str
+    hypothetical_doc_used: bool
+
+
+class LegalDbQueryResult(TypedDict):
+    """JSON-compatible return value for LangGraph nodes and LLM tools."""
+
+    query: str
+    context_text: str
+    documents: list[LegalDbDocument]
+    citations: list[LegalDbCitation]
+    law_context_status: str
+    law_context_added: bool
+    document_count: int
+    has_evidence: bool
+    filters: LegalDbQueryFilters
 
 
 # ── 프롬프트 빌더 ─────────────────────────────────────────────────────────────
@@ -525,6 +575,158 @@ class RagPipeline:
             retrieved_docs=retrieved_docs,
             law_context_status=law_context_status,
         )
+
+    def query_legal_db(
+        self,
+        query: str,
+        *,
+        doc_types: list[str] | None = None,
+        law_names: list[str] | None = None,
+        intent: str | None = None,
+        search_query: str | None = None,
+        hypothetical_doc: str | None = None,
+        trace: Any | None = None,
+        top_k: int | None = None,
+    ) -> LegalDbQueryResult:
+        """법률 DB 검색만 실행하고 LLM/tool-call 친화적인 구조화 결과를 반환한다.
+
+        `run()`과 달리 답변 생성을 하지 않는다. 반환값은 dataclass/model 인스턴스가
+        아니라 plain dict/list/str/number/bool만 포함하므로 LangGraph state, LangChain
+        tool 반환값, JSON 응답에 그대로 넣기 쉽다.
+        """
+        owns_trace = trace is None
+        effective_doc_types = list(doc_types) if doc_types is not None else None
+        effective_law_names = list(law_names) if law_names is not None else None
+        if intent == "case_law":
+            effective_law_names = None
+            if effective_doc_types is None:
+                effective_doc_types = ["prec", "decc", "detc", "expc"]
+        effective_search_query = search_query or query
+        effective_top_k = top_k or self._cfg.retrieval.top_k
+
+        if owns_trace:
+            trace = start_trace(
+                "legal_db_query",
+                input={
+                    "query": query,
+                    "doc_types": effective_doc_types,
+                    "law_names": effective_law_names,
+                    "intent": intent,
+                    "search_query": effective_search_query,
+                    "top_k": effective_top_k,
+                },
+            )
+
+        try:
+            llm_rows, context_text, law_context_status, law_context_added = self._retrieve(
+                query,
+                doc_types=effective_doc_types,
+                law_names=effective_law_names,
+                intent=intent,
+                search_query=search_query,
+                hypothetical_doc=hypothetical_doc,
+                trace=trace,
+                top_k=top_k,
+            )
+            documents = self._build_legal_db_documents(llm_rows)
+            result: LegalDbQueryResult = {
+                "query": query,
+                "context_text": context_text,
+                "documents": documents,
+                "citations": [
+                    {
+                        "rank": doc["rank"],
+                        "source_id": doc["source_id"],
+                        "doc_type": doc["doc_type"],
+                        "law_name": doc["law_name"],
+                        "article_no": doc["article_no"],
+                        "citation": doc["citation"],
+                    }
+                    for doc in documents
+                ],
+                "law_context_status": law_context_status,
+                "law_context_added": law_context_added,
+                "document_count": len(documents),
+                "has_evidence": bool(documents),
+                "filters": {
+                    "doc_types": effective_doc_types,
+                    "law_names": effective_law_names,
+                    "intent": intent,
+                    "top_k": effective_top_k,
+                    "search_query": effective_search_query,
+                    "hypothetical_doc_used": bool(hypothetical_doc),
+                },
+            }
+            if owns_trace:
+                update_trace(
+                    trace,
+                    output={
+                        "document_count": result["document_count"],
+                        "law_context_status": law_context_status,
+                    },
+                    level="DEFAULT",
+                )
+            return result
+        except Exception:
+            if owns_trace:
+                update_trace(trace, level="ERROR")
+            raise
+
+    def _build_legal_db_documents(
+        self,
+        llm_rows: list[dict[str, Any]],
+    ) -> list[LegalDbDocument]:
+        snippet_max = self._cfg.snippet_max_chars
+
+        def _snippet(row: dict[str, Any]) -> str:
+            raw = str(row.get("snippet", "") or "")
+            return raw[:snippet_max] if snippet_max > 0 else raw
+
+        documents: list[LegalDbDocument] = []
+        for row in llm_rows:
+            rank = self._normalize_rank(row.get("rank"))
+            doc: LegalDbDocument = {
+                "rank": rank,
+                "source_id": str(row.get("source_id", "") or ""),
+                "doc_type": str(row.get("doc_type", "") or ""),
+                "law_name": str(row.get("law_name", "") or ""),
+                "article_no": str(row.get("article_no", "") or ""),
+                "score": self._normalize_score(row.get("score")),
+                "snippet": _snippet(row),
+                "text": str(row.get("text", "") or ""),
+                "citation": "",
+            }
+            doc["citation"] = self._build_citation(doc)
+            documents.append(doc)
+        return documents
+
+    @staticmethod
+    def _normalize_rank(value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _normalize_score(value: Any) -> int | float | str | None:
+        if value is None or isinstance(value, (int, float, str)):
+            return value
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return str(value)
+
+    @staticmethod
+    def _build_citation(doc: LegalDbDocument) -> str:
+        label = " ".join(
+            part for part in (doc["law_name"], doc["article_no"]) if part
+        ).strip()
+        source_id = doc["source_id"]
+        if label and source_id:
+            return f"{label} ({source_id})"
+        return label or source_id or doc["doc_type"] or "unknown"
 
     def run(
         self,
