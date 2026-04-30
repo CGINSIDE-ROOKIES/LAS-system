@@ -204,13 +204,6 @@ def embed_query(
 
 # ── 중복 제거 ─────────────────────────────────────────────────────────────────
 
-def normalize_source_id(source_id: str) -> str:
-    """source_id 끝의 중복 suffix(__dup0, __dup1 …)를 제거해 정규화한다."""
-    if not source_id:
-        return ""
-    return re.sub(r"__dup\d+$", "", source_id)
-
-
 def _fallback_text_key(text: str) -> str:
     """source_id가 없을 때 텍스트 앞 800자의 SHA-1 해시를 중복 판별 키로 사용한다."""
     text_norm = re.sub(r"\s+", " ", text).strip().lower()
@@ -229,7 +222,7 @@ def dedup_normalized_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     for row in rows:
         sid = str(row.get("source_id", "") or "")
-        key = normalize_source_id(sid) if sid else ""
+        key = sid
         if not key:
             key = _fallback_text_key(str(row.get("text", "") or ""))
         if key in seen:

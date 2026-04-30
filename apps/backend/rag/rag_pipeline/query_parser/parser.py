@@ -42,9 +42,10 @@ _SYSTEM_PROMPT = """\
   · 오타·잘못된 법령명을 교정 (예: "근로기쥰법" → "근로기준법")
   · 원문이 이미 표준 법률 용어면 그대로 반환
   · is_legal=false이면 빈 문자열 반환
-- hypothetical_doc: intent가 "normative"일 때만 작성. normalized_query를 의무·요건 조문 형식의 문장으로 변환하여 1~2문장으로 생성.
-  · 벌칙·제재 조문("~에 처한다")이 아닌, 해당 의무나 요건을 직접 규정하는 조문 형태로 작성
-  · 예: normalized_query가 "해고 사전 통보 기간"이면 → "사용자는 근로자를 해고하려면 적어도 30일 전에 예고하여야 한다."
+- hypothetical_doc: intent가 "normative"일 때만 작성. normalized_query를 실제 조문 형식의 문장으로 변환하여 1~2문장으로 생성.
+  · 질문이 벌금·과태료·처벌·제재 여부를 묻는 경우: 벌칙 조문 형태로 작성 (예: "~한 자는 X만원 이하의 벌금에 처한다.")
+  · 그 외: 의무나 요건을 직접 규정하는 조문 형태로 작성 (예: "사용자는 근로자를 해고하려면 적어도 30일 전에 예고하여야 한다.")
+  · 실제 법령에 근거 없이 민사 손해배상·배상 의무 조문을 임의로 만들지 말 것
   · 조문 내용에 구체적인 요건·기준·숫자·조건이 없고 "법령에서 정하는 바에 따른다" 수준의 추상적 문장이 되면 빈 문자열 "" 반환
   · intent가 "normative"가 아니면 반드시 빈 문자열 ""
 
@@ -179,6 +180,7 @@ def _parse_llm_output(text: str) -> QueryParseResult:
     data = _extract_json(text)
     law_names = _normalize_law_names(data.get("law_names"))
     suggested_laws = _normalize_law_names(data.get("suggested_laws"))
+    # law_names에 이미 포함된 항목은 suggested_laws에서 제거
     suggested_laws = [s for s in suggested_laws if s not in law_names]
     return QueryParseResult(
         law_names=law_names,
@@ -244,8 +246,8 @@ class QueryParser:
             )
             result = _parse_llm_output(raw_text)
             logger.debug(
-                "query_parser: query=%r law_names=%r intent=%r is_legal=%r",
-                query[:80], result.law_names, result.intent, result.is_legal,
+                "query_parser: query=%r law_names=%r suggested_laws=%r intent=%r is_legal=%r",
+                query[:80], result.law_names, result.suggested_laws, result.intent, result.is_legal,
             )
             return result
 

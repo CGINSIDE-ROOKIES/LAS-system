@@ -56,7 +56,7 @@ function LawGroup({ lawName, citations }: { lawName: string; citations: Citation
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-2 space-y-2">
-          {citations.map((c) => (
+          {citations.filter((c, idx, arr) => arr.findIndex((x) => x.article === c.article) === idx).map((c) => (
             <div
               key={c.article}
               className="rounded-md border border-border bg-card p-3 transition-colors hover:border-primary/30"
