@@ -1,4 +1,4 @@
-"""Gemini Flash-Lite 기반 Query Parser.
+"""LLM 기반 Query Parser.
 
 사용자 질문에서 법령명, 조문번호, intent를 추출하고 법률 무관 질문을 판별한다.
 """
@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PARSER_MODEL_GEMINI = "gemini-2.0-flash-lite"
 DEFAULT_PARSER_MODEL_OPENAI = "gpt-4o-mini"
-DEFAULT_PARSER_MODEL = DEFAULT_PARSER_MODEL_GEMINI  # backward compat
 _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 _OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
@@ -195,7 +194,7 @@ def _parse_llm_output(text: str) -> QueryParseResult:
 # ── QueryParser ───────────────────────────────────────────────────────────────
 
 class QueryParser:
-    """질문을 Gemini LLM으로 파싱해 구조화 결과를 반환한다."""
+    """질문을 LLM으로 파싱해 구조화 결과를 반환한다."""
 
     def __init__(self, config: QueryParserConfig) -> None:
         self._cfg = config
