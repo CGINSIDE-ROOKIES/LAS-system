@@ -560,7 +560,7 @@ export function ChatContainer({ onCitationsChange, onQuestionSubmit, onNewChat }
           {/* 추천 질문 칩 */}
           {settings.showFollowUpQuestions && (
             <div
-              className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 w-full max-w-3xl"
+              className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 w-full max-w-4xl"
               style={{ animationDelay: "440ms" }}
             >
               <ScrollableChips
