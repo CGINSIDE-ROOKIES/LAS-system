@@ -95,7 +95,7 @@ Document-level parser metadata should live at:
 - split review only covers boundary corrections, not full paragraph restructuring
 - clause-level risk review is not part of the parser stage yet
 - pause/resume human review is not part of the graph yet
-- native source-document write-back exists through `doc_processor.api` and `doc_processor.edit_engine`, but only for `docx`/`hwp`/`hwpx`
+- native source-document write-back exists through `doc_processor.api.apply_document_edits`, but only for `docx`/`hwp`/`hwpx`
 - PDF should be treated as a suggestion-only format until a dedicated ingest path exists
 
 ## Prior Reference Implementation

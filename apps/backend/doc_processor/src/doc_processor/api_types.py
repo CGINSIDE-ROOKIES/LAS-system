@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from document_processor.api_types import (
+    AnnotationTargetKind,
     AnnotationValidationCode,
     AnnotationValidationIssue,
     AnnotationValidationResult,
-    ApplyTextEditsRequest,
-    ApplyTextEditsResult,
+    AppliedEditResult,
+    ApplyDocumentEditsResult,
     DocumentContextResult,
+    DocumentEdit,
     DocumentInput,
     DocumentParagraphContext,
     DocumentRunContext,
@@ -16,16 +18,19 @@ from document_processor.api_types import (
     EditValidationCode,
     EditValidationIssue,
     EditValidationResult,
-    GetDocumentContextRequest,
-    ListEditableTargetsRequest,
+    InsertPosition,
     ListEditableTargetsResult,
-    RenderReviewHtmlRequest,
+    ReadDocumentResult,
     ResolvedTextAnnotation,
     ReviewHtmlResult,
+    StructuralEdit,
+    StructuralOperationKind,
+    StyleEdit,
+    StyleTargetKind,
     TargetKind,
     TextAnnotation,
     TextEdit,
-    ValidateTextEditsRequest,
+    TextTargetKind,
 )
 
 from .parser_types import ParagraphCategory, RelevanceDecision, RelevanceMode
@@ -58,36 +63,6 @@ class ParagraphPreview(BaseModel):
     run_count: int = 0
 
 
-class ParseDocumentRequest(BaseModel):
-    document: DocumentInput | None = Field(default=None, description="Source document for parser execution.")
-    source_path: str | None = Field(
-        default=None,
-        description="Deprecated convenience field for path-backed calls.",
-    )
-    relevance_mode: RelevanceMode = Field(default=RelevanceMode.KEYWORD_THEN_LLM)
-    boundary_review_enabled: bool = Field(default=True)
-    label_review_enabled: bool = Field(default=True)
-    prompt_profile: str = Field(default="default")
-    include_paragraphs: bool = Field(default=True)
-    include_clauses: bool = Field(default=True)
-    include_editable_targets: bool = Field(default=False)
-    max_paragraphs: int | None = Field(default=120, ge=1)
-    max_editable_targets: int | None = Field(default=200, ge=1)
-    paragraph_excerpt_length: int | None = Field(default=240, ge=1)
-
-    @model_validator(mode="after")
-    def _coerce_document(self) -> "ParseDocumentRequest":
-        if self.document is not None and self.source_path is not None:
-            raise ValueError("Specify either document or source_path, not both.")
-        if self.document is None:
-            if self.source_path is None:
-                raise ValueError("Provide either document or source_path.")
-            self.document = DocumentInput(source_path=self.source_path)
-        if self.document.doc_ir is not None:
-            raise ValueError("parse_document requires source_path or source_bytes, not doc_ir.")
-        return self
-
-
 class ParseDocumentResult(BaseModel):
     source_path: str | None = None
     source_doc_type: str | None = None
@@ -104,13 +79,15 @@ class ParseDocumentResult(BaseModel):
 
 
 __all__ = [
+    "AnnotationTargetKind",
     "AnnotationValidationCode",
     "AnnotationValidationIssue",
     "AnnotationValidationResult",
-    "ApplyTextEditsRequest",
-    "ApplyTextEditsResult",
+    "AppliedEditResult",
+    "ApplyDocumentEditsResult",
     "ClauseSummary",
     "DocumentContextResult",
+    "DocumentEdit",
     "DocumentInput",
     "DocumentParagraphContext",
     "DocumentRunContext",
@@ -118,17 +95,19 @@ __all__ = [
     "EditValidationCode",
     "EditValidationIssue",
     "EditValidationResult",
-    "GetDocumentContextRequest",
-    "ListEditableTargetsRequest",
+    "InsertPosition",
     "ListEditableTargetsResult",
     "ParagraphPreview",
-    "ParseDocumentRequest",
     "ParseDocumentResult",
-    "RenderReviewHtmlRequest",
+    "ReadDocumentResult",
     "ResolvedTextAnnotation",
     "ReviewHtmlResult",
+    "StructuralEdit",
+    "StructuralOperationKind",
+    "StyleEdit",
+    "StyleTargetKind",
     "TargetKind",
     "TextAnnotation",
     "TextEdit",
-    "ValidateTextEditsRequest",
+    "TextTargetKind",
 ]
