@@ -26,13 +26,13 @@ def _dispatch_review_tasks(
     state: WorkflowState,
     *,
     review_kind: str,
-    unit_ids: list[str],
+    node_ids: list[str],
     analysis: ParserAnalysis | None = None,
 ) -> Command[str | Send]:
     log_info(
         state.parser_config,
         "[structure_analysis.llm_analysis] dispatching %s %s workers (max_concurrency=%s)",
-        len(unit_ids),
+        len(node_ids),
         review_kind,
         state.parser_config.max_concurrent_workers,
     )
@@ -48,11 +48,11 @@ def _dispatch_review_tasks(
                     "working_doc": state.working_doc,
                     "parser_analysis": analysis or state.parser_analysis,
                     "parser_config": state.parser_config,
-                    "active_review_unit_id": unit_id,
+                    "active_review_node_id": node_id,
                     "active_review_kind": review_kind,
                 },
             )
-            for unit_id in unit_ids
+            for node_id in node_ids
         ],
     )
 
@@ -149,7 +149,7 @@ def llm_analysis(state: WorkflowState) -> Command[str | Send]:
     stage = state.llm_review_stage
 
     if stage is None:
-        suspect_ids = list(analysis.boundary_suspect_unit_ids)
+        suspect_ids = list(analysis.boundary_suspect_node_ids)
         if suspect_ids and state.parser_config.boundary_review_enabled:
             log_info(
                 state.parser_config,
@@ -162,12 +162,12 @@ def llm_analysis(state: WorkflowState) -> Command[str | Send]:
             )
 
         analysis = label_paragraphs(analysis)
-        ambiguous_ids = list(analysis.ambiguous_label_unit_ids)
+        ambiguous_ids = list(analysis.ambiguous_label_node_ids)
         if ambiguous_ids and state.parser_config.label_review_enabled:
             return _dispatch_review_tasks(
                 state,
                 review_kind="label",
-                unit_ids=ambiguous_ids,
+                node_ids=ambiguous_ids,
                 analysis=analysis,
             )
         return Command(
@@ -177,17 +177,17 @@ def llm_analysis(state: WorkflowState) -> Command[str | Send]:
 
     if stage == "boundary":
         reviews = {
-            item["unit_id"]: BoundaryReviewOutput.model_validate(item["review"])
+            item["node_id"]: BoundaryReviewOutput.model_validate(item["review"])
             for item in state.boundary_review_results
         }
         analysis = apply_boundary_reviews(analysis, reviews)
         analysis = label_paragraphs(analysis)
-        ambiguous_ids = list(analysis.ambiguous_label_unit_ids)
+        ambiguous_ids = list(analysis.ambiguous_label_node_ids)
         if ambiguous_ids and state.parser_config.label_review_enabled:
             return _dispatch_review_tasks(
                 state,
                 review_kind="label",
-                unit_ids=ambiguous_ids,
+                node_ids=ambiguous_ids,
                 analysis=analysis,
             )
         return Command(
@@ -197,7 +197,7 @@ def llm_analysis(state: WorkflowState) -> Command[str | Send]:
 
     if stage == "label":
         reviews = {
-            item["unit_id"]: LabelReviewOutput.model_validate(item["review"])
+            item["node_id"]: LabelReviewOutput.model_validate(item["review"])
             for item in state.label_review_results
         }
         analysis = apply_label_reviews(analysis, reviews)
@@ -239,8 +239,8 @@ def boundary_llm_batch(state: WorkflowState) -> Command[str]:
     return Command(
         update={
             "boundary_review_results": [
-                {"unit_id": unit_id, "review": review.model_dump(mode="json")}
-                for unit_id, review in reviews.items()
+                {"node_id": node_id, "review": review.model_dump(mode="json")}
+                for node_id, review in reviews.items()
             ]
         },
         goto="llm_analysis",
@@ -250,12 +250,12 @@ def boundary_llm_batch(state: WorkflowState) -> Command[str]:
 @traced_structure_analysis_node("structure_analysis.llm_analysis.worker")
 def llm_analysis_worker(state: WorkflowState) -> Command[str]:
     state = _coerce_state(state)
-    if state.working_doc is None or state.parser_analysis is None or state.active_review_unit_id is None:
-        raise ValueError("Review worker requires document, analysis, and active_review_unit_id.")
+    if state.working_doc is None or state.parser_analysis is None or state.active_review_node_id is None:
+        raise ValueError("Review worker requires document, analysis, and active_review_node_id.")
     if state.active_review_kind is None:
         raise ValueError("Review worker requires active_review_kind.")
 
-    unit_id = state.active_review_unit_id
+    node_id = state.active_review_node_id
     review_kind = state.active_review_kind
 
     try:
@@ -263,7 +263,7 @@ def llm_analysis_worker(state: WorkflowState) -> Command[str]:
             review = review_single_ambiguous_label_with_llm(
                 state.working_doc,
                 state.parser_analysis,
-                unit_id,
+                node_id,
                 state.parser_config,
             )
             update_key = "label_review_results"
@@ -272,22 +272,22 @@ def llm_analysis_worker(state: WorkflowState) -> Command[str]:
     except Exception as exc:  # pragma: no cover
         log_info(
             state.parser_config,
-            "[structure_analysis.llm_analysis.worker] kind=%s unit=%s failed",
+            "[structure_analysis.llm_analysis.worker] kind=%s node=%s failed",
             review_kind,
-            unit_id,
+            node_id,
         )
-        return Command(update={"errors": [f"{review_kind.capitalize()} LLM review failed for {unit_id}: {exc}"]})
+        return Command(update={"errors": [f"{review_kind.capitalize()} LLM review failed for {node_id}: {exc}"]})
 
     log_info(
         state.parser_config,
-        "[structure_analysis.llm_analysis.worker] kind=%s unit=%s complete",
+        "[structure_analysis.llm_analysis.worker] kind=%s node=%s complete",
         review_kind,
-        unit_id,
+        node_id,
     )
     return Command(
         update={
             update_key: [
-                {"unit_id": unit_id, "review": review.model_dump(mode="json")},
+                {"node_id": node_id, "review": review.model_dump(mode="json")},
             ]
         }
     )
@@ -328,8 +328,8 @@ def finalize_llm(state: WorkflowState) -> Command[str]:
         result.subclause_rule_name = analysis.subclause_rule_name
         result.clause_count = len(analysis.clause_entries)
         result.subclause_count = subclause_count
-        result.boundary_suspect_unit_ids = list(analysis.boundary_suspect_unit_ids)
-        result.ambiguous_label_unit_ids = list(analysis.ambiguous_label_unit_ids)
+        result.boundary_suspect_node_ids = list(analysis.boundary_suspect_node_ids)
+        result.ambiguous_label_node_ids = list(analysis.ambiguous_label_node_ids)
         result.notes = list(analysis.notes)
     else:
         result = ParserResult(
@@ -340,8 +340,8 @@ def finalize_llm(state: WorkflowState) -> Command[str]:
             subclause_rule_name=analysis.subclause_rule_name,
             clause_count=len(analysis.clause_entries),
             subclause_count=subclause_count,
-            boundary_suspect_unit_ids=list(analysis.boundary_suspect_unit_ids),
-            ambiguous_label_unit_ids=list(analysis.ambiguous_label_unit_ids),
+            boundary_suspect_node_ids=list(analysis.boundary_suspect_node_ids),
+            ambiguous_label_node_ids=list(analysis.ambiguous_label_node_ids),
             notes=list(analysis.notes),
         )
 

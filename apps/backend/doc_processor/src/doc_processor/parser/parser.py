@@ -308,20 +308,20 @@ def build_clause_entries_from_analysis(paragraphs: list[ParagraphAnalysis]) -> l
                 clause_id=paragraph.clause_id,
                 clause_no=paragraph.clause_no,
                 title=title,
-                heading_unit_id=paragraph.unit_id if any(span.kind == ParagraphCategory.CLAUSE_HEADING for span in paragraph.spans) else None,
-                start_unit_id=paragraph.unit_id,
-                end_unit_id=paragraph.unit_id,
-                member_unit_ids=[],
-                spans_by_unit={},
+                heading_node_id=paragraph.node_id if any(span.kind == ParagraphCategory.CLAUSE_HEADING for span in paragraph.spans) else None,
+                start_node_id=paragraph.node_id,
+                end_node_id=paragraph.node_id,
+                member_node_ids=[],
+                spans_by_node={},
                 subclauses=[],
             )
             clause_order.append(paragraph.clause_id)
 
         clause_entry = by_clause[paragraph.clause_id]
-        clause_entry.end_unit_id = paragraph.unit_id
-        clause_entry.member_unit_ids.append(paragraph.unit_id)
+        clause_entry.end_node_id = paragraph.node_id
+        clause_entry.member_node_ids.append(paragraph.node_id)
         if paragraph.spans:
-            clause_entry.spans_by_unit[paragraph.unit_id] = paragraph.spans
+            clause_entry.spans_by_node[paragraph.node_id] = paragraph.spans
 
         seen_in_para: set[str] = set()
         for span in paragraph.spans:
@@ -334,19 +334,19 @@ def build_clause_entries_from_analysis(paragraphs: list[ParagraphAnalysis]) -> l
                     SubclauseEntry(
                         subclause_id=span.subclause_id,
                         subclause_no=span.subclause_no,
-                        start_unit_id=paragraph.unit_id,
-                        end_unit_id=paragraph.unit_id,
-                        member_unit_ids=[paragraph.unit_id],
-                        spans_by_unit={paragraph.unit_id: [current for current in paragraph.spans if current.subclause_id == span.subclause_id]},
+                        start_node_id=paragraph.node_id,
+                        end_node_id=paragraph.node_id,
+                        member_node_ids=[paragraph.node_id],
+                        spans_by_node={paragraph.node_id: [current for current in paragraph.spans if current.subclause_id == span.subclause_id]},
                     )
                 )
                 by_subclause[key] = len(clause_entry.subclauses) - 1
             else:
                 subclause = clause_entry.subclauses[by_subclause[key]]
-                subclause.end_unit_id = paragraph.unit_id
-                if paragraph.unit_id not in subclause.member_unit_ids:
-                    subclause.member_unit_ids.append(paragraph.unit_id)
-                subclause.spans_by_unit[paragraph.unit_id] = [
+                subclause.end_node_id = paragraph.node_id
+                if paragraph.node_id not in subclause.member_node_ids:
+                    subclause.member_node_ids.append(paragraph.node_id)
+                subclause.spans_by_node[paragraph.node_id] = [
                     current for current in paragraph.spans if current.subclause_id == span.subclause_id
                 ]
 

@@ -28,15 +28,30 @@ class FakeStructuredResponder:
         if "suspect_blocks" in payload:
             reviews: list[dict] = []
             for block in payload["suspect_blocks"]:
-                for unit_id in block["suspect_unit_ids"]:
-                    template = self.outputs.get(unit_id, self.outputs.get("__default__", {}))
+                for node_id in block["suspect_node_ids"]:
+                    template = self.outputs.get(node_id, self.outputs.get("__default__", {}))
                     review = dict(template)
-                    review["unit_id"] = unit_id
+                    review["node_id"] = node_id
                     reviews.append(review)
             return schema.model_validate({"reviews": reviews})
-        key = payload.get("unit_id") or payload.get("title") or "__default__"
+        key = payload.get("node_id") or payload.get("title") or "__default__"
         output = self.outputs.get(key, self.outputs.get("__default__", {}))
         return schema.model_validate(output)
+
+
+def _paragraph_by_anchor(doc: DocIR, debug_path: str):
+    for paragraph in doc.paragraphs:
+        anchor = paragraph.native_anchor
+        if anchor is not None and anchor.debug_path == debug_path:
+            return paragraph
+    raise KeyError(debug_path)
+
+
+def _node_id_by_anchor(doc: DocIR, debug_path: str) -> str:
+    node_id = _paragraph_by_anchor(doc, debug_path).node_id
+    if node_id is None:
+        raise AssertionError(f"Paragraph {debug_path} has no node_id.")
+    return node_id
 
 
 class ParserGraphTests(unittest.TestCase):
@@ -59,9 +74,8 @@ class ParserGraphTests(unittest.TestCase):
         self.assertEqual(state.parser_result.clause_rule_name, "article")
         self.assertEqual(state.parser_result.subclause_rule_name, "circled")
         self.assertGreaterEqual(state.parser_result.clause_count, 10)
-        paragraph_map = {paragraph.unit_id: paragraph for paragraph in state.working_doc.paragraphs}
-        self.assertEqual(paragraph_map["s1.p8"].meta.parser.category, ParagraphCategory.CLAUSE_HEADING)
-        self.assertEqual(paragraph_map["s1.p16"].meta.parser.category, ParagraphCategory.SUBCLAUSE_HEADING)
+        self.assertEqual(_paragraph_by_anchor(state.working_doc, "s1.p8").meta.parser.category, ParagraphCategory.CLAUSE_HEADING)
+        self.assertEqual(_paragraph_by_anchor(state.working_doc, "s1.p16").meta.parser.category, ParagraphCategory.SUBCLAUSE_HEADING)
 
     def test_global_subclause_rule_prefers_circled_over_definition_list_numeric(self) -> None:
         state = self._invoke_state(
@@ -76,10 +90,9 @@ class ParserGraphTests(unittest.TestCase):
         )
         self.assertTrue(state.parser_result.accepted)
         self.assertEqual(state.parser_result.subclause_rule_name, "circled")
-        paragraph_map = {paragraph.unit_id: paragraph for paragraph in state.working_doc.paragraphs}
-        self.assertEqual(paragraph_map["s1.p11"].meta.parser.category, ParagraphCategory.CLAUSE_BODY)
-        self.assertEqual(paragraph_map["s1.p17"].meta.parser.category, ParagraphCategory.CLAUSE_BODY)
-        self.assertEqual(paragraph_map["s1.p21"].meta.parser.category, ParagraphCategory.SUBCLAUSE_HEADING)
+        self.assertEqual(_paragraph_by_anchor(state.working_doc, "s1.p11").meta.parser.category, ParagraphCategory.CLAUSE_BODY)
+        self.assertEqual(_paragraph_by_anchor(state.working_doc, "s1.p17").meta.parser.category, ParagraphCategory.CLAUSE_BODY)
+        self.assertEqual(_paragraph_by_anchor(state.working_doc, "s1.p21").meta.parser.category, ParagraphCategory.SUBCLAUSE_HEADING)
 
     def test_boundary_batch_payload_preserves_immediate_blank_separator_context(self) -> None:
         target = STANDARD_CONTRACT_SAMPLES / "04. 2차적저작물작성권 양도계약서.hwp"
@@ -101,10 +114,12 @@ class ParserGraphTests(unittest.TestCase):
             ParserConfig(boundary_model_override=responder),
         )
         blocks = responder.calls[0]["payload"]["suspect_blocks"]
-        block = next(item for item in blocks if "s1.p85" in item["suspect_unit_ids"])
+        target_node_id = _node_id_by_anchor(doc, "s1.p85")
+        previous_node_id = _node_id_by_anchor(doc, "s1.p84")
+        block = next(item for item in blocks if target_node_id in item["suspect_node_ids"])
         paragraphs = block["paragraphs"]
-        target_index = next(index for index, paragraph in enumerate(paragraphs) if paragraph["unit_id"] == "s1.p85")
-        self.assertEqual(paragraphs[target_index - 1]["unit_id"], "s1.p84")
+        target_index = next(index for index, paragraph in enumerate(paragraphs) if paragraph["node_id"] == target_node_id)
+        self.assertEqual(paragraphs[target_index - 1]["node_id"], previous_node_id)
         self.assertEqual(paragraphs[target_index - 1]["text"], "")
         self.assertIn("_____년 __월 __일", [paragraph["text"] for paragraph in paragraphs[target_index + 1 :]])
 
@@ -162,9 +177,10 @@ class ParserGraphTests(unittest.TestCase):
         self.assertEqual(len(entries), 2)
         self.assertEqual(entries[0].subclauses[0].subclause_no, "1")
         targets = clause_entry_to_targets(entries[0])
-        self.assertEqual([target.unit_id for target in targets], ["s1.p3", "s1.p4"])
+        expected_node_ids = [_node_id_by_anchor(state.working_doc, "s1.p3"), _node_id_by_anchor(state.working_doc, "s1.p4")]
+        self.assertEqual([target.node_id for target in targets], expected_node_ids)
         resolved = resolve_clause_entry(state.working_doc, entries[0])
-        self.assertEqual([paragraph.unit_id for paragraph in resolved], ["s1.p3", "s1.p4"])
+        self.assertEqual([paragraph.node_id for paragraph in resolved], expected_node_ids)
 
     def test_keyword_then_llm_uses_override_for_ambiguous_doc(self) -> None:
         doc = DocIR.from_mapping(
@@ -209,17 +225,20 @@ class ParserGraphTests(unittest.TestCase):
             }
         )
         doc.paragraphs[0].para_style = ParaStyleInfo(align="center")
+        p2_node_id = _node_id_by_anchor(doc, "s1.p2")
+        p3_node_id = _node_id_by_anchor(doc, "s1.p3")
+        p4_node_id = _node_id_by_anchor(doc, "s1.p4")
         boundary_responder = FakeStructuredResponder(
             {
-                "s1.p2": {"unit_id": "s1.p2", "action": "keep", "reason": "Clause heading remains part of the clause.", "anchor_text": None, "occurrence": 1},
-                "s1.p3": {"unit_id": "s1.p3", "action": "keep", "reason": "Clause body remains part of the clause.", "anchor_text": None, "occurrence": 1},
-                "s1.p4": {"unit_id": "s1.p4", "action": "detach", "reason": "Appendix marker should not inherit the clause.", "anchor_text": None, "occurrence": 1},
+                p2_node_id: {"node_id": p2_node_id, "action": "keep", "reason": "Clause heading remains part of the clause.", "anchor_text": None, "occurrence": 1},
+                p3_node_id: {"node_id": p3_node_id, "action": "keep", "reason": "Clause body remains part of the clause.", "anchor_text": None, "occurrence": 1},
+                p4_node_id: {"node_id": p4_node_id, "action": "detach", "reason": "Appendix marker should not inherit the clause.", "anchor_text": None, "occurrence": 1},
             }
         )
         label_responder = FakeStructuredResponder(
             {
-                "s1.p4": {
-                    "unit_id": "s1.p4",
+                p4_node_id: {
+                    "node_id": p4_node_id,
                     "status": "ok",
                     "label": "appendix",
                     "candidate_labels": ["appendix"],
@@ -239,17 +258,17 @@ class ParserGraphTests(unittest.TestCase):
                 ),
             )
         )
-        paragraph_map = {paragraph.unit_id: paragraph for paragraph in state.working_doc.paragraphs}
         self.assertEqual(len(boundary_responder.calls), 1)
         self.assertIn("suspect_blocks", boundary_responder.calls[0]["payload"])
-        self.assertIsNone(paragraph_map["s1.p4"].meta.parser.clause_id)
-        self.assertIsNone(paragraph_map["s1.p4"].meta.parser.clause_no)
-        self.assertIsNone(paragraph_map["s1.p4"].meta.parser.subclause_id)
-        self.assertIsNone(paragraph_map["s1.p4"].meta.parser.subclause_no)
-        self.assertEqual(paragraph_map["s1.p4"].meta.parser.category, ParagraphCategory.APPENDIX)
-        self.assertEqual(paragraph_map["s1.p4"].meta.parser.spans, [])
+        p4 = _paragraph_by_anchor(state.working_doc, "s1.p4")
+        self.assertIsNone(p4.meta.parser.clause_id)
+        self.assertIsNone(p4.meta.parser.clause_no)
+        self.assertIsNone(p4.meta.parser.subclause_id)
+        self.assertIsNone(p4.meta.parser.subclause_no)
+        self.assertEqual(p4.meta.parser.category, ParagraphCategory.APPENDIX)
+        self.assertEqual(p4.meta.parser.spans, [])
         clause_entry = state.working_doc.meta.parser_doc.clause_entries[0]
-        self.assertEqual(clause_entry.member_unit_ids, ["s1.p2", "s1.p3"])
+        self.assertEqual(clause_entry.member_node_ids, [p2_node_id, p3_node_id])
 
     def test_clause_owned_tables_and_input_like_paragraphs_stay_clause_body(self) -> None:
         doc = DocIR.from_mapping(
@@ -265,7 +284,7 @@ class ParserGraphTests(unittest.TestCase):
         boundary_responder = FakeStructuredResponder(
             {
                 "__default__": {
-                    "unit_id": "ignored",
+                    "node_id": "ignored",
                     "action": "keep",
                     "reason": "Still part of the active clause context.",
                     "anchor_text": None,
@@ -284,10 +303,9 @@ class ParserGraphTests(unittest.TestCase):
                 ),
             )
         )
-        paragraph_map = {paragraph.unit_id: paragraph for paragraph in state.working_doc.paragraphs}
-        self.assertEqual(paragraph_map["s1.p3"].meta.parser.category, ParagraphCategory.CLAUSE_BODY)
-        self.assertEqual(paragraph_map["s1.p4"].meta.parser.category, ParagraphCategory.CLAUSE_BODY)
-        self.assertEqual(paragraph_map["s1.p3"].tables[0].meta.parser.category, ParagraphCategory.CLAUSE_BODY)
+        self.assertEqual(_paragraph_by_anchor(state.working_doc, "s1.p3").meta.parser.category, ParagraphCategory.CLAUSE_BODY)
+        self.assertEqual(_paragraph_by_anchor(state.working_doc, "s1.p4").meta.parser.category, ParagraphCategory.CLAUSE_BODY)
+        self.assertEqual(_paragraph_by_anchor(state.working_doc, "s1.p3").tables[0].meta.parser.category, ParagraphCategory.CLAUSE_BODY)
 
 
 if __name__ == "__main__":

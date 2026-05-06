@@ -12,6 +12,7 @@ dependencies = [
     "langfuse>=4.0.0",
     "langgraph>=1.1.6",
     "pydantic>=2.11.7",
+    "rag-pipeline",
 ]
 
 [build-system]
@@ -22,4 +23,5 @@ build-backend = "hatchling.build"
 packages = ["src/doc_processor"]
 
 [tool.uv.sources]
-document-processor = { git = "https://github.com/CGINSIDE-ROOKIES/document-processor.git" }
+document-processor = { git = "https://github.com/CGINSIDE-ROOKIES/document-processor.git", branch = "refactor/xml-hardening" }
+rag-pipeline = { path = "../rag", editable = true }

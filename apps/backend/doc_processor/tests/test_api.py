@@ -41,6 +41,16 @@ class ApiTests(unittest.TestCase):
         docx.add_paragraph("Second paragraph")
         docx.save(path)
 
+    @staticmethod
+    def _sample_ids(path: Path) -> dict[str, str]:
+        doc = DocIR.from_file(path)
+        return {
+            "p1": doc.paragraphs[0].node_id,
+            "p2": doc.paragraphs[1].node_id,
+            "r1": doc.paragraphs[0].runs[0].node_id,
+            "r2": doc.paragraphs[0].runs[1].node_id,
+        }
+
     def test_parse_document_returns_compact_llm_friendly_summary(self) -> None:
         target = DOC_SAMPLES / "02. 청소년 대중문화예술인 표준 부속합의서.hwpx"
         result = parse_document(
@@ -87,32 +97,34 @@ class ApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             source = Path(tmp_dir) / "sample.docx"
             self._build_sample_docx(source)
+            ids = self._sample_ids(source)
 
             context = get_document_context(
                 GetDocumentContextRequest(
                     source_path=str(source),
-                    unit_ids=["s1.p1.r2"],
+                    target_ids=[ids["r2"]],
                     before=0,
                     after=1,
                 )
             )
-            self.assertEqual([paragraph.unit_id for paragraph in context.paragraphs], ["s1.p1", "s1.p2"])
+            self.assertEqual([paragraph.node_id for paragraph in context.paragraphs], [ids["p1"], ids["p2"]])
             self.assertEqual(context.paragraphs[0].runs[1].text, "World")
 
             targets = list_editable_targets(
                 ListEditableTargetsRequest(
                     source_path=str(source),
-                    unit_ids=["s1.p1"],
+                    target_ids=[ids["p1"]],
                     target_kinds=["run"],
                     include_child_runs=True,
                 )
             )
-            self.assertEqual([target.target_unit_id for target in targets.targets], ["s1.p1.r1", "s1.p1.r2"])
+            self.assertEqual([target.target_id for target in targets.targets], [ids["r1"], ids["r2"]])
 
     def test_validate_text_edits_returns_structured_issues(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             source = Path(tmp_dir) / "sample.docx"
             self._build_sample_docx(source)
+            ids = self._sample_ids(source)
 
             result = validate_text_edits(
                 ValidateTextEditsRequest(
@@ -120,14 +132,14 @@ class ApiTests(unittest.TestCase):
                     edits=[
                         TextEdit(
                             target_kind="paragraph",
-                            target_unit_id="s1.p1",
+                            target_id=ids["p1"],
                             expected_text="World",
                             new_text="Hello Legal World",
                             reason="wrong old text",
                         ),
                         TextEdit(
                             target_kind="run",
-                            target_unit_id="s1.p1",
+                            target_id=ids["p1"],
                             expected_text="Hello World",
                             new_text="Hello Legal World",
                             reason="wrong target kind",
@@ -145,6 +157,7 @@ class ApiTests(unittest.TestCase):
             source = Path(tmp_dir) / "sample.docx"
             output = Path(tmp_dir) / "sample_edited.docx"
             self._build_sample_docx(source)
+            ids = self._sample_ids(source)
 
             result = apply_text_edits(
                 ApplyTextEditsRequest(
@@ -153,7 +166,7 @@ class ApiTests(unittest.TestCase):
                     edits=[
                         TextEdit(
                             target_kind="paragraph",
-                            target_unit_id="s1.p1",
+                            target_id=ids["p1"],
                             expected_text="Hello World",
                             new_text="Hello Legal World",
                             reason="expand wording",
@@ -164,7 +177,7 @@ class ApiTests(unittest.TestCase):
 
             self.assertTrue(result.ok)
             self.assertEqual(result.output_path, str(output))
-            self.assertIn("s1.p1", result.modified_target_ids)
+            self.assertIn(ids["p1"], result.modified_target_ids)
 
             reparsed = DocIR.from_file(output)
             self.assertEqual(reparsed.paragraphs[0].text, "Hello Legal World")
@@ -174,6 +187,7 @@ class ApiTests(unittest.TestCase):
             source = Path(tmp_dir) / "sample.docx"
             output = Path(tmp_dir) / "llm_review.docx"
             self._build_sample_docx(source)
+            ids = self._sample_ids(source)
 
             result = apply_text_edits(
                 ApplyTextEditsRequest(
@@ -182,7 +196,7 @@ class ApiTests(unittest.TestCase):
                     edits=[
                         TextEdit(
                             target_kind="paragraph",
-                            target_unit_id="s1.p1",
+                            target_id=ids["p1"],
                             expected_text="Hello World",
                             new_text="Hello Contract World",
                             reason="expand wording",
@@ -199,6 +213,7 @@ class ApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             source = Path(tmp_dir) / "sample.docx"
             self._build_sample_docx(source)
+            ids = self._sample_ids(source)
 
             result = apply_text_edits(
                 ApplyTextEditsRequest(
@@ -207,7 +222,7 @@ class ApiTests(unittest.TestCase):
                     edits=[
                         TextEdit(
                             target_kind="paragraph",
-                            target_unit_id="s1.p1",
+                            target_id=ids["p1"],
                             expected_text="Hello World",
                             new_text="Hello Contract World",
                             reason="expand wording",
@@ -224,6 +239,7 @@ class ApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             source = Path(tmp_dir) / "sample.docx"
             self._build_sample_docx(source)
+            ids = self._sample_ids(source)
 
             ok_result = render_review_html(
                 RenderReviewHtmlRequest(
@@ -231,7 +247,7 @@ class ApiTests(unittest.TestCase):
                     annotations=[
                         TextAnnotation(
                             target_kind="paragraph",
-                            target_unit_id="s1.p1",
+                            target_id=ids["p1"],
                             selected_text="Hello",
                             label="Intro",
                         )
@@ -248,7 +264,7 @@ class ApiTests(unittest.TestCase):
                     annotations=[
                         TextAnnotation(
                             target_kind="run",
-                            target_unit_id="s1.p1",
+                            target_id=ids["p1"],
                             selected_text="Hello",
                             label="Wrong kind",
                         )
@@ -262,6 +278,7 @@ class ApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             source = Path(tmp_dir) / "sample.docx"
             self._build_sample_docx(source)
+            ids = self._sample_ids(source)
 
             result = render_review_html(
                 RenderReviewHtmlRequest(
@@ -269,7 +286,7 @@ class ApiTests(unittest.TestCase):
                     annotations=[
                         TextAnnotation(
                             target_kind="paragraph",
-                            target_unit_id="s1.p1",
+                            target_id=ids["p1"],
                             selected_text="l",
                             label="Ambiguous letter",
                         )

@@ -140,7 +140,7 @@ Suggested endpoints:
 
 - review one clause or clause batch at a time
 - generate structured risk findings, annotations, and edit suggestions
-- anchor every suggestion to stable unit ids and clause ids from parser output
+- anchor every suggestion to stable node IDs and clause ids from parser output
 - persist each suggestion with status `pending`
 - prepare HTML-oriented annotation payloads for the later live review UI
 
@@ -148,7 +148,7 @@ Suggested suggestion payload shape:
 
 - `suggestion_id`
 - `clause_id`
-- `target_unit_ids`
+- `target_node_ids`
 - `risk_level`
 - `annotation`
 - `proposed_edit`

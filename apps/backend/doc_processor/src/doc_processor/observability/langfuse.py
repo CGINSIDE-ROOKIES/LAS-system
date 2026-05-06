@@ -96,19 +96,19 @@ def _coerce_list(value: Any) -> list[Any]:
 
 
 def _summarize_review_results(items: list[Any]) -> dict[str, Any]:
-    unit_ids: list[str] = []
+    node_ids: list[str] = []
     statuses: list[str] = []
     for item in items:
         if isinstance(item, Mapping):
-            unit_id = item.get("unit_id")
-            if unit_id is not None:
-                unit_ids.append(str(unit_id))
+            node_id = item.get("node_id")
+            if node_id is not None:
+                node_ids.append(str(node_id))
             review = item.get("review")
             if isinstance(review, Mapping):
                 status = review.get("status") or review.get("action")
                 if status is not None:
                     statuses.append(str(status))
-    summary = _summarize_string_list(unit_ids)
+    summary = _summarize_string_list(node_ids)
     summary["statuses"] = _summarize_string_list(statuses)
     return summary
 
@@ -129,8 +129,8 @@ def _summarize_parser_analysis(analysis: ParserAnalysis) -> dict[str, Any]:
         "paragraph_count": len(analysis.paragraphs),
         "paragraph_category_counts": paragraph_category_counts,
         "clause_count": len(analysis.clause_entries),
-        "boundary_suspect_unit_ids": _summarize_string_list(list(analysis.boundary_suspect_unit_ids)),
-        "ambiguous_label_unit_ids": _summarize_string_list(list(analysis.ambiguous_label_unit_ids)),
+        "boundary_suspect_node_ids": _summarize_string_list(list(analysis.boundary_suspect_node_ids)),
+        "ambiguous_label_node_ids": _summarize_string_list(list(analysis.ambiguous_label_node_ids)),
         "notes": _summarize_string_list(list(analysis.notes)),
     }
 
@@ -151,8 +151,8 @@ def _summarize_parser_analysis_mapping(data: Mapping[str, Any]) -> dict[str, Any
             key = str(category)
             paragraph_category_counts[key] = paragraph_category_counts.get(key, 0) + 1
 
-    boundary_ids = data.get("boundary_suspect_unit_ids")
-    ambiguous_ids = data.get("ambiguous_label_unit_ids")
+    boundary_ids = data.get("boundary_suspect_node_ids")
+    ambiguous_ids = data.get("ambiguous_label_node_ids")
     notes = data.get("notes")
     return {
         "_excluded_type": "ParserAnalysis",
@@ -162,8 +162,8 @@ def _summarize_parser_analysis_mapping(data: Mapping[str, Any]) -> dict[str, Any
         "paragraph_count": paragraph_count,
         "paragraph_category_counts": paragraph_category_counts,
         "clause_count": clause_count,
-        "boundary_suspect_unit_ids": _summarize_string_list(list(boundary_ids) if isinstance(boundary_ids, list) else []),
-        "ambiguous_label_unit_ids": _summarize_string_list(list(ambiguous_ids) if isinstance(ambiguous_ids, list) else []),
+        "boundary_suspect_node_ids": _summarize_string_list(list(boundary_ids) if isinstance(boundary_ids, list) else []),
+        "ambiguous_label_node_ids": _summarize_string_list(list(ambiguous_ids) if isinstance(ambiguous_ids, list) else []),
         "notes": _summarize_string_list(list(notes) if isinstance(notes, list) else []),
     }
 
@@ -178,15 +178,15 @@ def _summarize_parser_result(result: ParserResult) -> dict[str, Any]:
         "subclause_rule_name": result.subclause_rule_name,
         "clause_count": result.clause_count,
         "subclause_count": result.subclause_count,
-        "boundary_suspect_unit_ids": _summarize_string_list(list(result.boundary_suspect_unit_ids)),
-        "ambiguous_label_unit_ids": _summarize_string_list(list(result.ambiguous_label_unit_ids)),
+        "boundary_suspect_node_ids": _summarize_string_list(list(result.boundary_suspect_node_ids)),
+        "ambiguous_label_node_ids": _summarize_string_list(list(result.ambiguous_label_node_ids)),
         "notes": _summarize_string_list(list(result.notes)),
     }
 
 
 def _summarize_parser_result_mapping(data: Mapping[str, Any]) -> dict[str, Any]:
-    boundary_ids = data.get("boundary_suspect_unit_ids")
-    ambiguous_ids = data.get("ambiguous_label_unit_ids")
+    boundary_ids = data.get("boundary_suspect_node_ids")
+    ambiguous_ids = data.get("ambiguous_label_node_ids")
     notes = data.get("notes")
     return {
         "_excluded_type": "ParserResult",
@@ -197,8 +197,8 @@ def _summarize_parser_result_mapping(data: Mapping[str, Any]) -> dict[str, Any]:
         "subclause_rule_name": data.get("subclause_rule_name"),
         "clause_count": data.get("clause_count"),
         "subclause_count": data.get("subclause_count"),
-        "boundary_suspect_unit_ids": _summarize_string_list(list(boundary_ids) if isinstance(boundary_ids, list) else []),
-        "ambiguous_label_unit_ids": _summarize_string_list(list(ambiguous_ids) if isinstance(ambiguous_ids, list) else []),
+        "boundary_suspect_node_ids": _summarize_string_list(list(boundary_ids) if isinstance(boundary_ids, list) else []),
+        "ambiguous_label_node_ids": _summarize_string_list(list(ambiguous_ids) if isinstance(ambiguous_ids, list) else []),
         "notes": _summarize_string_list(list(notes) if isinstance(notes, list) else []),
     }
 
@@ -213,7 +213,7 @@ def _summarize_workflow_state(state: WorkflowState) -> dict[str, Any]:
         "parser_config": _sanitize_langfuse_payload(state.parser_config),
         "parser_analysis": _sanitize_langfuse_payload(state.parser_analysis),
         "parser_result": _sanitize_langfuse_payload(state.parser_result),
-        "active_review_unit_id": state.active_review_unit_id,
+        "active_review_node_id": state.active_review_node_id,
         "active_review_kind": state.active_review_kind,
         "llm_review_stage": state.llm_review_stage,
         "boundary_review_results": _summarize_review_results(list(state.boundary_review_results)),
@@ -237,7 +237,7 @@ def _summarize_workflow_state_mapping(data: Mapping[str, Any]) -> dict[str, Any]
         "parser_config": _sanitize_langfuse_payload(data.get("parser_config")),
         "parser_analysis": _sanitize_langfuse_payload(data.get("parser_analysis")),
         "parser_result": _sanitize_langfuse_payload(data.get("parser_result")),
-        "active_review_unit_id": data.get("active_review_unit_id"),
+        "active_review_node_id": data.get("active_review_node_id"),
         "active_review_kind": data.get("active_review_kind"),
         "llm_review_stage": data.get("llm_review_stage"),
         "boundary_review_results": _summarize_review_results(_coerce_list(data.get("boundary_review_results"))),
@@ -259,13 +259,13 @@ def _looks_like_workflow_state_mapping(value: Mapping[str, Any]) -> bool:
 
 def _looks_like_parser_analysis_mapping(value: Mapping[str, Any]) -> bool:
     return "paragraphs" in value and any(
-        key in value for key in ("boundary_suspect_unit_ids", "ambiguous_label_unit_ids", "clause_entries")
+        key in value for key in ("boundary_suspect_node_ids", "ambiguous_label_node_ids", "clause_entries")
     )
 
 
 def _looks_like_parser_result_mapping(value: Mapping[str, Any]) -> bool:
     return "accepted" in value and "reason" in value and any(
-        key in value for key in ("clause_count", "subclause_count", "boundary_suspect_unit_ids")
+        key in value for key in ("clause_count", "subclause_count", "boundary_suspect_node_ids")
     )
 
 

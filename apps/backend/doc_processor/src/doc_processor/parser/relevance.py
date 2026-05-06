@@ -108,7 +108,7 @@ def review_relevance_with_llm(
         "source_doc_type": doc.source_doc_type,
         "title": preview[0].text if preview else "",
         "paragraphs": [
-            {"unit_id": paragraph.unit_id, "page_number": paragraph.page_number, "text": paragraph.text}
+            {"node_id": paragraph.node_id, "page_number": paragraph.page_number, "text": paragraph.text}
             for paragraph in preview
         ],
         "keyword_decision": keyword_decision.model_dump(mode="json"),

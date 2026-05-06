@@ -23,7 +23,7 @@ class LabelSplitOp(BaseModel):
 
 
 class LabelReviewOutput(BaseModel):
-    unit_id: str
+    node_id: str
     status: Literal["ok", "split_suggested"] = "ok"
     label: ParagraphCategory
     candidate_labels: list[ParagraphCategory] = Field(default_factory=list)
@@ -54,8 +54,8 @@ def label_paragraphs(analysis: ParserAnalysis) -> ParserAnalysis:
         paragraph.candidate_labels = candidates
         paragraph.notes.extend(notes)
         if is_ambiguous:
-            ambiguous.append(paragraph.unit_id)
-    analysis.ambiguous_label_unit_ids = ambiguous
+            ambiguous.append(paragraph.node_id)
+    analysis.ambiguous_label_node_ids = ambiguous
     return analysis
 
 
@@ -64,32 +64,32 @@ def review_ambiguous_labels_with_llm(
     analysis: ParserAnalysis,
     config: ParserConfig,
 ) -> dict[str, LabelReviewOutput]:
-    if not config.label_review_enabled or not analysis.ambiguous_label_unit_ids:
+    if not config.label_review_enabled or not analysis.ambiguous_label_node_ids:
         return {}
 
     results: dict[str, LabelReviewOutput] = {}
 
-    for unit_id in analysis.ambiguous_label_unit_ids:
-        results[unit_id] = review_single_ambiguous_label_with_llm(doc, analysis, unit_id, config)
+    for node_id in analysis.ambiguous_label_node_ids:
+        results[node_id] = review_single_ambiguous_label_with_llm(doc, analysis, node_id, config)
     return results
 
 
 def review_single_ambiguous_label_with_llm(
     doc: DocIR,
     analysis: ParserAnalysis,
-    unit_id: str,
+    node_id: str,
     config: ParserConfig,
 ) -> LabelReviewOutput:
     prompt = load_prompt("parser/paragraph_labeler", profile=config.prompt_profile)
-    paragraph_map = {paragraph.unit_id: paragraph for paragraph in analysis.paragraphs}
-    paragraph = paragraph_map[unit_id]
+    paragraph_map = {paragraph.node_id: paragraph for paragraph in analysis.paragraphs}
+    paragraph = paragraph_map[node_id]
     index = analysis.paragraphs.index(paragraph)
     prev_text = next((candidate.text for candidate in reversed(analysis.paragraphs[:index]) if candidate.text.strip()), "")
     next_text = next((candidate.text for candidate in analysis.paragraphs[index + 1 :] if candidate.text.strip()), "")
     payload = {
-        "unit_id": paragraph.unit_id,
+        "node_id": paragraph.node_id,
         "text": paragraph.text,
-        "position": paragraph_position(analysis.paragraphs, paragraph.unit_id),
+        "position": paragraph_position(analysis.paragraphs, paragraph.node_id),
         "signals": {
             "clause_no": paragraph.clause_no,
             "subclause_no": paragraph.subclause_no,
@@ -119,9 +119,9 @@ def apply_label_reviews(analysis: ParserAnalysis, reviews: dict[str, LabelReview
     if not reviews:
         return analysis
 
-    paragraph_map = {paragraph.unit_id: paragraph for paragraph in analysis.paragraphs}
-    for unit_id, review in reviews.items():
-        paragraph = paragraph_map.get(unit_id)
+    paragraph_map = {paragraph.node_id: paragraph for paragraph in analysis.paragraphs}
+    for node_id, review in reviews.items():
+        paragraph = paragraph_map.get(node_id)
         if paragraph is None:
             continue
         paragraph.notes.append(f"Label LLM review: {review.reason}")
@@ -140,10 +140,10 @@ def apply_label_reviews(analysis: ParserAnalysis, reviews: dict[str, LabelReview
             )
         _normalize_clause_context_for_category(paragraph)
 
-    analysis.ambiguous_label_unit_ids = [
-        paragraph.unit_id
+    analysis.ambiguous_label_node_ids = [
+        paragraph.node_id
         for paragraph in analysis.paragraphs
-        if paragraph.unit_id not in reviews
+        if paragraph.node_id not in reviews
     ]
     return analysis
 

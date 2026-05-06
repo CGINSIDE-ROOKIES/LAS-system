@@ -30,7 +30,7 @@ Given a single target paragraph with optional context, assign the best structura
 
 ```json
 {
-  "unit_id": "s1.p5",
+  "node_id": "p_15f892c6a4d903f0",
   "text": "paragraph text here",
   "position": "start | middle | end | only",
   "signals": { "...": "..." },
@@ -43,7 +43,7 @@ Given a single target paragraph with optional context, assign the best structura
 
 ```json
 {
-  "unit_id": "s1.p5",
+  "node_id": "p_15f892c6a4d903f0",
   "status": "ok",
   "label": "clause_body",
   "candidate_labels": ["clause_body"],

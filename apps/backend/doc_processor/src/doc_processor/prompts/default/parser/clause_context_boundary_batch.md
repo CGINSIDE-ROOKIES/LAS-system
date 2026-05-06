@@ -32,10 +32,10 @@ Choose one action per suspect paragraph:
       "block_id": "clause:13",
       "active_clause_no": "13",
       "is_trailing_final_clause_chunk": true,
-      "suspect_unit_ids": ["s1.p85", "s1.p87"],
+      "suspect_node_ids": ["p_a85c5c2eaa8b6731", "p_d32e928a5d0f91c4"],
       "paragraphs": [
         {
-          "unit_id": "s1.p84",
+          "node_id": "p_7b6c0fb7a8d14b2e",
           "text": "",
           "is_suspect": false,
           "current_kind": null,
@@ -45,7 +45,7 @@ Choose one action per suspect paragraph:
           "page_number": 12
         },
         {
-          "unit_id": "s1.p85",
+          "node_id": "p_a85c5c2eaa8b6731",
           "text": "이 계약의 성립을 증명하기 위하여...",
           "is_suspect": true,
           "current_kind": "subclause_body",
@@ -66,7 +66,7 @@ Choose one action per suspect paragraph:
 {
   "reviews": [
     {
-      "unit_id": "s1.p85",
+      "node_id": "p_a85c5c2eaa8b6731",
       "action": "detach",
       "reason": "One sentence.",
       "anchor_text": null,
@@ -77,7 +77,7 @@ Choose one action per suspect paragraph:
 ```
 
 Rules:
-- Return one review object for every `suspect_unit_id`, and no review objects for non-suspect context paragraphs.
+- Return one review object for every `suspect_node_id`, and no review objects for non-suspect context paragraphs.
 - `action` must be `keep`, `detach`, or `split`.
 - `anchor_text` is required only for `split`, and must be an exact substring where the unrelated right-hand segment begins.
 - When not splitting, return `"anchor_text": null`.
