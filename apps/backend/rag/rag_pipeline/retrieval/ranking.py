@@ -78,26 +78,6 @@ def rank_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     return ranked
 
 
-# ── LLM 입력 행 선택 ──────────────────────────────────────────────────────────
-
-def select_llm_rows(
-    rows: list[dict[str, object]],
-    *,
-    top_k: int,
-    min_law_contexts: int,
-) -> tuple[list[dict[str, object]], bool]:
-    """LLM에 넘길 행을 선택하고, 최소 law 문서 수 충족 여부를 함께 반환한다.
-
-    참고: 현재 rag_pipeline 경로에서는 `select_rows_with_law_policy()`를 사용한다.
-    이 함수는 단순 선택 정책이 필요한 호출부와의 하위호환을 위해 유지한다.
-    """
-    selected = list(rows[: max(1, top_k)])
-    if min_law_contexts <= 0:
-        return selected, True
-    law_count = sum(1 for r in selected if str(r.get("doc_type", "") or "") == "law")
-    return selected, law_count >= min_law_contexts
-
-
 def select_rows_with_law_policy(
     rows: list[dict[str, object]],
     *,

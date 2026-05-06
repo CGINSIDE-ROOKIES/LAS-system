@@ -28,7 +28,6 @@ from .ranking import (
     LAW_CONTEXT_SUPPLEMENTED,
     apply_law_boost,
     rank_rows,
-    select_llm_rows,
     select_rows_with_law_policy,
 )
 from .service import RetrievalConfig
@@ -58,6 +57,5 @@ __all__ = [
     "select_rows_with_law_policy",
     "search_bm25",
     "search_qdrant",
-    "select_llm_rows",
     "truncate_on_semantic_boundary",
 ]

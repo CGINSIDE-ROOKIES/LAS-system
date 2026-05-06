@@ -1,4 +1,4 @@
-"""Gemini Flash-Lite 기반 Query Parser.
+"""LLM 기반 Query Parser.
 
 사용자 질문에서 법령명, 조문번호, intent를 추출하고 법률 무관 질문을 판별한다.
 """
@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PARSER_MODEL_GEMINI = "gemini-2.0-flash-lite"
 DEFAULT_PARSER_MODEL_OPENAI = "gpt-4o-mini"
-DEFAULT_PARSER_MODEL = DEFAULT_PARSER_MODEL_GEMINI  # backward compat
 _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 _OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
@@ -29,24 +28,32 @@ _SYSTEM_PROMPT = """\
 
 {{"law_names": [...], "suggested_laws": [...], "intent": "...", "is_legal": true/false, "normalized_query": "...", "hypothetical_doc": "..."}}
 
-- law_names: [현재 질문]에 법령명이 명시된 경우만 추출. [이전 질문]에 나온 법령명은 포함하지 말 것. 추론하거나 유추하지 말 것. 없으면 []
+[법령명 추출]
+- law_names: [현재 질문]에 법령명이 명시된 경우만 추출. [이전 질문] 법령명 포함 금지. 추론·유추 금지. 없으면 []
 - suggested_laws: 법령명 미명시이지만 질문 맥락에서 명확히 추론 가능한 주요 법령. 불명확하거나 law_names에 이미 있으면 []
-- intent: "normative" | "case_law" | "mixed" | "graph_lookup" | null (법률 무관이면 null)
-  -> "graph_lookup": 법령 구조(하위법령/위임/참조 관계) 조회 질의
+
+[질문 분류]
 - is_legal: 다음 중 하나라도 해당하면 true, 모두 해당 없으면 false
-  · [현재 질문]이 법률 관련인 경우
+  · [현재 질문]이 법률 관련인 경우 (행위의 불법·합법 여부, 처벌·제재 여부를 묻는 질문 포함)
   · [이전 질문]이 있고, [현재 질문]이 그 맥락에서 의미 있는 후속 질문인 경우
   (날씨·음식·일상 등 법률 및 이전 대화와 무관한 질문은 false)
-- normalized_query: [현재 질문]만을 법률 문서 검색에 최적화된 표준 법률 용어로 변환한 검색 쿼리. [이전 질문] 내용은 포함하지 말 것.
-  · 구어체·줄임말을 표준 법률 용어로 교정 (예: "월급 안주면" → "임금 미지급", "짤리면" → "해고")
-  · 오타·잘못된 법령명을 교정 (예: "근로기쥰법" → "근로기준법")
+- intent: "normative" | "case_law" | "mixed" | "graph_lookup" | null (법률 무관이면 null)
+  · normative: 법령 조문의 요건·의무·효과를 묻는 질문
+  · case_law: 사실관계 판단·인정 여부·법리 해석을 묻는 질문
+  · mixed: 조문과 판례를 함께 요청하거나 양쪽 모두 필요한 질문
+  · graph_lookup: 법령 구조(하위법령/위임/참조 관계) 조회 질의
+
+[검색 최적화]
+- normalized_query: [현재 질문]만을 법률 문서 검색에 최적화된 표준 법률 용어로 변환한 검색 쿼리. [이전 질문] 내용 포함 금지.
+  · 구어체·줄임말 교정 (예: "월급 안주면" → "임금 미지급", "짤리면" → "해고")
+  · 오타·잘못된 법령명 교정 (예: "근로기쥰법" → "근로기준법")
   · 원문이 이미 표준 법률 용어면 그대로 반환
   · is_legal=false이면 빈 문자열 반환
-- hypothetical_doc: intent가 "normative"일 때만 작성. normalized_query를 실제 조문 형식의 문장으로 변환하여 1~2문장으로 생성.
-  · 질문이 벌금·과태료·처벌·제재 여부를 묻는 경우: 벌칙 조문 형태로 작성 (예: "~한 자는 X만원 이하의 벌금에 처한다.")
-  · 그 외: 의무나 요건을 직접 규정하는 조문 형태로 작성 (예: "사용자는 근로자를 해고하려면 적어도 30일 전에 예고하여야 한다.")
-  · 실제 법령에 근거 없이 민사 손해배상·배상 의무 조문을 임의로 만들지 말 것
-  · 조문 내용에 구체적인 요건·기준·숫자·조건이 없고 "법령에서 정하는 바에 따른다" 수준의 추상적 문장이 되면 빈 문자열 "" 반환
+- hypothetical_doc: intent="normative"일 때만 작성. normalized_query를 실제 조문 형식의 문장으로 1~2문장 생성.
+  · 의무·요건을 직접 규정하는 조문 형태로 작성 (예: "사용자는 근로자를 해고하려면 적어도 30일 전에 예고하여야 한다.")
+  · 벌금 금액·징역 기간 등 처벌 수위 자체가 핵심인 경우에만 벌칙 조문 형태 추가 (예: "~한 자는 X만원 이하의 벌금에 처한다.")
+  · 실제 법령 근거 없이 민사 손해배상·배상 의무 조문 생성 금지
+  · 구체적 요건·기준·숫자 없이 추상적 문장이 되면 빈 문자열 "" 반환
   · intent가 "normative"가 아니면 반드시 빈 문자열 ""
 
 인식 가능한 법령 목록:
@@ -195,7 +202,7 @@ def _parse_llm_output(text: str) -> QueryParseResult:
 # ── QueryParser ───────────────────────────────────────────────────────────────
 
 class QueryParser:
-    """질문을 Gemini LLM으로 파싱해 구조화 결과를 반환한다."""
+    """질문을 LLM으로 파싱해 구조화 결과를 반환한다."""
 
     def __init__(self, config: QueryParserConfig) -> None:
         self._cfg = config

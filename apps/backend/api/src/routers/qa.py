@@ -1,9 +1,9 @@
 """Q&A 라우터.
 
 엔드포인트:
-  POST /api/v1/qa/ask              - 질문을 받아 RAG 기반 답변 반환 (단일 응답)
-  POST /api/v1/qa/ask/stream       - 질문을 받아 RAG 기반 답변 스트리밍 반환 (SSE)
-  POST /api/v1/qa/{qa_id}/feedback - Q&A 답변에 대한 사용자 피드백 저장
+  POST /api/v1/qa/ask        - 질문을 받아 RAG 기반 답변 반환 (단일 응답)
+  POST /api/v1/qa/ask/stream - 질문을 받아 RAG 기반 답변 스트리밍 반환 (SSE)
+  POST /api/v1/qa/suggestions - 후속 추천 질문 생성
 """
 
 import json
@@ -12,8 +12,7 @@ import re
 import time
 
 import psycopg2.extensions
-from fastapi import APIRouter, Depends, Query
-from fastapi import HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
@@ -23,7 +22,7 @@ from rag_pipeline.generation.pipeline import RagPipeline, build_system_prompt
 from rag_pipeline.generation.service import GenerationService
 from rag_pipeline.observability.tracing import end_span, start_span, start_trace, update_trace
 from rag_pipeline.query_parser import QueryParser
-from src.history import delete_history_item, delete_history_items, get_history, get_history_item, save_feedback, save_qa
+from src.history import save_qa
 from rag_pipeline.retrieval.common import EmbeddingError, LLMError, LLMTimeoutError, RetrievalError
 
 router = APIRouter(tags=["qa"])
@@ -167,91 +166,6 @@ class AskResponse(BaseModel):
     retrieved_docs: list[RetrievedDoc]
     law_context_status: str
     qa_id: str | None = None
-
-
-@router.get("/history")
-def history(
-    q: str | None = Query(default=None, description="질문/답변 검색어"),
-    session_id: str | None = Query(default=None, description="세션 ID 필터"),
-    date_from: str | None = Query(default=None, description="시작 날짜 (ISO 8601, 예: 2026-01-01)"),
-    date_to: str | None = Query(default=None, description="종료 날짜 (ISO 8601, 예: 2026-12-31)"),
-    limit: int = Query(default=20, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
-    conn: psycopg2.extensions.connection = Depends(get_db),
-):
-    """Q&A 히스토리 목록을 반환합니다."""
-    try:
-        return get_history(
-            conn,
-            q=q,
-            session_id=session_id,
-            date_from=date_from,
-            date_to=date_to,
-            limit=limit,
-            offset=offset,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-class BulkDeleteRequest(BaseModel):
-    ids: list[str] = Field(min_length=1)
-
-
-@router.delete("/history", status_code=200)
-def delete_history_bulk(
-    request: BulkDeleteRequest,
-    conn: psycopg2.extensions.connection = Depends(get_db),
-):
-    """여러 Q&A 히스토리를 한 번에 삭제합니다."""
-    deleted = delete_history_items(conn, request.ids)
-    return {"deleted": deleted}
-
-
-@router.delete("/history/{qa_id}", status_code=204)
-def delete_history(
-    qa_id: str,
-    conn: psycopg2.extensions.connection = Depends(get_db),
-):
-    """단건 Q&A 히스토리를 삭제합니다."""
-    deleted = delete_history_item(conn, qa_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="히스토리를 찾을 수 없습니다.")
-
-
-@router.get("/history/{qa_id}")
-def history_item(
-    qa_id: str,
-    conn: psycopg2.extensions.connection = Depends(get_db),
-):
-    """단건 Q&A 히스토리를 반환합니다."""
-    item = get_history_item(conn, qa_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="히스토리를 찾을 수 없습니다.")
-    return item
-
-
-class FeedbackRequest(BaseModel):
-    thumbs_up: bool
-    comment: str | None = Field(default=None, max_length=1000)
-
-
-class FeedbackResponse(BaseModel):
-    id: str
-
-
-@router.post("/{qa_id}/feedback", response_model=FeedbackResponse, status_code=201)
-def submit_feedback(
-    qa_id: str,
-    request: FeedbackRequest,
-    conn: psycopg2.extensions.connection = Depends(get_db),
-) -> FeedbackResponse:
-    """Q&A 답변에 대한 사용자 피드백(평점·코멘트)을 저장합니다."""
-    try:
-        feedback_id = save_feedback(conn, qa_id=qa_id, thumbs_up=request.thumbs_up, comment=request.comment)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="히스토리를 찾을 수 없습니다.")
-    return FeedbackResponse(id=feedback_id)
 
 
 # ask/ask_stream은 동기 함수로 유지한다.

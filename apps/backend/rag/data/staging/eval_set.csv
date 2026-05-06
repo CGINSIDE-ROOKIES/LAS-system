@@ -17,9 +17,7 @@ query,intent,gold_law,gold_article,expected_doc_type,notes
 도급 계약 인력에게 업무 지시를 하면 근로자로 볼 수 있나요,case_law,,,prec,query_group=근로자성_판단|gold_issue_keyword=근로자성|사용종속관계|업무지시
 하도급 대금 지급 기한을 어기면 어떤 불이익이 있나요,normative,하도급거래 공정화에 관한 법률,제13조,law,
 직원 해고가 정당한지 어떤 기준으로 판단하나요,mixed,근로기준법,제23조,mixed,allowed_doc_types=law|prec|decc
-직원이 업무 중 부상을 입은 경우 회사의 보상 의무는 어떻게 되나요,normative,산업재해보상보험법,제37조,law,
 직원 점심시간 중 업무 대기를 시키면 휴게시간으로 인정되지 않나요,case_law,,,expc,gold_issue_keyword=휴게시간|대기시간|근로시간해석
-업무상 사망 사고 발생 시 유족에게 어떤 보상을 해줘야 하나요,normative,산업재해보상보험법,제62조,law,
 근로기준법 위반으로 제재받은 사례가 있나요,case_law,근로기준법,,relation,relation_type=법령연관사례
 근무시간에 따른 휴게시간 부여 기준이 어떻게 되나요,normative,근로기준법,제54조,law,
 연장근로 수당 관련 분쟁 판례나 해석 사례가 있나요,mixed,근로기준법,제56조,mixed,allowed_doc_types=law|prec|decc|relation
@@ -28,7 +26,6 @@ query,intent,gold_law,gold_article,expected_doc_type,notes
 급여 지급일을 정할 때 법적 기준이 있나요,normative,근로기준법,제43조,law,
 최저임금 미준수로 소송이 제기된 경우 법원 판단 기준은 무엇인가요,case_law,최저임금법,,relation,relation_type=법령연관사례
 근로계약서 미작성 시 법적 문제가 있나요,normative,근로기준법,제17조,law,
-산재보험 관련 분쟁에서 회사가 불리하게 판결난 사례가 있나요,case_law,산업재해보상보험법,,relation,relation_type=법령연관사례
 기간제 근로자에게 정규직과 다른 처우를 하면 문제가 되나요,normative,기간제 및 단시간근로자 보호 등에 관한 법률,제8조,law,
 기간제 근로자 계약 만료 후 묵시적 갱신이 인정될 수 있나요,case_law,,,prec,gold_issue_keyword=기간제|묵시적갱신
 파견 기간이 초과된 경우 직접 고용 의무가 발생하나요,mixed,파견근로자 보호 등에 관한 법률,제6조의2,mixed,allowed_doc_types=law|prec
