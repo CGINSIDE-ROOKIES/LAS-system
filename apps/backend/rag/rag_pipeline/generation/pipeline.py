@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 from ..observability.langfuse_client import score_trace
 from ..observability.tracing import end_span, get_trace_id, start_generation_span, start_span, start_trace, update_trace
 from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, embed_query
-from ..retrieval.context import build_llm_context_rows, build_llm_context_text, truncate_on_semantic_boundary
+from ..retrieval.context import build_llm_context_rows, build_llm_context_text
 from ..retrieval.fusion import fuse_rrf, fuse_rrf_multi
 from ..retrieval.opensearch import search_bm25
 from ..retrieval.qdrant import search_qdrant_with_vector
@@ -33,7 +33,11 @@ from ..retrieval.ranking import (
     select_rows_with_law_policy,
 )
 from ..retrieval.service import RetrievalConfig
+from .prompt import DEFAULT_SYSTEM_PROMPT, build_system_prompt, build_user_prompt_with_limit
 from .service import GenerationConfig, GenerationService
+
+# build_system_prompt는 qa.py에서 직접 import하므로 여기서 재노출한다.
+__all__ = ["RagPipeline", "RagPipelineConfig", "RagResult", "build_system_prompt", "DEFAULT_SYSTEM_PROMPT"]
 
 _LAW_CONTEXT_SCORES: dict[str, float] = {
     LAW_CONTEXT_OK: 1.0,
@@ -46,57 +50,6 @@ _NO_RESULT_ANSWER = (
     "관련 법령·판례 문서를 찾지 못했습니다. "
     "질문을 더 구체적으로 입력하시거나, 법령 필터가 설정되어 있다면 해제 후 다시 시도해보세요."
 )
-
-_SYSTEM_PROMPT_BASE = (
-    "당신은 노동법 및 하도급법 전문 법률 Q&A 어시스턴트입니다.\n"
-    "주요 대상 법령은 근로기준법, 기간제 및 단시간근로자 보호 등에 관한 법률, "
-    "파견근로자 보호 등에 관한 법률, 최저임금법, 남녀고용평등과 일·가정 양립 지원에 관한 법률, "
-    "근로자퇴직급여 보장법, 하도급거래 공정화에 관한 법률, 건설산업기본법 등입니다.\n\n"
-    "답변 시 다음 원칙을 따르세요:\n"
-    "- 제공된 컨텍스트에 있는 내용만 근거로 답변하세요.\n"
-    "- 조문 번호나 출처 표기는 하지 마세요. 근거 문서는 별도로 제공됩니다.\n"
-    "- 컨텍스트에 없는 내용은 절대 생성하지 마세요. 컨텍스트가 질문과 무관하거나 관련 정보가 없으면 그 사실 한 문장만 답하고 추가 내용을 작성하지 마세요.\n"
-    "{detail_instruction}"
-    "- 답변 마지막 줄에 반드시 [ANSWERABLE:yes] 또는 [ANSWERABLE:no]를 단독으로 출력하세요. "
-    "컨텍스트가 질문과 관련 있어 답변할 수 있으면 [ANSWERABLE:yes], "
-    "컨텍스트가 질문과 무관해 실질적으로 답변할 수 없으면 [ANSWERABLE:no]입니다."
-)
-
-_DETAIL_INSTRUCTIONS: dict[str, str] = {
-    "brief": (
-        "- 핵심 내용을 3~5문장 이내로 간결하게 전달하세요.\n"
-        "- 법령명·핵심 개념·중요 조건은 **볼드**로 강조하세요.\n"
-        "- 전문적이되 자연스러운 구어체로 작성하세요.\n"
-    ),
-    "normal": (
-        "- 핵심 내용을 5~10문장 내외로 전달하세요.\n"
-        "- 법령명·핵심 개념·중요 조건은 **볼드**로 강조하세요.\n"
-        "- 전문적이되 자연스러운 구어체로 작성하세요.\n"
-    ),
-    "detailed": (
-        "- 관련 조문·사례를 포함해 충분한 근거와 함께 상세히 설명하세요.\n\n"
-        "**[출력 형식 — 반드시 준수]**\n"
-        "- 연속 문단(산문) 나열 금지. 구조화된 마크다운으로만 작성하세요.\n"
-        "- 주제나 단계가 2개 이상이면 ## 소제목으로 섹션을 나누세요.\n"
-        "- 나열 항목은 번호 목록(1. 2. 3.) 또는 글머리 기호(-)를 사용하세요.\n"
-        "- 법령명, 핵심 개념, 중요 조건은 **볼드**로 강조하세요.\n"
-    ),
-}
-
-DEFAULT_SYSTEM_PROMPT = _SYSTEM_PROMPT_BASE.format(
-    detail_instruction=_DETAIL_INSTRUCTIONS["normal"]
-)
-
-
-def build_system_prompt(answer_detail: str | None) -> str:
-    """답변 상세도 설정에 따른 시스템 프롬프트를 반환한다.
-
-    Args:
-        answer_detail: "brief" | "normal" | "detailed" | None.
-            None 또는 미지원 값이면 기본(normal) 프롬프트를 반환한다.
-    """
-    instruction = _DETAIL_INSTRUCTIONS.get(answer_detail or "normal", _DETAIL_INSTRUCTIONS["normal"])
-    return _SYSTEM_PROMPT_BASE.format(detail_instruction=instruction)
 
 
 @dataclass

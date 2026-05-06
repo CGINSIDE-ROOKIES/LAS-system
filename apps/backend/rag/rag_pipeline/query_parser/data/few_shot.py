@@ -40,10 +40,15 @@ FEW_SHOT_EXAMPLES: list[tuple[str, str]] = [
         "하도급 현장 근로자 임금 체불",
         '{"law_names": [], "suggested_laws": [], "intent": "normative", "is_legal": true, "normalized_query": "하도급 현장 근로자 임금 체불 구제", "hypothetical_doc": "도급사업의 사업주는 하수급인이 사용한 근로자에게 임금을 지급하지 못한 경우 그 하수급인과 연대하여 책임을 진다."}',
     ),
-    # ── normative: 벌금·처벌 여부 질문 → 벌칙 조문 형태로 작성 ──────────────
+    # ── normative: 벌금·처벌 여부 질문 → 의무 조문 형태 우선 ──────────────
     (
         "근로계약서 안 쓰면 벌금 있나요",
-        '{"law_names": [], "suggested_laws": ["근로기준법"], "intent": "normative", "is_legal": true, "normalized_query": "근로계약서 미작성 벌칙", "hypothetical_doc": "근로계약을 서면으로 체결하지 아니한 자는 500만원 이하의 벌금에 처한다."}',
+        '{"law_names": [], "suggested_laws": ["근로기준법"], "intent": "normative", "is_legal": true, "normalized_query": "근로계약서 미작성 제재", "hypothetical_doc": "사용자는 근로계약 체결 시 임금, 소정근로시간 등 근로조건을 서면으로 명시하여 근로자에게 교부하여야 한다."}',
+    ),
+    # ── normative: 처벌 수위 자체를 묻는 질문 → 벌칙 조문 형태 ──────────────
+    (
+        "근로계약서 미작성 벌금이 얼마야",
+        '{"law_names": [], "suggested_laws": ["근로기준법"], "intent": "normative", "is_legal": true, "normalized_query": "근로계약서 미작성 벌금", "hypothetical_doc": "근로계약을 서면으로 체결하지 아니한 자는 500만원 이하의 벌금에 처한다."}',
     ),
     # ── hypothetical_doc 빈 문자열 반환 케이스 (산입 범위 등 세부 규정은 구체적 조문 작성 불가) ──
     (
