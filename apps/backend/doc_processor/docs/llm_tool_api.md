@@ -14,7 +14,9 @@ Except for the local parser entrypoint, calls are keyword-only.
 - `validate_text_annotations(...)`
 - `render_review_html(...)`
 - `review_contract_document(...)`
+- `review_contract_document_from_env(...)`
 - `review_parsed_contract(...)`
+- `check_contract_review_env(...)`
 
 ## Parse
 
@@ -129,3 +131,30 @@ injected clients:
 
 In `apps/backend/api`, use the existing `get_rag_pipeline()` and
 `get_generation_service()` dependencies for those clients.
+
+For demos and local checks, `review_contract_document_from_env(...)` builds the
+same clients from RAG env:
+
+```python
+from doc_processor import ReviewContractRequest, review_contract_document_from_env
+
+result = review_contract_document_from_env(
+    ReviewContractRequest(source_path="sample.docx")
+)
+```
+
+Risk levels are normalized to `none`, `low`, `mid`, `high`, and `crit`. The LLM
+assigns the level using the fixed rubric in `doc_processor.contract_review`;
+findings without selected RAG sources are discarded.
+
+Before running the pipeline, check the required vector DB and model settings:
+
+```python
+from doc_processor import check_contract_review_env
+
+status = check_contract_review_env()
+assert status.ready, status.missing
+```
+
+The current Qdrant DB uses 1024-dimensional embeddings, so local runs should
+set `OPENAI_EMBEDDING_DIMENSIONS=1024`.

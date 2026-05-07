@@ -60,6 +60,8 @@ def parse_document(
     relevance_mode: RelevanceMode = RelevanceMode.KEYWORD_THEN_LLM,
     boundary_review_enabled: bool = True,
     label_review_enabled: bool = True,
+    max_concurrent_workers: int = 4,
+    llm_repair_max_attempts: int = 3,
     prompt_profile: str = "default",
     include_paragraphs: bool = True,
     include_clauses: bool = True,
@@ -76,6 +78,8 @@ def parse_document(
                 relevance_mode=relevance_mode,
                 boundary_review_enabled=boundary_review_enabled,
                 label_review_enabled=label_review_enabled,
+                max_concurrent_workers=max_concurrent_workers,
+                llm_repair_max_attempts=llm_repair_max_attempts,
                 prompt_profile=prompt_profile,
             ),
         )

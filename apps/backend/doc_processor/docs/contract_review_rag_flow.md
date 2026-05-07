@@ -5,6 +5,8 @@ review. The implementation entrypoints are:
 
 - `review_contract_document(...)`
 - `review_parsed_contract(...)`
+- `review_contract_document_from_env(...)`
+- `check_contract_review_env(...)`
 - models in `doc_processor.contract_review`
 
 ## Document Processor API
@@ -31,6 +33,40 @@ services:
 - `RagEvidenceClient.query_legal_db(...)`
 - `ReviewGenerationClient.generate(...)`
 
+For local demos or later API wiring, `review_contract_document_from_env(...)`
+constructs these clients from the existing `rag-pipeline` package:
+
+- `RagPipeline.from_env()` for Qdrant/OpenSearch retrieval
+- `GenerationService.from_env()` for review JSON generation
+
+`check_contract_review_env()` reports missing required settings without making
+network calls.
+
+Required retrieval settings:
+
+- `QDRANT_URL`
+- `QDRANT_COLLECTIONS`
+- `OPENAI_API_KEY` for query embeddings
+- `OPENAI_EMBEDDING_DIMENSIONS=1024` for the current reduced-dimension Qdrant DB
+
+Optional hybrid BM25 settings:
+
+- `OPENSEARCH_URL`
+- `OPENSEARCH_INDEX`
+
+Gemini review generation settings:
+
+- `LLM_PROVIDER=gemini`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`, for example `gemini-2.5-flash-lite`
+
+For notebook convenience, the env hook can fall back from parser LLM variables
+when the RAG generation variables are missing:
+
+- `DOC_PROCESSOR_LLM_PROVIDER -> LLM_PROVIDER`
+- `DOC_PROCESSOR_LLM_MODEL -> GEMINI_MODEL` when provider is `gemini`
+- `DOC_PROCESSOR_LLM_API_KEY -> GEMINI_API_KEY` when provider is `gemini`
+
 In `apps/backend/api`, these should be provided by existing dependencies:
 
 - `get_rag_pipeline()` for retrieval evidence
@@ -50,7 +86,7 @@ This keeps the dependency direction simple:
    `intent="normative"` and the clause text as `search_query`.
 4. Send the clause text plus RAG evidence to the generation client.
 5. Require strict JSON findings:
-   - severity
+   - `risk_level`
    - issue type
    - target paragraph node id
    - risky selected text
@@ -67,6 +103,26 @@ The clause boundary is the context-control unit. This follows the same design
 principle as hierarchical long-document editors: local edits should be scoped
 to a structural node, while the system can still expose higher-level progress
 and navigation.
+
+## Risk Level Methodology
+
+The model chooses the category, but it is constrained by a fixed rubric and the
+result is normalized to these values:
+
+- `none`: no concrete source-backed issue. The pipeline records this at clause
+  level when no findings survive validation.
+- `low`: minor drafting ambiguity, missing detail, or negotiability concern
+  with limited legal exposure.
+- `mid`: meaningful ambiguity, enforceability concern, statutory compliance
+  risk, or operational burden that needs legal review.
+- `high`: likely illegal, unfair, unenforceable, or creates significant
+  monetary/rights exposure if accepted as written.
+- `crit`: severe statutory conflict, immediate invalidity risk,
+  criminal/regulatory exposure, or large non-recoverable loss.
+
+Findings with no selected RAG source are discarded. Findings labeled `none` are
+also discarded; `none` belongs to the clause rollup rather than a user-visible
+problem highlight.
 
 ## HITL State Flow
 
@@ -114,7 +170,7 @@ Recommended endpoints:
   - SSE progress events
 
 - `GET /api/v1/document-reviews/{review_id}/suggestions`
-  - unresolved and resolved findings with severity, sources, annotations,
+  - unresolved and resolved findings with risk level, sources, annotations,
     recommendations, and proposed edits
 
 - `POST /api/v1/document-reviews/{review_id}/suggestions/{suggestion_id}/decision`
