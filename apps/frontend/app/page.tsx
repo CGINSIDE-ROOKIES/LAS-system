@@ -1,7 +1,7 @@
 "use client";
 
-import IndexPage from "@/screens/Index";
+import Dashboard from "@/screens/Dashboard";
 
 export default function HomePage() {
-  return <IndexPage />;
+  return <Dashboard />;
 }

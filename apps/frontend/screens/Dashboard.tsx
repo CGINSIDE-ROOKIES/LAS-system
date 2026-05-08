@@ -1,0 +1,787 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useEffect, useState, Fragment } from "react";
+import {
+  LayoutDashboard, MessageSquare, FileSearch, FilePen,
+  Clock, Settings, Zap, Check, ArrowRight,
+  Search, Bell, TrendingUp, Newspaper, Scale, ChevronLeft, ChevronRight, PanelLeft,
+} from "lucide-react";
+
+// ─── 디자인 토큰 ─────────────────────────────────────────────────────────────
+
+const T = {
+  bgApp:        "#FFFFFF",
+  bgCanvas:     "#FAFAFA",
+  bgCard:       "#FFFFFF",
+  bgCardSoft:   "#F5F7FA",
+  bgSb:         "#14182A",
+  primary:      "#3D52F5",
+  primary700:   "#2C3DCF",
+  primary50:    "#ECEFFE",
+  primary100:   "#DBE0FD",
+  warm:         "#EE8A5D",
+  warmSoft:     "#FCEAE0",
+  warmDeep:     "#C76844",
+  green:        "#2D9C73",
+  greenSoft:    "#DDF1E7",
+  amber:        "#E0A43A",
+  amberSoft:    "#FBEDC9",
+  amberInk:     "#8A6312",
+  rose:         "#D9484A",
+  roseSoft:     "#FCE2E1",
+  ink900:       "#14182A",
+  ink800:       "#1F2438",
+  ink700:       "#2A2F44",
+  ink500:       "#5C6275",
+  ink400:       "#8087A0",
+  ink300:       "#B6BCCB",
+  ink200:       "#E2E5ED",
+  border:       "#E5E9F5",
+  borderSoft:   "#EDF0F7",
+  borderStrong: "#D5DCF0",
+  sbText:       "rgba(255,255,255,.72)",
+  sbTextDim:    "rgba(255,255,255,.48)",
+  sbStrong:     "#FFFFFF",
+  sbBorder:     "rgba(255,255,255,.07)",
+  sbActive:     "rgba(255,255,255,.09)",
+  shadowCard:   "0 1px 0 rgba(20,24,42,.04),0 1px 2px rgba(20,24,42,.04)",
+} as const;
+
+// ─── 목데이터 ─────────────────────────────────────────────────────────────────
+
+const MOCK_USER = { name: "씨지인사이드", initial: "C", dept: "경영지원본부 · 법무팀" };
+
+const HISTORY = [
+  { id: 1, q: "근로계약서 작성 시 필수 기재사항은?",            when: "오늘 14:32", tag: "근로기준법", tone: "primary" },
+  { id: 2, q: "하도급 대금 지급 지연 시 이자율은 얼마인가요?", when: "어제",       tag: "하도급법",   tone: "warm"    },
+  { id: 3, q: "파견근로자에게 인정되는 휴게시간 기준",          when: "2일 전",     tag: "파견법",     tone: "amber"   },
+  { id: 4, q: "중대재해처벌법 적용 사업장 기준 정리해줘",        when: "3일 전",     tag: "중대재해",   tone: "rose"    },
+];
+
+const DRAFTS = [
+  { id: 1, title: "(주)그린로지스 - 운송 위·수탁 계약서", step: "2/4 단계 · 대금/지급", updated: "10분 전", progress: 52 },
+  { id: 2, title: "경력직 채용 표준 근로계약서 v3",       step: "3/4 단계 · 휴가·휴직", updated: "어제",    progress: 78 },
+];
+
+const NOTICES = [
+  { id: 1, tag: "업데이트",    title: "중대재해처벌법 시행령 개정사항이 반영되었습니다", when: "1일 전" },
+  { id: 2, tag: "신규 템플릿", title: "스타트업 투자계약서(SAFE) 표준 양식 추가",        when: "3일 전" },
+];
+
+const USAGE = {
+  used: 101, quota: 500, deltaPct: 12, period: "5월 1일 ~ 8일",
+  breakdown: [
+    { key: "qna",    label: "법령 Q&A",   value: 84, color: T.primary },
+    { key: "review", label: "계약서 검토", value: 11, color: T.green   },
+    { key: "draft",  label: "초안 작성",   value: 6,  color: T.amber   },
+  ],
+};
+
+const HERO_METRICS = [
+  { k: "커버리지",    v: "8개 법령" },
+  { k: "표준 템플릿", v: "32개"      },
+  { k: "평균 응답",   v: "2.4초"     },
+  { k: "평균 검토",   v: "30초"      },
+];
+
+type Illust = "qna" | "review" | "draft";
+
+const FEATURES: {
+  num: string; title: string; tagline: string; desc: string;
+  bullets: string[]; cta: string; accent: string; bg: string;
+  illust: Illust; stat: { k: string; v: string } | null; example: string; href: string;
+}[] = [
+  {
+    num: "01", title: "법령 Q&A", tagline: "법령을 친구처럼 물어보기",
+    desc: "근로기준법, 하도급법, 건설산업기본법 등 8개 법령의 조문과 판례 기반 답변.",
+    bullets: ["근거 조문 자동 인용", "관련 판례 함께 보기", "대화 히스토리 저장"],
+    cta: "질문 시작", accent: T.primary, bg: T.primary50, illust: "qna",
+    stat: null, example: "연차수당 계산 기준이 뭐야?", href: "/chat",
+  },
+  {
+    num: "02", title: "계약서 검토", tagline: "놓친 위험을 30초 만에",
+    desc: "PDF · DOCX를 올리면 위험 조항을 자동 진단하고 수정 문구를 제안해드려요.",
+    bullets: ["42종 리스크 룰셋", "조항별 비교 뷰", "협상 포인트 정리"],
+    cta: "계약서 업로드", accent: T.green, bg: T.greenSoft, illust: "review",
+    stat: { k: "이번 주 검토", v: "11건" }, example: "NDA · 디자인스튜디오 코코넛", href: "/contract-review",
+  },
+  {
+    num: "03", title: "계약서 초안 작성", tagline: "빈 화면이 두렵지 않게",
+    desc: "용도와 조건만 입력하세요. 표준 양식과 추천 조항으로 초안이 완성됩니다.",
+    bullets: ["32종 표준 템플릿", "단계별 가이드", "동료와 공유·협업"],
+    cta: "초안 만들기", accent: T.amberInk, bg: T.amberSoft, illust: "draft",
+    stat: { k: "이번 주 작성", v: "6건" }, example: "운송 위·수탁 계약서", href: "/contract-draft",
+  },
+];
+
+const PILL_TONE: Record<string, { bg: string; border: string; color: string }> = {
+  primary: { bg: T.primary50,  border: T.primary100, color: T.primary700 },
+  warm:    { bg: T.warmSoft,   border: T.warmSoft,   color: T.warmDeep  },
+  green:   { bg: T.greenSoft,  border: T.greenSoft,  color: T.green     },
+  amber:   { bg: T.amberSoft,  border: T.amberSoft,  color: T.amberInk  },
+  rose:    { bg: T.roseSoft,   border: T.roseSoft,   color: T.rose      },
+};
+
+const NAV_ITEMS = [
+  { id: "home",    label: "홈",             Icon: LayoutDashboard, href: "/"                },
+  { id: "qna",     label: "법령 Q&A",       Icon: MessageSquare,   href: "/chat"            },
+  { id: "review",  label: "계약서 검토",     Icon: FileSearch,      href: "/contract-review" },
+  { id: "draft",   label: "계약서 초안 작성", Icon: FilePen,         href: "/contract-draft"  },
+  { id: "history", label: "히스토리",        Icon: Clock,           href: "/history"         },
+  { id: "settings",label: "설정",            Icon: Settings,        href: "/settings"        },
+];
+
+// ─── 공통 컴포넌트 ────────────────────────────────────────────────────────────
+
+function Pill({
+  children, tone, style,
+}: {
+  children: React.ReactNode;
+  tone?: string;
+  style?: React.CSSProperties;
+}) {
+  const c = tone && PILL_TONE[tone]
+    ? PILL_TONE[tone]
+    : { bg: T.bgCardSoft, border: T.border, color: T.ink700 };
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      padding: "4px 10px", borderRadius: 999,
+      fontSize: 12, fontWeight: 500,
+      background: c.bg, border: `1px solid ${c.border}`, color: c.color,
+      ...style,
+    }}>{children}</span>
+  );
+}
+
+function SectionHead({
+  icon, title, sub, action,
+}: {
+  icon: React.ReactNode; title: string; sub?: string; action?: React.ReactNode;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <span style={{
+        width: 28, height: 28, borderRadius: 8,
+        background: T.bgCardSoft, color: T.ink500,
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>{icon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: T.ink900, letterSpacing: "-.005em" }}>{title}</div>
+        {sub && <div style={{ fontSize: 11.5, color: T.ink500, marginTop: 1 }}>{sub}</div>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+// ─── 사이드바 ─────────────────────────────────────────────────────────────────
+
+// 텍스트를 opacity+maxWidth로 부드럽게 fade 처리하는 헬퍼
+function SbFade({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
+  return (
+    <div style={{
+      overflow: "hidden", whiteSpace: "nowrap",
+      maxWidth: collapsed ? 0 : 200,
+      opacity: collapsed ? 0 : 1,
+      transition: "max-width .2s cubic-bezier(.4,0,.2,1), opacity .15s ease",
+      flexShrink: 0,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function Sidebar({ collapsed }: { collapsed: boolean }) {
+  const pathname = usePathname();
+
+  const activeId =
+    pathname === "/"                ? "home"    :
+    pathname === "/chat"            ? "qna"     :
+    pathname === "/contract-review" ? "review"  :
+    pathname === "/contract-draft"  ? "draft"   :
+    pathname === "/history"         ? "history" :
+    pathname === "/settings"        ? "settings": "home";
+
+  const brandGrad = `linear-gradient(135deg,#5C70FF,${T.primary})`;
+  const tr = "width .2s cubic-bezier(.4,0,.2,1), padding .2s cubic-bezier(.4,0,.2,1)";
+
+  return (
+    <aside style={{
+      width: collapsed ? 72 : 248, flexShrink: 0,
+      background: T.bgSb, color: T.sbText,
+      display: "flex", flexDirection: "column",
+      borderRight: `1px solid ${T.sbBorder}`,
+      transition: tr, overflow: "hidden",
+      willChange: "width", position: "relative",
+    }}>
+      {/* 브랜드 */}
+      <div style={{
+        padding: "20px 16px",
+        display: "flex", alignItems: "center", gap: 10,
+        borderBottom: `1px solid ${T.sbBorder}`, minHeight: 76,
+      }}>
+        <div style={{
+          width: 36, height: 36, borderRadius: 10, background: brandGrad, flexShrink: 0,
+          display: "flex", alignItems: "center", justifyContent: "center", color: "#fff",
+          boxShadow: "0 6px 14px rgba(61,82,245,.35)",
+        }}>
+          <Scale size={20} strokeWidth={1.9} />
+        </div>
+        <SbFade collapsed={collapsed}>
+          <div style={{ paddingLeft: 2 }}>
+            <div style={{ color: T.sbStrong, fontWeight: 700, fontSize: 14.5, letterSpacing: "-.01em" }}>LAS</div>
+            <div style={{ fontSize: 11, color: T.sbTextDim, marginTop: 1 }}>AI 법무지원시스템</div>
+          </div>
+        </SbFade>
+      </div>
+
+      {/* 내비 */}
+      <nav style={{ padding: "4px 14px", flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+        <div style={{
+          fontSize: 10.5, fontWeight: 600, letterSpacing: ".08em",
+          color: T.sbTextDim, textTransform: "uppercase",
+          overflow: "hidden",
+          maxHeight: collapsed ? 0 : 40,
+          opacity: collapsed ? 0 : 1,
+          transition: "max-height .2s cubic-bezier(.4,0,.2,1), opacity .15s ease",
+          paddingTop: collapsed ? 0 : 14, paddingBottom: collapsed ? 0 : 8,
+          paddingLeft: 8,
+        }}>메뉴</div>
+        <ul style={{ display: "flex", flexDirection: "column", gap: 2, listStyle: "none", padding: 0, margin: 0 }}>
+          {NAV_ITEMS.map(n => {
+            const isActive = n.id === activeId;
+            return (
+              <li key={n.id}>
+                <Link
+                  href={n.href}
+                  title={collapsed ? n.label : undefined}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "9px 8px", borderRadius: 8, overflow: "hidden",
+                    background: isActive ? T.sbActive : "transparent",
+                    color: isActive ? T.sbStrong : T.sbText,
+                    fontWeight: isActive ? 600 : 500, fontSize: 13.5,
+                    textDecoration: "none", position: "relative",
+                  }}>
+                  {isActive && (
+                    <span style={{
+                      position: "absolute", left: 0, top: 6, bottom: 6, width: 3,
+                      background: T.primary, borderRadius: "0 3px 3px 0",
+                      opacity: collapsed ? 0 : 1,
+                      transition: "opacity .15s ease",
+                    }} />
+                  )}
+                  <n.Icon size={17} strokeWidth={1.7} style={{ flexShrink: 0 }} />
+                  <SbFade collapsed={collapsed}>{n.label}</SbFade>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+
+      {/* 사용량 게이지 */}
+      <div style={{
+        overflow: "hidden",
+        maxHeight: collapsed ? 0 : 120,
+        opacity: collapsed ? 0 : 1,
+        transition: "max-height .2s cubic-bezier(.4,0,.2,1), opacity .15s ease",
+        padding: collapsed ? "0 14px" : "10px 14px 14px",
+      }}>
+        <div style={{
+          background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)",
+          borderRadius: 12, padding: 14,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <Zap size={14} />
+            <span style={{ fontSize: 12, color: T.sbStrong, fontWeight: 600 }}>이번 달 사용량</span>
+          </div>
+          <div style={{ height: 6, background: "rgba(255,255,255,.08)", borderRadius: 99, overflow: "hidden" }}>
+            <div style={{ width: "64%", height: "100%", background: T.primary }} />
+          </div>
+          <div style={{ marginTop: 8, fontSize: 11.5, color: T.sbTextDim, display: "flex", justifyContent: "space-between" }}>
+            <span>320 / 500 질의</span>
+            <span style={{ color: T.sbStrong }}>64%</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 유저 */}
+      <div style={{
+        borderTop: `1px solid ${T.sbBorder}`,
+        padding: "12px 14px",
+        display: "flex", alignItems: "center", gap: 10, overflow: "hidden",
+      }}>
+        <div style={{
+          width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+          background: "linear-gradient(135deg,#7B91FF,#3D52F5)",
+          color: "#ffffff", fontWeight: 700, fontSize: 13,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>{MOCK_USER.initial}</div>
+        <SbFade collapsed={collapsed}>
+          <div>
+            <div style={{ color: T.sbStrong, fontSize: 13, fontWeight: 600 }}>{MOCK_USER.name}</div>
+            <div style={{ fontSize: 11.5, color: T.sbTextDim }}>{MOCK_USER.dept}</div>
+          </div>
+        </SbFade>
+      </div>
+    </aside>
+  );
+}
+
+// ─── 탑바 ────────────────────────────────────────────────────────────────────
+
+function TopBar({ onToggle }: { onToggle: () => void }) {
+  return (
+    <header style={{
+      display: "flex", alignItems: "center", gap: 16,
+      padding: "18px 24px 18px 12px", borderBottom: `1px solid ${T.border}`,
+      background: T.bgCanvas, position: "sticky", top: 0, zIndex: 5,
+    }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+          background: "transparent", border: `1px solid ${T.border}`,
+          color: T.ink400, cursor: "pointer",
+        }}
+      >
+        <PanelLeft size={16} />
+      </button>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 12, color: T.ink500, fontWeight: 500 }}>대시보드</div>
+        <div style={{ fontSize: 16, color: T.ink900, fontWeight: 700, letterSpacing: "-.01em" }}>홈</div>
+      </div>
+      <div style={{ flex: 1, maxWidth: 520, marginLeft: 24, position: "relative" }}>
+        <Search size={16} style={{
+          position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: T.ink400,
+        }} />
+        <input
+          placeholder="법령, 판례, 계약 조항을 검색해보세요"
+          style={{
+            width: "100%", height: 40, padding: "0 40px 0 38px",
+            border: `1px solid ${T.border}`, borderRadius: 10,
+            background: T.bgCardSoft, color: T.ink900,
+            fontFamily: "inherit", fontSize: 14, outline: "none",
+          }}
+        />
+        <kbd style={{
+          position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+          fontSize: 10.5, color: T.ink500, background: T.bgCard,
+          border: `1px solid ${T.border}`, borderRadius: 6, padding: "3px 6px",
+          fontFamily: "monospace",
+        }}>⌘ K</kbd>
+      </div>
+      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+        <button type="button" style={{
+          display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px",
+          borderRadius: 8, border: `1px solid ${T.border}`,
+          background: "transparent", color: T.ink700, cursor: "pointer", fontSize: 12.5,
+          fontFamily: "inherit",
+        }}>
+          <Bell size={16} />
+          <span style={{ width: 8, height: 8, borderRadius: 99, background: T.primary, marginLeft: -2 }} />
+        </button>
+        <button type="button" style={{
+          display: "inline-flex", alignItems: "center", padding: "6px 10px",
+          borderRadius: 8, border: `1px solid ${T.border}`,
+          background: "transparent", color: T.ink700, cursor: "pointer", fontSize: 12.5,
+          fontFamily: "inherit",
+        }}>도움말</button>
+      </div>
+    </header>
+  );
+}
+
+// ─── 히어로 ───────────────────────────────────────────────────────────────────
+
+function HeroDecoration() {
+  return (
+    <svg width="320" height="320" viewBox="0 0 320 320"
+      style={{ position: "absolute", right: -60, top: -80, opacity: 0.35, pointerEvents: "none" }}>
+      <circle cx="160" cy="160" r="140" fill="none" stroke={T.primary} strokeWidth="1.2" strokeDasharray="2 6" />
+      <circle cx="160" cy="160" r="100" fill="none" stroke={T.primary} strokeWidth="1.2" />
+      <circle cx="160" cy="160" r="60"  fill={T.primary} opacity={0.18} />
+      <g transform="translate(140 140)" stroke={T.primary700} strokeWidth="1.6" fill="none" strokeLinecap="round">
+        <path d="M20 0v40" /><path d="M5 8h30" />
+        <path d="M5 8l-7 16a8 8 0 0 0 14 0z" />
+        <path d="M35 8l-7 16a8 8 0 0 0 14 0z" />
+        <path d="M12 44h16" />
+      </g>
+    </svg>
+  );
+}
+
+function Hero() {
+  const [label, setLabel] = useState("오늘도 든든하게");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    const h = new Date().getHours();
+    const days = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
+    const period = h < 12 ? "오전" : h < 18 ? "오후" : "저녁";
+    setLabel(`${days[new Date().getDay()]} ${period} · 오늘도 든든하게`);
+  }, []);
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  return (
+    <section style={{
+      position: "relative", overflow: "hidden", borderRadius: 24,
+      background: "linear-gradient(180deg,#EEF2FF 0%,#FAFBFF 100%)",
+      border: "1px solid #D4DEFF", padding: "40px 44px 36px",
+      opacity: mounted ? 1 : 0,
+      transform: mounted ? "translateY(0)" : "translateY(18px)",
+      transition: "opacity .55s cubic-bezier(.4,0,.2,1), transform .55s cubic-bezier(.4,0,.2,1)",
+    }}>
+      <HeroDecoration />
+      <div style={{ position: "relative", maxWidth: 760 }}>
+        <div style={{
+          display: "inline-flex", alignItems: "center", gap: 8,
+          padding: "0.5px 12px", borderRadius: 999,
+          background: "rgba(255,255,255,.7)", border: "1px solid #C5D0FA",
+          fontSize: 12, fontWeight: 600, color: T.primary700,
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: 99, background: T.primary }} />
+          {label}
+        </div>
+        <h1 style={{
+          fontSize: 38, fontWeight: 800, color: T.ink900,
+          letterSpacing: "-.025em", lineHeight: 1.18, marginTop: 14,
+        }}>
+          안녕하세요 씨지인사이드 님,<br />
+          <span style={{ color: T.primary700 }}>오늘 업무</span>, 같이 정리해볼까요?
+        </h1>
+        <p style={{ fontSize: 15, color: T.ink700, marginTop: 20, lineHeight: 1.6}}>
+          법령 Q&A, 계약서 검토, 초안 작성 — 필요한 조문과 판례를 근거로 바로 정리해드릴게요.
+        </p>
+        <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
+          {HERO_METRICS.map((m, i) => (
+            <Fragment key={m.k}>
+              {i > 0 && <span style={{ width: 1, height: 16, background: "rgba(20,24,42,.10)" }} />}
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                <span style={{ fontSize: 10.5, color: T.ink500, fontWeight: 500 }}>{m.k}</span>
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: T.ink900, letterSpacing: "-.02em" }}>{m.v}</span>
+              </div>
+            </Fragment>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── 기능 카드 일러스트 ───────────────────────────────────────────────────────
+
+function IllustQnA({ accent }: { accent: string }) {
+  return (
+    <svg width="100%" height="100%" viewBox="0 0 280 96" preserveAspectRatio="xMidYMid slice">
+      <g transform="translate(20 22)">
+        <rect width="120" height="22" rx="11" fill={accent} opacity={0.22} />
+        <rect width="80"  height="22" y="30" rx="11" fill={accent} opacity={0.18} />
+        <rect width="140" height="22" y="60" x="100" rx="11" fill={accent} opacity={0.34} />
+      </g>
+      <circle cx="246" cy="22" r="14" fill={accent} opacity={0.5} />
+      <path d="M244 18l4 4-4 4" stroke="#fff" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IllustReview({ accent }: { accent: string }) {
+  return (
+    <svg width="100%" height="100%" viewBox="0 0 280 96" preserveAspectRatio="xMidYMid slice">
+      <rect x="100" y="14" width="100" height="68" rx="6" fill="#fff" stroke={accent} strokeOpacity={0.5} />
+      <rect x="110" y="24" width="80" height="4" rx="2" fill={accent} opacity={0.5} />
+      <rect x="110" y="34" width="60" height="4" rx="2" fill={accent} opacity={0.25} />
+      <rect x="110" y="44" width="70" height="4" rx="2" fill={accent} opacity={0.25} />
+      <rect x="110" y="54" width="40" height="4" rx="2" fill="#D9484A" opacity={0.7} />
+      <rect x="110" y="64" width="55" height="4" rx="2" fill={accent} opacity={0.25} />
+      <circle cx="218" cy="56" r="14" fill={accent} />
+      <path d="M212 56l4 4 8-8" stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IllustDraft({ accent }: { accent: string }) {
+  return (
+    <svg width="100%" height="100%" viewBox="0 0 280 96" preserveAspectRatio="xMidYMid slice">
+      <rect x="80" y="12" width="120" height="72" rx="6" fill="#fff" stroke={accent} strokeOpacity={0.5} />
+      <rect x="90" y="22" width="50" height="4"  rx="2"   fill={accent} opacity={0.55} />
+      <rect x="90" y="32" width="100" height="3" rx="1.5" fill={accent} opacity={0.18} />
+      <rect x="90" y="40" width="80"  height="3" rx="1.5" fill={accent} opacity={0.18} />
+      <rect x="90" y="48" width="90"  height="3" rx="1.5" fill={accent} opacity={0.18} />
+      <rect x="90" y="60" width="50"  height="14" rx="3"  fill={accent} opacity={0.5}  />
+      <g transform="translate(195 60)">
+        <path d="M0 14 L18 -4 L24 2 L6 20 Z" fill={accent} />
+        <path d="M0 14 L0 22 L8 20 Z" fill={accent} opacity={0.7} />
+      </g>
+    </svg>
+  );
+}
+
+// ─── 기능 카드 ────────────────────────────────────────────────────────────────
+
+function FeatureCard({ num, title, tagline, desc, bullets, cta, accent, bg, illust, stat, example, href }: typeof FEATURES[0]) {
+  return (
+    <div style={{
+      background: T.bgCard, border: `1px solid ${T.border}`,
+      borderRadius: 18, padding: 22,
+      display: "flex", flexDirection: "column", gap: 12,
+      position: "relative", overflow: "hidden",
+      boxShadow: T.shadowCard,
+    }}>
+      {/* 일러스트 블록 */}
+      <div style={{ height: 96, borderRadius: 12, background: bg, position: "relative", overflow: "hidden", marginBottom: 4 }}>
+        {illust === "qna"    && <IllustQnA    accent={accent} />}
+        {illust === "review" && <IllustReview accent={accent} />}
+        {illust === "draft"  && <IllustDraft  accent={accent} />}
+        <span style={{
+          position: "absolute", top: 10, left: 12,
+          fontSize: 11, fontWeight: 700, color: accent,
+          fontFamily: "monospace", letterSpacing: ".05em",
+        }}>{num}</span>
+        {stat && (
+          <span style={{
+            position: "absolute", top: 10, right: 12,
+            display: "inline-flex", alignItems: "center", gap: 4,
+            padding: "3px 8px", borderRadius: 999,
+            background: "rgba(255,255,255,.85)",
+            fontSize: 10.5, fontWeight: 600, color: accent,
+            backdropFilter: "blur(4px)",
+          }}>
+            <span style={{ width: 5, height: 5, borderRadius: 99, background: accent }} />
+            {stat.k} {stat.v}
+          </span>
+        )}
+      </div>
+
+      {/* 텍스트 */}
+      <div>
+        <h3 style={{ fontSize: 18, fontWeight: 700, color: T.ink900, letterSpacing: "-.015em" }}>{title}</h3>
+        <div style={{ fontSize: 12.5, color: accent, fontWeight: 600, marginTop: 2 }}>{tagline}</div>
+        <p style={{ fontSize: 13, color: T.ink500, lineHeight: 1.55, marginTop: 8 }}>{desc}</p>
+      </div>
+
+      {/* 불릿 */}
+      <ul style={{ display: "flex", flexDirection: "column", gap: 6, paddingTop: 4, listStyle: "none", padding: 0, margin: 0 }}>
+        {bullets.map(b => (
+          <li key={b} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: T.ink700 }}>
+            <span style={{
+              width: 16, height: 16, borderRadius: 99, background: bg, color: accent, flexShrink: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <Check size={10} strokeWidth={2.4} />
+            </span>
+            {b}
+          </li>
+        ))}
+      </ul>
+
+      {/* 예시 */}
+      <div style={{
+        marginTop: 4, padding: "10px 12px", background: bg, borderRadius: 10,
+        display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: T.ink700,
+      }}>
+        <span style={{ fontSize: 10.5, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: ".06em", flexShrink: 0 }}>예시</span>
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{example}</span>
+      </div>
+
+      {/* CTA */}
+      <Link href={href} style={{
+        marginTop: "auto", alignSelf: "stretch",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        padding: "12px 20px", borderRadius: 12,
+        background: accent, color: "#fff",
+        fontSize: 14, fontWeight: 700, textDecoration: "none",
+        boxShadow: `0 2px 8px ${accent}55`,
+      }}>
+        {cta} <ArrowRight size={15} />
+      </Link>
+    </div>
+  );
+}
+
+function FeatureCards() {
+  return (
+    <section>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 18, gap: 16, flexWrap: "wrap" }}>
+        <div>
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: T.ink900, letterSpacing: "-.015em" }}>무엇을 도와드릴까요?</h2>
+          <p style={{ fontSize: 13, color: T.ink500, marginTop: 4 }}>세 가지 기능을 선택하면 각각의 작업 페이지로 이어져요.</p>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <Pill tone="primary" style={{ fontSize: 11.5 }}>이번 주 인기 · 법령 Q&A</Pill>
+          <Pill style={{ fontSize: 11.5 }}>3가지로 충분해요</Pill>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16 }}>
+        {FEATURES.map(f => <FeatureCard key={f.num} {...f} />)}
+      </div>
+    </section>
+  );
+}
+
+// ─── 위젯들 ───────────────────────────────────────────────────────────────────
+
+function HistoryWidget() {
+  return (
+    <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: 16, padding: 24, boxShadow: T.shadowCard }}>
+      <SectionHead
+        icon={<Clock size={16} />}
+        title="이어서 이야기하기"
+        sub="최근 챗봇 대화"
+        action={
+          <Link href="/history" style={{
+            display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 10px",
+            borderRadius: 8, border: `1px solid ${T.border}`,
+            background: "transparent", color: T.ink700, fontSize: 12.5,
+            fontWeight: 500, textDecoration: "none",
+          }}>전체 →</Link>
+        }
+      />
+      <ul style={{ marginTop: 8, listStyle: "none", padding: 0, margin: 0 }}>
+        {HISTORY.map((h, i) => (
+          <li key={h.id} style={{
+            padding: "12px 0",
+            borderTop: i === 0 ? "none" : `1px solid ${T.borderSoft}`,
+            display: "flex", alignItems: "flex-start", gap: 12,
+          }}>
+            <span style={{ fontSize: 11, color: T.ink400, fontFamily: "monospace", marginTop: 2, minWidth: 24 }}>0{i + 1}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, color: T.ink900, fontWeight: 500, lineHeight: 1.4 }}>{h.q}</div>
+              <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
+                <Pill tone={h.tone} style={{ fontSize: 10.5 }}>{h.tag}</Pill>
+                <span style={{ fontSize: 11.5, color: T.ink400 }}>{h.when}</span>
+              </div>
+            </div>
+            <ArrowRight size={14} color={T.ink300} style={{ marginTop: 4, flexShrink: 0 }} />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function DraftsWidget() {
+  return (
+    <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: 16, padding: 24, boxShadow: T.shadowCard }}>
+      <SectionHead icon={<FilePen size={16} />} title="작성 중인 초안" sub="자동 저장됨" />
+      <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+        {DRAFTS.map(d => (
+          <a key={d.id} href="/contract-draft" style={{
+            display: "block", padding: 12, borderRadius: 10,
+            background: T.bgCardSoft, border: `1px dashed ${T.borderStrong}`,
+            textDecoration: "none",
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: T.ink900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</div>
+            <div style={{ fontSize: 11.5, color: T.ink500, marginTop: 4 }}>{d.step} · {d.updated}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+              <div style={{ flex: 1, height: 4, background: T.ink200, borderRadius: 99, overflow: "hidden" }}>
+                <div style={{ width: `${d.progress}%`, height: "100%", background: T.primary }} />
+              </div>
+              <span style={{ fontSize: 11.5, fontWeight: 600, color: T.primary700 }}>이어쓰기 →</span>
+            </div>
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function UsageWidget() {
+  const u = USAGE;
+  return (
+    <div style={{
+      background: `linear-gradient(180deg,${T.bgCard} 50%,#EEF2FF 100%)`,
+      border: `1px solid ${T.border}`, borderRadius: 16, padding: 24,
+      boxShadow: T.shadowCard,
+    }}>
+      <SectionHead icon={<TrendingUp size={16} />} title="이번 달 사용량" sub={u.period} />
+      <div style={{ marginTop: 14, display: "flex", alignItems: "baseline", gap: 6 }}>
+        <span style={{ fontSize: 30, fontWeight: 700, color: T.ink900, letterSpacing: "-.02em" }}>{u.used}</span>
+        <span style={{ fontSize: 13, color: T.ink500, fontWeight: 500 }}>/ {u.quota} 건</span>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: T.green, fontWeight: 600 }}>↗ +{u.deltaPct}%</span>
+      </div>
+      <div style={{ height: 6, background: T.ink200, borderRadius: 99, overflow: "hidden", marginTop: 10 }}>
+        <div style={{ display: "flex", height: "100%" }}>
+          {u.breakdown.map(b => (
+            <div key={b.key} style={{ width: `${(b.value / u.quota) * 100}%`, background: b.color }} />
+          ))}
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginTop: 14 }}>
+        {u.breakdown.map(b => (
+          <div key={b.key} style={{ borderTop: `2px solid ${b.color}`, paddingTop: 8 }}>
+            <div style={{ fontSize: 11, color: T.ink500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{b.label}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: T.ink900, marginTop: 2, letterSpacing: "-.02em" }}>
+              {b.value}<span style={{ fontSize: 11, color: T.ink500, fontWeight: 500 }}> 건</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NoticesWidget() {
+  return (
+    <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: 16, padding: 24, boxShadow: T.shadowCard }}>
+      <SectionHead icon={<Newspaper size={16} />} title="공지사항" />
+      <ul style={{ marginTop: 8, listStyle: "none", padding: 0 }}>
+        {NOTICES.map((n, i) => (
+          <li key={n.id} style={{ padding: "10px 0", borderTop: i === 0 ? "none" : `1px solid ${T.borderSoft}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <Pill tone="warm" style={{ fontSize: 10.5 }}>{n.tag}</Pill>
+              <span style={{ marginLeft: "auto", fontSize: 11, color: T.ink400 }}>{n.when}</span>
+            </div>
+            <div style={{ fontSize: 12.5, color: T.ink800, marginTop: 6, lineHeight: 1.5 }}>{n.title}</div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// ─── 메인 ─────────────────────────────────────────────────────────────────────
+
+export default function Dashboard() {
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <div style={{
+      width: "100%", height: "100vh", display: "flex",
+      background: T.bgApp, overflow: "hidden",
+      fontFamily: '"Pretendard","Pretendard Variable",-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif',
+      color: T.ink800, fontSize: 14, lineHeight: 1.45,
+      letterSpacing: "-.005em",
+    }}>
+      <Sidebar collapsed={collapsed} />
+      <main style={{
+        flex: 1, minWidth: 0, display: "flex", flexDirection: "column",
+        overflowY: "auto", background: T.bgCanvas,
+      }}>
+        <TopBar onToggle={() => setCollapsed(c => !c)} />
+        <div style={{ padding: "16px 40px 40px", display: "flex", flexDirection: "column", gap: 28 }}>
+          <Hero />
+          <FeatureCards />
+          <section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <HistoryWidget />
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <DraftsWidget />
+              <UsageWidget />
+              <NoticesWidget />
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  );
+}

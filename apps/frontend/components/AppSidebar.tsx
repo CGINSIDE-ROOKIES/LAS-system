@@ -139,7 +139,7 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border">
-        {pathname !== "/" ? null : collapsed ? (
+        {pathname !== "/chat" ? null : collapsed ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="flex items-center justify-center py-3 cursor-default">
