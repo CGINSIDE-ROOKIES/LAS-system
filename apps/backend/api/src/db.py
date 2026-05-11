@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import logging
 import os
 from pathlib import Path
@@ -49,6 +50,22 @@ def close_pool() -> None:
 
 def get_db():
     """FastAPI Depends()용 커넥션 제공자."""
+    if _pool is None:
+        raise RuntimeError("DB pool이 초기화되지 않았습니다.")
+    conn = _pool.getconn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        _pool.putconn(conn)
+
+
+@contextmanager
+def db_connection():
+    """Background 작업/SSE polling에서 사용할 커넥션 컨텍스트."""
     if _pool is None:
         raise RuntimeError("DB pool이 초기화되지 않았습니다.")
     conn = _pool.getconn()

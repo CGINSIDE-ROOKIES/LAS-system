@@ -82,7 +82,7 @@ from src.db import close_pool, init_pool
 from src.dependencies import warmup_dependencies
 from rag_pipeline.observability import initialize_langfuse, shutdown_langfuse
 from rag_pipeline.retrieval.common import EmbeddingError, LLMError, LLMTimeoutError, RetrievalError
-from src.routers import health, qa, graph, history
+from src.routers import document_reviews, graph, health, history, qa
 
 
 # ─── 앱 생명주기 관리 (Lifespan) ──────────────────────────────────────────────
@@ -185,3 +185,4 @@ app.include_router(health.router)
 app.include_router(qa.router, prefix="/api/v1/qa")
 app.include_router(history.router, prefix="/api/v1/qa")
 app.include_router(graph.router, prefix="/api/v1/graph")
+app.include_router(document_reviews.router, prefix="/api/v1/document-reviews")

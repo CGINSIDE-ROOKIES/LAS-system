@@ -1,0 +1,8 @@
+NEXT_PUBLIC_API_URL=http://localhost:7999
+BACKEND_INTERNAL_URL=http://localhost:8000
+
+# NEXT_PUBLIC_API_URL를 비워두면 브라우저는 same-origin /api/* 를 호출하고,
+# Next.js 서버가 BACKEND_INTERNAL_URL로 프록시합니다.
+
+# 쉼표로 구분된 허용 프레임 출처 (미설정 시 'self'만 허용)
+# ALLOWED_FRAME_ORIGINS=https://a.com,https://b.com

@@ -66,6 +66,16 @@ LLM_MAX_TOKENS=4096
 | `POST` | `/api/v1/qa/{id}/feedback` | 답변 피드백 제출 (👍/👎) |
 | `POST` | `/api/v1/graph/query` | 자연어 질의 → 법령 그래프 조회 (LLM 사용) |
 | `POST` | `/api/v1/graph/expand` | 법령 노드 클릭 시 연결 법령 직접 조회 (LLM 불필요) |
+| `POST` | `/api/v1/document-reviews` | 계약서 업로드 후 문서 검토 작업 생성 |
+| `GET` | `/api/v1/document-reviews/{id}` | 문서 검토 작업 상태 조회 |
+| `GET` | `/api/v1/document-reviews/{id}/events` | 문서 검토 작업 SSE 이벤트 |
+| `GET` | `/api/v1/document-reviews/{id}/preview.html` | 문서 검토 HTML 미리보기 |
+| `GET` | `/api/v1/document-reviews/{id}/suggestions` | HITL 제안 목록 |
+| `POST` | `/api/v1/document-reviews/{id}/resume` | HITL 결정 반영 후 검토 재개 |
+| `POST` | `/api/v1/document-reviews/{id}/apply` | 수락한 수정안 원본 문서에 적용 |
+| `GET` | `/api/v1/document-reviews/{id}/download` | 수정 문서 다운로드 |
+
+문서 검토 프론트엔드 연동 상세는 [`docs/document_reviews_frontend.md`](docs/document_reviews_frontend.md)를 참고한다.
 
 ### POST /api/v1/qa/ask
 
