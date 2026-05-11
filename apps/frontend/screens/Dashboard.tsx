@@ -5,8 +5,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, Fragment } from "react";
 import {
   LayoutDashboard, MessageSquare, FileSearch, FilePen,
-  Clock, Settings, Zap, Check, ArrowRight,
-  Search, Bell, TrendingUp, Newspaper, Scale, ChevronLeft, ChevronRight, PanelLeft,
+  Clock, Settings, Check, ArrowRight,
+  Search, Bell, TrendingUp, Newspaper, Scale, PanelLeft,
 } from "lucide-react";
 
 // ─── 디자인 토큰 ─────────────────────────────────────────────────────────────
@@ -196,6 +196,7 @@ function SbFade({ collapsed, children }: { collapsed: boolean; children: React.R
 
 function Sidebar({ collapsed }: { collapsed: boolean }) {
   const pathname = usePathname();
+  const [usageHovered, setUsageHovered] = useState(false);
 
   const activeId =
     pathname === "/"                ? "home"    :
@@ -283,31 +284,33 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
         </ul>
       </nav>
 
-      {/* 사용량 게이지 */}
-      <div style={{
-        overflow: "hidden",
-        maxHeight: collapsed ? 0 : 120,
-        opacity: collapsed ? 0 : 1,
-        transition: "max-height .2s cubic-bezier(.4,0,.2,1), opacity .15s ease",
-        padding: collapsed ? "0 14px" : "10px 14px 14px",
-      }}>
-        <div style={{
-          background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)",
-          borderRadius: 12, padding: 14,
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <Zap size={14} />
-            <span style={{ fontSize: 12, color: T.sbStrong, fontWeight: 600 }}>이번 달 사용량</span>
-          </div>
-          <div style={{ height: 6, background: "rgba(255,255,255,.08)", borderRadius: 99, overflow: "hidden" }}>
+      {/* 사용량 미니 인디케이터 */}
+      {!collapsed && (
+        <div
+          style={{ padding: "4px 14px 10px", position: "relative" }}
+          onMouseEnter={() => setUsageHovered(true)}
+          onMouseLeave={() => setUsageHovered(false)}
+        >
+          <div style={{ height: 3, background: "rgba(255,255,255,.08)", borderRadius: 99, overflow: "hidden" }}>
             <div style={{ width: "64%", height: "100%", background: T.primary }} />
           </div>
-          <div style={{ marginTop: 8, fontSize: 11.5, color: T.sbTextDim, display: "flex", justifyContent: "space-between" }}>
+          <div style={{ marginTop: 5, fontSize: 10.5, color: T.sbTextDim, display: "flex", justifyContent: "space-between" }}>
             <span>320 / 500 질의</span>
             <span style={{ color: T.sbStrong }}>64%</span>
           </div>
+          {usageHovered && (
+            <div style={{
+              position: "absolute", bottom: "calc(100% + 4px)", left: 14, right: 14,
+              background: "#1a2040", border: "1px solid rgba(255,255,255,.12)",
+              borderRadius: 8, padding: "7px 10px",
+              fontSize: 11.5, color: T.sbText, zIndex: 100,
+              whiteSpace: "nowrap",
+            }}>
+              법령 Q&amp;A 84 · 검토 11 · 초안 6
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* 유저 */}
       <div style={{
@@ -402,8 +405,8 @@ function TopBar({ onToggle }: { onToggle: () => void }) {
 
 function HeroDecoration() {
   return (
-    <svg width="320" height="320" viewBox="0 0 320 320"
-      style={{ position: "absolute", right: -60, top: -80, opacity: 0.35, pointerEvents: "none" }}>
+    <svg width="160" height="160" viewBox="0 0 320 320"
+      style={{ position: "absolute", right: -30, top: -40, opacity: 0.35, pointerEvents: "none" }}>
       <circle cx="160" cy="160" r="140" fill="none" stroke={T.primary} strokeWidth="1.2" strokeDasharray="2 6" />
       <circle cx="160" cy="160" r="100" fill="none" stroke={T.primary} strokeWidth="1.2" />
       <circle cx="160" cy="160" r="60"  fill={T.primary} opacity={0.18} />
@@ -418,15 +421,7 @@ function HeroDecoration() {
 }
 
 function Hero() {
-  const [label, setLabel] = useState("오늘도 든든하게");
   const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    const h = new Date().getHours();
-    const days = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
-    const period = h < 12 ? "오전" : h < 18 ? "오후" : "저녁";
-    setLabel(`${days[new Date().getDay()]} ${period} · 오늘도 든든하게`);
-  }, []);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setMounted(true));
@@ -435,41 +430,32 @@ function Hero() {
 
   return (
     <section style={{
-      position: "relative", overflow: "hidden", borderRadius: 24,
+      position: "relative", overflow: "hidden", borderRadius: 20,
       background: "linear-gradient(180deg,#EEF2FF 0%,#FAFBFF 100%)",
-      border: "1px solid #D4DEFF", padding: "40px 44px 36px",
+      border: "1px solid #D4DEFF", padding: "24px 44px 20px",
       opacity: mounted ? 1 : 0,
       transform: mounted ? "translateY(0)" : "translateY(18px)",
       transition: "opacity .55s cubic-bezier(.4,0,.2,1), transform .55s cubic-bezier(.4,0,.2,1)",
     }}>
       <HeroDecoration />
       <div style={{ position: "relative", maxWidth: 760 }}>
-        <div style={{
-          display: "inline-flex", alignItems: "center", gap: 8,
-          padding: "0.5px 12px", borderRadius: 999,
-          background: "rgba(255,255,255,.7)", border: "1px solid #C5D0FA",
-          fontSize: 12, fontWeight: 600, color: T.primary700,
-        }}>
-          <span style={{ width: 6, height: 6, borderRadius: 99, background: T.primary }} />
-          {label}
-        </div>
         <h1 style={{
-          fontSize: 38, fontWeight: 800, color: T.ink900,
-          letterSpacing: "-.025em", lineHeight: 1.18, marginTop: 14,
+          fontSize: 26, fontWeight: 800, color: T.ink900,
+          letterSpacing: "-.025em", lineHeight: 1.25, margin: 0,
         }}>
-          안녕하세요 씨지인사이드 님,<br />
-          <span style={{ color: T.primary700 }}>오늘 업무</span>, 같이 정리해볼까요?
+          안녕하세요 씨지인사이드 님,{" "}
+          <span style={{ color: T.primary700 }}>오늘 업무</span>도 같이 정리해볼까요?
         </h1>
-        <p style={{ fontSize: 15, color: T.ink700, marginTop: 20, lineHeight: 1.6}}>
-          법령 Q&A, 계약서 검토, 초안 작성 — 필요한 조문과 판례를 근거로 바로 정리해드릴게요.
+        <p style={{ fontSize: 13, color: T.ink500, marginTop: 10, lineHeight: 1.5 }}>
+          법령 Q&amp;A · 계약서 검토 · 초안 작성 — 조문과 판례를 근거로 바로 정리해드려요.
         </p>
-        <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
+        <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           {HERO_METRICS.map((m, i) => (
             <Fragment key={m.k}>
-              {i > 0 && <span style={{ width: 1, height: 16, background: "rgba(20,24,42,.10)" }} />}
-              <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                <span style={{ fontSize: 10.5, color: T.ink500, fontWeight: 500 }}>{m.k}</span>
-                <span style={{ fontSize: 13.5, fontWeight: 700, color: T.ink900, letterSpacing: "-.02em" }}>{m.v}</span>
+              {i > 0 && <span style={{ width: 1, height: 14, background: "rgba(20,24,42,.10)" }} />}
+              <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+                <span style={{ fontSize: 10, color: T.ink400, fontWeight: 500 }}>{m.k}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: T.ink900, letterSpacing: "-.02em" }}>{m.v}</span>
               </div>
             </Fragment>
           ))}
@@ -484,13 +470,19 @@ function Hero() {
 function IllustQnA({ accent }: { accent: string }) {
   return (
     <svg width="100%" height="100%" viewBox="0 0 280 96" preserveAspectRatio="xMidYMid slice">
-      <g transform="translate(20 22)">
-        <rect width="120" height="22" rx="11" fill={accent} opacity={0.22} />
-        <rect width="80"  height="22" y="30" rx="11" fill={accent} opacity={0.18} />
-        <rect width="140" height="22" y="60" x="100" rx="11" fill={accent} opacity={0.34} />
-      </g>
-      <circle cx="246" cy="22" r="14" fill={accent} opacity={0.5} />
-      <path d="M244 18l4 4-4 4" stroke="#fff" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      {/* 질문 말풍선 (좌상단) */}
+      <rect x="14" y="10" width="122" height="40" rx="13" fill={accent} opacity={0.13} />
+      {/* 질문 텍스트 라인 */}
+      <rect x="26" y="23" width="66" height="5" rx="2.5" fill={accent} opacity={0.3} />
+      <rect x="26" y="34" width="46" height="5" rx="2.5" fill={accent} opacity={0.18} />
+      {/* 답변 말풍선 (우하단) */}
+      <rect x="96" y="46" width="120" height="38" rx="13" fill={accent} opacity={0.18} />
+      {/* 답변 텍스트 라인 */}
+      <rect x="108" y="57" width="64" height="4" rx="2" fill={accent} opacity={0.35} />
+      <rect x="108" y="68" width="44" height="4" rx="2" fill={accent} opacity={0.22} />
+      {/* 우측 상단 액센트 */}
+      <circle cx="248" cy="20" r="13" fill={accent} opacity={0.4} />
+      <path d="M244 16l6 4-6 4" stroke="#fff" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -612,15 +604,12 @@ function FeatureCard({ num, title, tagline, desc, bullets, cta, accent, bg, illu
 function FeatureCards() {
   return (
     <section>
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 18, gap: 16, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 18, gap: 16 }}>
         <div>
           <h2 style={{ fontSize: 22, fontWeight: 700, color: T.ink900, letterSpacing: "-.015em" }}>무엇을 도와드릴까요?</h2>
           <p style={{ fontSize: 13, color: T.ink500, marginTop: 4 }}>세 가지 기능을 선택하면 각각의 작업 페이지로 이어져요.</p>
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <Pill tone="primary" style={{ fontSize: 11.5 }}>이번 주 인기 · 법령 Q&A</Pill>
-          <Pill style={{ fontSize: 11.5 }}>3가지로 충분해요</Pill>
-        </div>
+        <Pill tone="primary" style={{ fontSize: 11.5, flexShrink: 0 }}>이번 주 인기 · 법령 Q&A</Pill>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16 }}>
         {FEATURES.map(f => <FeatureCard key={f.num} {...f} />)}
@@ -632,28 +621,45 @@ function FeatureCards() {
 // ─── 위젯들 ───────────────────────────────────────────────────────────────────
 
 function HistoryWidget() {
+  const [hoveredId, setHoveredId] = useState<number | null>(null);
+
   return (
-    <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: 16, padding: 24, boxShadow: T.shadowCard }}>
+    <div style={{
+      background: T.bgCard,
+      border: `1px solid ${T.border}`,
+      borderLeft: `4px solid rgba(61,82,245,0.18)`,
+      borderRadius: 16, padding: 24, boxShadow: T.shadowCard,
+    }}>
       <SectionHead
         icon={<Clock size={16} />}
         title="이어서 이야기하기"
         sub="최근 챗봇 대화"
         action={
           <Link href="/history" style={{
-            display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 10px",
-            borderRadius: 8, border: `1px solid ${T.border}`,
-            background: "transparent", color: T.ink700, fontSize: 12.5,
-            fontWeight: 500, textDecoration: "none",
+            display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px",
+            borderRadius: 8, border: `1px solid ${T.primary100}`,
+            background: T.primary50, color: T.primary700, fontSize: 12.5,
+            fontWeight: 600, textDecoration: "none",
           }}>전체 →</Link>
         }
       />
       <ul style={{ marginTop: 8, listStyle: "none", padding: 0, margin: 0 }}>
         {HISTORY.map((h, i) => (
-          <li key={h.id} style={{
-            padding: "12px 0",
-            borderTop: i === 0 ? "none" : `1px solid ${T.borderSoft}`,
-            display: "flex", alignItems: "flex-start", gap: 12,
-          }}>
+          <li
+            key={h.id}
+            onMouseEnter={() => setHoveredId(h.id)}
+            onMouseLeave={() => setHoveredId(null)}
+            style={{
+              padding: "11px 10px",
+              marginLeft: -10, marginRight: -10,
+              borderRadius: 8,
+              borderTop: i === 0 ? "none" : `1px solid ${T.borderSoft}`,
+              display: "flex", alignItems: "flex-start", gap: 12,
+              background: hoveredId === h.id ? T.bgCardSoft : "transparent",
+              cursor: "pointer",
+              transition: "background .12s ease",
+            }}
+          >
             <span style={{ fontSize: 11, color: T.ink400, fontFamily: "monospace", marginTop: 2, minWidth: 24 }}>0{i + 1}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13.5, color: T.ink900, fontWeight: 500, lineHeight: 1.4 }}>{h.q}</div>
@@ -662,7 +668,11 @@ function HistoryWidget() {
                 <span style={{ fontSize: 11.5, color: T.ink400 }}>{h.when}</span>
               </div>
             </div>
-            <ArrowRight size={14} color={T.ink300} style={{ marginTop: 4, flexShrink: 0 }} />
+            <ArrowRight
+              size={14}
+              color={hoveredId === h.id ? T.primary : T.ink300}
+              style={{ marginTop: 4, flexShrink: 0, transition: "color .12s ease" }}
+            />
           </li>
         ))}
       </ul>
@@ -671,23 +681,40 @@ function HistoryWidget() {
 }
 
 function DraftsWidget() {
+  const [hoveredId, setHoveredId] = useState<number | null>(null);
+
   return (
-    <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: 16, padding: 24, boxShadow: T.shadowCard }}>
+    <div style={{
+      background: T.bgCard,
+      border: `1px solid ${T.border}`,
+      borderLeft: `4px solid rgba(224,164,58,0.22)`,
+      borderRadius: 16, padding: 24, boxShadow: T.shadowCard,
+    }}>
       <SectionHead icon={<FilePen size={16} />} title="작성 중인 초안" sub="자동 저장됨" />
-      <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
         {DRAFTS.map(d => (
-          <a key={d.id} href="/contract-draft" style={{
-            display: "block", padding: 12, borderRadius: 10,
-            background: T.bgCardSoft, border: `1px dashed ${T.borderStrong}`,
-            textDecoration: "none",
-          }}>
+          <a
+            key={d.id}
+            href="/contract-draft"
+            onMouseEnter={() => setHoveredId(d.id)}
+            onMouseLeave={() => setHoveredId(null)}
+            style={{
+              display: "block", padding: 12, borderRadius: 10,
+              background: hoveredId === d.id ? T.amberSoft : T.bgCardSoft,
+              border: `1px dashed ${hoveredId === d.id ? T.amber : T.borderStrong}`,
+              textDecoration: "none",
+              transition: "background .12s ease, border-color .12s ease",
+            }}
+          >
             <div style={{ fontSize: 13, fontWeight: 600, color: T.ink900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</div>
             <div style={{ fontSize: 11.5, color: T.ink500, marginTop: 4 }}>{d.step} · {d.updated}</div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
               <div style={{ flex: 1, height: 4, background: T.ink200, borderRadius: 99, overflow: "hidden" }}>
-                <div style={{ width: `${d.progress}%`, height: "100%", background: T.primary }} />
+                <div style={{ width: `${d.progress}%`, height: "100%", background: T.amber }} />
               </div>
-              <span style={{ fontSize: 11.5, fontWeight: 600, color: T.primary700 }}>이어쓰기 →</span>
+              <span style={{ fontSize: 11.5, fontWeight: 600, color: T.amberInk, display: "flex", alignItems: "center", gap: 3 }}>
+                이어쓰기 <ArrowRight size={12} />
+              </span>
             </div>
           </a>
         ))}
@@ -700,8 +727,8 @@ function UsageWidget() {
   const u = USAGE;
   return (
     <div style={{
-      background: `linear-gradient(180deg,${T.bgCard} 50%,#EEF2FF 100%)`,
-      border: `1px solid ${T.border}`, borderRadius: 16, padding: 24,
+      background: T.bgCardSoft,
+      border: `1px solid ${T.borderSoft}`, borderRadius: 16, padding: 24,
       boxShadow: T.shadowCard,
     }}>
       <SectionHead icon={<TrendingUp size={16} />} title="이번 달 사용량" sub={u.period} />
@@ -733,16 +760,23 @@ function UsageWidget() {
 
 function NoticesWidget() {
   return (
-    <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: 16, padding: 24, boxShadow: T.shadowCard }}>
-      <SectionHead icon={<Newspaper size={16} />} title="공지사항" />
-      <ul style={{ marginTop: 8, listStyle: "none", padding: 0 }}>
+    <div style={{
+      background: "transparent",
+      border: `1px solid ${T.borderSoft}`,
+      borderRadius: 16, padding: "14px 18px",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+        <Newspaper size={13} color={T.ink400} />
+        <span style={{ fontSize: 12, fontWeight: 600, color: T.ink500, letterSpacing: "-.005em" }}>공지사항</span>
+      </div>
+      <ul style={{ marginTop: 6, listStyle: "none", padding: 0 }}>
         {NOTICES.map((n, i) => (
-          <li key={n.id} style={{ padding: "10px 0", borderTop: i === 0 ? "none" : `1px solid ${T.borderSoft}` }}>
+          <li key={n.id} style={{ padding: "8px 0", borderTop: i === 0 ? "none" : `1px solid ${T.borderSoft}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <Pill tone="warm" style={{ fontSize: 10.5 }}>{n.tag}</Pill>
-              <span style={{ marginLeft: "auto", fontSize: 11, color: T.ink400 }}>{n.when}</span>
+              <span style={{ marginLeft: "auto", fontSize: 10.5, color: T.ink400 }}>{n.when}</span>
             </div>
-            <div style={{ fontSize: 12.5, color: T.ink800, marginTop: 6, lineHeight: 1.5 }}>{n.title}</div>
+            <div style={{ fontSize: 12, color: T.ink700, marginTop: 5, lineHeight: 1.5 }}>{n.title}</div>
           </li>
         ))}
       </ul>
@@ -772,7 +806,7 @@ export default function Dashboard() {
         <div style={{ padding: "16px 40px 40px", display: "flex", flexDirection: "column", gap: 28 }}>
           <Hero />
           <FeatureCards />
-          <section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <section style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
             <HistoryWidget />
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <DraftsWidget />
