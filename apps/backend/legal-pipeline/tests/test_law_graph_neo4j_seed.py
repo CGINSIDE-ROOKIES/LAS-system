@@ -2,6 +2,8 @@ from src.common.io_utils import write_jsonl
 from src.export.law_graph_neo4j_seed import (
     ARTICLE_NODE_QUERY,
     CASE_CITES_CASE_QUERY,
+    CASE_CHALLENGES_ARTICLE_QUERY,
+    CASE_CHALLENGES_LAW_QUERY,
     CASE_NODE_QUERY,
     CASE_RELATED_TO_ARTICLE_QUERY,
     CASE_RELATED_TO_LAW_QUERY,
@@ -29,6 +31,8 @@ def test_load_graph_seed_rows_and_manifest(tmp_path):
     write_jsonl([{"edge_id": "REFERS_TO_ARTICLE::article::001::1::article::002::2"}], base_dir / "graph_edges_refers_to_article.jsonl")
     write_jsonl([{"edge_id": "CASE_RELATED_TO_LAW::1"}], base_dir / "graph_edges_case_related_to_law.jsonl")
     write_jsonl([{"edge_id": "CASE_RELATED_TO_ARTICLE::1"}], base_dir / "graph_edges_case_related_to_article.jsonl")
+    write_jsonl([{"edge_id": "CASE_CHALLENGES_LAW::1"}], base_dir / "graph_edges_case_challenges_law.jsonl")
+    write_jsonl([{"edge_id": "CASE_CHALLENGES_ARTICLE::1"}], base_dir / "graph_edges_case_challenges_article.jsonl")
     write_jsonl([{"edge_id": "CASE_CITES_CASE::1"}], base_dir / "graph_edges_case_cites_case.jsonl")
 
     rows = load_graph_seed_rows(base_dir)
@@ -45,6 +49,8 @@ def test_load_graph_seed_rows_and_manifest(tmp_path):
         "refers_to_article_edge_count": 1,
         "case_related_to_law_edge_count": 1,
         "case_related_to_article_edge_count": 1,
+        "case_challenges_law_edge_count": 1,
+        "case_challenges_article_edge_count": 1,
         "case_cites_case_edge_count": 1,
     }
 
@@ -61,6 +67,8 @@ def test_iter_seed_operations_returns_expected_query_order():
         "refers_to_article_edges": [{"edge_id": "REFERS_TO_ARTICLE::article::001::1::article::002::2"}],
         "case_related_to_law_edges": [{"edge_id": "CASE_RELATED_TO_LAW::1"}],
         "case_related_to_article_edges": [{"edge_id": "CASE_RELATED_TO_ARTICLE::1"}],
+        "case_challenges_law_edges": [{"edge_id": "CASE_CHALLENGES_LAW::1"}],
+        "case_challenges_article_edges": [{"edge_id": "CASE_CHALLENGES_ARTICLE::1"}],
         "case_cites_case_edges": [{"edge_id": "CASE_CITES_CASE::1"}],
     }
 
@@ -76,5 +84,7 @@ def test_iter_seed_operations_returns_expected_query_order():
         REFERS_TO_ARTICLE_QUERY,
         CASE_RELATED_TO_LAW_QUERY,
         CASE_RELATED_TO_ARTICLE_QUERY,
+        CASE_CHALLENGES_LAW_QUERY,
+        CASE_CHALLENGES_ARTICLE_QUERY,
         CASE_CITES_CASE_QUERY,
     ]
