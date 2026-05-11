@@ -298,6 +298,83 @@ def test_build_legal_relation_records_uses_structured_article_reference_field(tm
     assert record["relation_confidence"] == 0.98
 
 
+def test_build_legal_relation_records_uses_detc_subject_article_reference_field(tmp_path):
+    raw_dir = tmp_path / "raw" / "02_related_legal_docs"
+    root = raw_dir / "파견근로자 보호 등에 관한 법률"
+    detail_path = root / "canonical" / "detc" / "case_detc_17713__detail.json"
+    _write_json(
+        detail_path,
+        {
+            "DetcService": {
+                "헌재결정례일련번호": "17713",
+                "사건명": "구 파견근로자보호 등에 관한 법률 제45조 위헌제청",
+                "사건번호": "2011헌가34",
+                "종국일자": "20111124",
+                "심판대상조문": (
+                    "구 파견근로자 보호 등에 관한 법률(1998. 2. 20. 법률 제5512호로 "
+                    "제정되고, 2006. 12. 21. 법률 제8076호로 개정되기 전의 것) "
+                    "제45조"
+                ),
+                "전문": "본문에는 법령명이 직접 나오지 않는다.",
+            }
+        },
+    )
+
+    _write_jsonl(
+        root / "candidate_hits.jsonl",
+        [
+            {
+                "candidate_id": "cand1",
+                "canonical_case_id": "case::detc::17713",
+                "target": "detc",
+                "source_law_name": "파견근로자 보호 등에 관한 법률",
+                "source_law_uid": "law-001",
+                "doc_id": "17713",
+                "title": "구 파견근로자보호 등에 관한 법률 제45조 위헌제청",
+                "doc_number": "2011헌가34",
+                "root_law_name": "파견근로자 보호 등에 관한 법률",
+                "source_file_path": "list1.json",
+            }
+        ],
+    )
+    _write_jsonl(
+        root / "canonical_cases.jsonl",
+        [
+            {
+                "id": "case::detc::17713",
+                "canonical_case_id": "case::detc::17713",
+                "canonical_id": "case::detc::17713",
+                "target": "detc",
+                "doc_type_label": "헌재결정례",
+                "doc_id": "17713",
+                "title": "구 파견근로자보호 등에 관한 법률 제45조 위헌제청",
+                "doc_number": "2011헌가34",
+                "root_law_name": "파견근로자 보호 등에 관한 법률",
+                "source_law_names": ["파견근로자 보호 등에 관한 법률"],
+                "source_law_uids": ["law-001"],
+                "source_hit_count": 1,
+                "detail_available": True,
+                "detail_payload_path": str(detail_path),
+            }
+        ],
+    )
+
+    records = build_legal_relation_records(raw_related_base_dir=raw_dir)
+
+    assert len(records) == 1
+    record = records[0]
+    assert record["law_name"] == "파견근로자 보호 등에 관한 법률"
+    assert record["article_keys"] == []
+    assert record["subject_article_keys"] == ["45"]
+    assert record["subject_article_no_displays"] == ["제45조"]
+    assert record["subject_article_reference_sources"] == ["structured_subject_field"]
+    assert record["relation_type"] == "challenged_law"
+    assert record["relation_types"] == ["search_hit", "challenged_law", "challenged_article"]
+    assert record["body_verified"] is True
+    assert record["relation_confidence"] == 0.99
+    assert "심판대상 조문: 제45조" in record["text"]
+
+
 # ── _is_unverified_search_hit 회귀 테스트 ────────────────────────────────────
 
 
