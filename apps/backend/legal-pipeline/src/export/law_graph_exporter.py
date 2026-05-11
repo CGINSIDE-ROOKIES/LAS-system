@@ -21,6 +21,13 @@ def _edge_id(prefix: str, source: str, target: str) -> str:
     return f"{prefix}::{source}::{target}"
 
 
+def _case_edge_id(prefix: str, relation_id: Any, source: str, target: str) -> str:
+    relation_id_text = str(relation_id or "").strip()
+    if relation_id_text:
+        return f"{prefix}::{relation_id_text}"
+    return _edge_id(prefix, source, target)
+
+
 def _clean_str(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
@@ -52,6 +59,62 @@ def _merge_string_list(existing: list[str] | None, new_values: list[str] | None)
         merged.append(text)
 
     return merged
+
+
+def _case_node_from_row(row: dict[str, Any]) -> dict[str, Any] | None:
+    canonical_case_id = _clean_str(row.get("canonical_case_id") or row.get("canonical_id"))
+    if not canonical_case_id:
+        return None
+
+    doc_type = _clean_str(row.get("doc_type") if row.get("doc_type") != "relation" else row.get("target"))
+    return {
+        "node_type": "Case",
+        "canonical_case_id": canonical_case_id,
+        "doc_type": doc_type,
+        "doc_type_label": row.get("doc_type_label"),
+        "title": row.get("title"),
+        "doc_number": row.get("doc_number"),
+        "decision_date": row.get("decision_date"),
+        "doc_id": row.get("doc_id"),
+        "detail_link": row.get("detail_link"),
+        "source_file_path": row.get("source_file_path"),
+    }
+
+
+def _target_case_node_from_relation(row: dict[str, Any]) -> dict[str, Any] | None:
+    canonical_case_id = _clean_str(row.get("target_canonical_case_id"))
+    if not canonical_case_id:
+        return None
+
+    return {
+        "node_type": "Case",
+        "canonical_case_id": canonical_case_id,
+        "doc_type": row.get("target_target") or row.get("target_case_type"),
+        "doc_type_label": row.get("target_doc_type_label"),
+        "title": row.get("target_title"),
+        "doc_number": row.get("target_doc_number"),
+        "decision_date": None,
+        "doc_id": row.get("target_doc_id"),
+        "detail_link": None,
+        "source_file_path": None,
+    }
+
+
+def _merge_case_node(case_nodes: dict[str, dict[str, Any]], candidate: dict[str, Any] | None) -> None:
+    if not candidate:
+        return
+    canonical_case_id = str(candidate.get("canonical_case_id") or "").strip()
+    if not canonical_case_id:
+        return
+
+    current = case_nodes.get(canonical_case_id)
+    if current is None:
+        case_nodes[canonical_case_id] = dict(candidate)
+        return
+
+    for key, value in candidate.items():
+        if value not in (None, "", []) and current.get(key) in (None, "", []):
+            current[key] = value
 
 
 def _normalized_law_level(row: dict[str, Any]) -> str:
@@ -578,6 +641,103 @@ def _upsert_refers_to_article_edge(
     current["reference_texts"] = _merge_string_list(current.get("reference_texts"), [reference_text])
 
 
+def _case_edge_common(row: dict[str, Any], edge_id: str, edge_type: str) -> dict[str, Any]:
+    return {
+        "edge_id": edge_id,
+        "edge_type": edge_type,
+        "relation_id": row.get("id"),
+        "relation_model": row.get("relation_model"),
+        "relation_type": row.get("relation_type"),
+        "relation_types": row.get("relation_types") or [],
+        "relation_confidence": row.get("relation_confidence"),
+        "resolution_status": row.get("resolution_status"),
+        "source_group": row.get("source_group"),
+        "source_file_path": row.get("source_file_path"),
+        "evidence_preview": row.get("evidence_preview"),
+        "referenced_case_number": row.get("referenced_case_number"),
+        "reference_sources": row.get("reference_sources") or [],
+    }
+
+
+def _build_case_graph_from_relations(
+    *,
+    legal_relations_path: Path,
+    case_nodes: dict[str, dict[str, Any]],
+    law_nodes: dict[str, dict[str, Any]],
+    article_nodes: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    case_related_to_law_edges: dict[str, dict[str, Any]] = {}
+    case_related_to_article_edges: dict[str, dict[str, Any]] = {}
+    case_cites_case_edges: dict[str, dict[str, Any]] = {}
+
+    for row in _iter_jsonl(legal_relations_path):
+        relation_model = str(row.get("relation_model") or "").strip()
+        source_case_id = _clean_str(row.get("source_canonical_case_id") or row.get("canonical_case_id"))
+
+        if relation_model == "law_to_case":
+            if not source_case_id:
+                continue
+            _merge_case_node(case_nodes, _case_node_from_row(row))
+
+            law_uid = _clean_str(row.get("law_uid") or row.get("source_law_uid"))
+            if law_uid and law_uid in law_nodes:
+                edge_id = _case_edge_id("CASE_RELATED_TO_LAW", row.get("id"), source_case_id, law_uid)
+                case_related_to_law_edges.setdefault(
+                    edge_id,
+                    {
+                        **_case_edge_common(row, edge_id, "RELATED_TO_LAW"),
+                        "source_canonical_case_id": source_case_id,
+                        "target_law_uid": law_uid,
+                        "target_law_name": row.get("law_name") or row.get("source_law_name"),
+                        "article_keys": row.get("article_keys") or [],
+                        "article_no_displays": row.get("article_no_displays") or [],
+                    },
+                )
+
+            for article_key in [str(item).strip() for item in (row.get("article_keys") or []) if str(item).strip()]:
+                article_uid = _article_uid(law_uid, article_key)
+                if not article_uid or article_uid not in article_nodes:
+                    continue
+                edge_id = _case_edge_id("CASE_RELATED_TO_ARTICLE", f"{row.get('id')}::{article_key}", source_case_id, article_uid)
+                case_related_to_article_edges.setdefault(
+                    edge_id,
+                    {
+                        **_case_edge_common(row, edge_id, "RELATED_TO_ARTICLE"),
+                        "source_canonical_case_id": source_case_id,
+                        "target_article_uid": article_uid,
+                        "target_law_uid": law_uid,
+                        "target_article_key": article_key,
+                    },
+                )
+
+        elif relation_model == "case_to_case":
+            target_case_id = _clean_str(row.get("target_canonical_case_id"))
+            if not source_case_id or not target_case_id:
+                continue
+
+            _merge_case_node(case_nodes, _case_node_from_row(row))
+            _merge_case_node(case_nodes, _target_case_node_from_relation(row))
+
+            edge_id = _case_edge_id("CASE_CITES_CASE", row.get("id"), source_case_id, target_case_id)
+            case_cites_case_edges.setdefault(
+                edge_id,
+                {
+                    **_case_edge_common(row, edge_id, "CITES_CASE"),
+                    "source_canonical_case_id": source_case_id,
+                    "target_canonical_case_id": target_case_id,
+                    "source_case_type": row.get("source_case_type"),
+                    "target_case_type": row.get("target_case_type"),
+                    "relation_subtype": row.get("relation_subtype"),
+                },
+            )
+
+    return (
+        sorted(case_related_to_law_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
+        sorted(case_related_to_article_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
+        sorted(case_cites_case_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
+    )
+
+
 def build_law_graph_export_rows(
     *,
     legal_corpus_path: str | Path = "data/dataset/legal_corpus.jsonl",
@@ -588,6 +748,7 @@ def build_law_graph_export_rows(
 
     law_nodes: dict[str, dict[str, Any]] = {}
     article_nodes: dict[str, dict[str, Any]] = {}
+    case_nodes: dict[str, dict[str, Any]] = {}
     has_article_edges: dict[str, dict[str, Any]] = {}
     has_child_law_edges: list[dict[str, Any]] = []
     delegates_to_law_edges: list[dict[str, Any]] = []
@@ -597,6 +758,10 @@ def build_law_graph_export_rows(
     seen_article_keys_by_law: dict[str, set[str]] = {}
 
     for row in _iter_jsonl(legal_corpus_path):
+        if str(row.get("doc_type") or "").strip() in {"prec", "detc", "expc", "decc"}:
+            _merge_case_node(case_nodes, _case_node_from_row(row))
+            continue
+
         if str(row.get("doc_type") or "").strip() != "law":
             continue
         if str(row.get("section_type") or "").strip() != "article":
@@ -830,14 +995,25 @@ def build_law_graph_export_rows(
                 target_article_details=[],
             )
 
+    case_related_to_law_edges, case_related_to_article_edges, case_cites_case_edges = _build_case_graph_from_relations(
+        legal_relations_path=legal_relations_path,
+        case_nodes=case_nodes,
+        law_nodes=law_nodes,
+        article_nodes=article_nodes,
+    )
+
     return {
         "law_nodes": sorted(law_nodes.values(), key=lambda row: str(row.get("law_uid") or "")),
         "article_nodes": sorted(article_nodes.values(), key=lambda row: str(row.get("article_uid") or "")),
+        "case_nodes": sorted(case_nodes.values(), key=lambda row: str(row.get("canonical_case_id") or "")),
         "has_article_edges": sorted(has_article_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
         "has_child_law_edges": has_child_law_edges,
         "delegates_to_law_edges": delegates_to_law_edges,
         "refers_to_law_edges": sorted(refers_to_law_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
         "refers_to_article_edges": sorted(refers_to_article_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
+        "case_related_to_law_edges": case_related_to_law_edges,
+        "case_related_to_article_edges": case_related_to_article_edges,
+        "case_cites_case_edges": case_cites_case_edges,
     }
 
 
@@ -855,20 +1031,28 @@ def write_law_graph_export(
 
     write_jsonl(rows["law_nodes"], output_dir / "graph_law_nodes.jsonl")
     write_jsonl(rows["article_nodes"], output_dir / "graph_article_nodes.jsonl")
+    write_jsonl(rows["case_nodes"], output_dir / "graph_case_nodes.jsonl")
     write_jsonl(rows["has_article_edges"], output_dir / "graph_edges_has_article.jsonl")
     write_jsonl(rows["has_child_law_edges"], output_dir / "graph_edges_has_child_law.jsonl")
     write_jsonl(rows["delegates_to_law_edges"], output_dir / "graph_edges_delegates_to_law.jsonl")
     write_jsonl(rows["refers_to_law_edges"], output_dir / "graph_edges_refers_to_law.jsonl")
     write_jsonl(rows["refers_to_article_edges"], output_dir / "graph_edges_refers_to_article.jsonl")
+    write_jsonl(rows["case_related_to_law_edges"], output_dir / "graph_edges_case_related_to_law.jsonl")
+    write_jsonl(rows["case_related_to_article_edges"], output_dir / "graph_edges_case_related_to_article.jsonl")
+    write_jsonl(rows["case_cites_case_edges"], output_dir / "graph_edges_case_cites_case.jsonl")
 
     manifest = {
         "law_node_count": len(rows["law_nodes"]),
         "article_node_count": len(rows["article_nodes"]),
+        "case_node_count": len(rows["case_nodes"]),
         "has_article_edge_count": len(rows["has_article_edges"]),
         "has_child_law_edge_count": len(rows["has_child_law_edges"]),
         "delegates_to_law_edge_count": len(rows["delegates_to_law_edges"]),
         "refers_to_law_edge_count": len(rows["refers_to_law_edges"]),
         "refers_to_article_edge_count": len(rows["refers_to_article_edges"]),
+        "case_related_to_law_edge_count": len(rows["case_related_to_law_edges"]),
+        "case_related_to_article_edge_count": len(rows["case_related_to_article_edges"]),
+        "case_cites_case_edge_count": len(rows["case_cites_case_edges"]),
         "source_legal_corpus_path": str(legal_corpus_path),
         "source_legal_relations_path": str(legal_relations_path),
     }

@@ -109,6 +109,132 @@ def test_build_law_graph_export_rows_dedupes_article_nodes_and_builds_reference_
     assert "explicit_law_name" in law_edge["relation_types"]
 
 
+def test_build_law_graph_export_rows_builds_case_nodes_and_case_relation_edges(tmp_path):
+    corpus_path = tmp_path / "dataset" / "legal_corpus.jsonl"
+    relations_path = tmp_path / "dataset" / "legal_relations.jsonl"
+
+    write_jsonl(
+        [
+            {
+                "id": "law::001::article::6::0",
+                "doc_type": "law",
+                "section_type": "article",
+                "law_uid": "001",
+                "law_name": "최저임금법",
+                "root_law_uid": "001",
+                "root_law_name": "최저임금법",
+                "classified_level": "법",
+                "kind_name": "법률",
+                "article_key": "6",
+                "article_no_display": "제6조",
+                "text": "최저임금 조문",
+                "display_text": "최저임금 조문",
+                "source_file_path": "law.json",
+            },
+            {
+                "id": "case_chunk::case::detc::180923::0",
+                "canonical_case_id": "case::detc::180923",
+                "canonical_id": "case::detc::180923",
+                "doc_type": "detc",
+                "doc_type_label": "헌재결정례",
+                "title": "최저임금법 제6조 제5항 위헌소원",
+                "doc_number": "2020헌바11",
+                "decision_date": "20230525",
+                "doc_id": "180923",
+                "detail_link": "/DRF/lawService.do?target=detc&ID=180923",
+                "source_file_path": "case.json",
+                "chunk_index": 0,
+                "text": "첫 청크",
+            },
+            {
+                "id": "case_chunk::case::detc::180923::1",
+                "canonical_case_id": "case::detc::180923",
+                "canonical_id": "case::detc::180923",
+                "doc_type": "detc",
+                "doc_type_label": "헌재결정례",
+                "chunk_index": 1,
+                "text": "둘째 청크",
+            },
+        ],
+        corpus_path,
+    )
+    write_jsonl(
+        [
+            {
+                "id": "relation::case::detc::180923::001",
+                "canonical_case_id": "case::detc::180923",
+                "canonical_id": "case::detc::180923",
+                "relation_model": "law_to_case",
+                "relation_type": "related_law",
+                "relation_types": ["search_hit", "related_law"],
+                "relation_confidence": 0.98,
+                "resolution_status": "resolved",
+                "doc_type": "relation",
+                "doc_type_label": "헌재결정례",
+                "target": "detc",
+                "title": "최저임금법 제6조 제5항 위헌소원",
+                "doc_number": "2020헌바11",
+                "law_uid": "001",
+                "law_name": "최저임금법",
+                "article_keys": ["6"],
+                "article_no_displays": ["제6조"],
+                "source_group": "03_expanded_related_docs",
+                "source_file_path": "relation.json",
+            },
+            {
+                "id": "case_relation::case::detc::180923::case::prec::1",
+                "canonical_case_id": "case::detc::180923",
+                "source_canonical_case_id": "case::detc::180923",
+                "target_canonical_case_id": "case::prec::1",
+                "relation_model": "case_to_case",
+                "relation_type": "cited_case",
+                "relation_types": ["cited_case"],
+                "relation_confidence": 0.95,
+                "resolution_status": "resolved",
+                "doc_type": "relation",
+                "doc_type_label": "헌재결정례",
+                "target": "detc",
+                "title": "최저임금법 제6조 제5항 위헌소원",
+                "doc_number": "2020헌바11",
+                "target_target": "prec",
+                "target_doc_type_label": "판례",
+                "target_title": "임금",
+                "target_doc_number": "2016다2451",
+                "referenced_case_number": "2016다2451",
+                "source_group": "04_case_to_case_relations",
+            },
+        ],
+        relations_path,
+    )
+
+    rows = build_law_graph_export_rows(
+        legal_corpus_path=corpus_path,
+        legal_relations_path=relations_path,
+    )
+
+    assert [row["canonical_case_id"] for row in rows["case_nodes"]] == [
+        "case::detc::180923",
+        "case::prec::1",
+    ]
+    source_case = rows["case_nodes"][0]
+    assert source_case["doc_type"] == "detc"
+    assert source_case["title"] == "최저임금법 제6조 제5항 위헌소원"
+
+    assert len(rows["case_related_to_law_edges"]) == 1
+    law_edge = rows["case_related_to_law_edges"][0]
+    assert law_edge["source_canonical_case_id"] == "case::detc::180923"
+    assert law_edge["target_law_uid"] == "001"
+
+    assert len(rows["case_related_to_article_edges"]) == 1
+    article_edge = rows["case_related_to_article_edges"][0]
+    assert article_edge["target_article_uid"] == "article::001::6"
+
+    assert len(rows["case_cites_case_edges"]) == 1
+    case_edge = rows["case_cites_case_edges"][0]
+    assert case_edge["source_canonical_case_id"] == "case::detc::180923"
+    assert case_edge["target_canonical_case_id"] == "case::prec::1"
+
+
 def test_build_law_graph_export_rows_skips_blank_law_name_and_restores_root_law_name(tmp_path):
     corpus_path = tmp_path / "dataset" / "legal_corpus.jsonl"
     relations_path = tmp_path / "dataset" / "legal_relations.jsonl"
@@ -613,10 +739,18 @@ def test_write_law_graph_export_writes_manifest_and_files(tmp_path):
 
     assert manifest["law_node_count"] == 1
     assert manifest["article_node_count"] == 1
+    assert manifest["case_node_count"] == 0
     assert manifest["has_child_law_edge_count"] == 0
     assert manifest["delegates_to_law_edge_count"] == 0
+    assert manifest["case_related_to_law_edge_count"] == 0
+    assert manifest["case_related_to_article_edge_count"] == 0
+    assert manifest["case_cites_case_edge_count"] == 0
     assert (output_dir / "graph_law_nodes.jsonl").exists()
     assert (output_dir / "graph_article_nodes.jsonl").exists()
+    assert (output_dir / "graph_case_nodes.jsonl").exists()
     assert (output_dir / "graph_edges_has_child_law.jsonl").exists()
     assert (output_dir / "graph_edges_delegates_to_law.jsonl").exists()
+    assert (output_dir / "graph_edges_case_related_to_law.jsonl").exists()
+    assert (output_dir / "graph_edges_case_related_to_article.jsonl").exists()
+    assert (output_dir / "graph_edges_case_cites_case.jsonl").exists()
     assert (output_dir / "graph_manifest.json").exists()

@@ -56,6 +56,7 @@ def main() -> None:
     with driver.session(database=neo4j_database) as session:
         session.run("CREATE CONSTRAINT law_uid_unique IF NOT EXISTS FOR (n:Law) REQUIRE n.law_uid IS UNIQUE")
         session.run("CREATE CONSTRAINT article_uid_unique IF NOT EXISTS FOR (n:Article) REQUIRE n.article_uid IS UNIQUE")
+        session.run("CREATE CONSTRAINT case_canonical_case_id_unique IF NOT EXISTS FOR (n:Case) REQUIRE n.canonical_case_id IS UNIQUE")
         for query, payload_rows in iter_seed_operations(rows):
             for batch in _batched(payload_rows, args.batch_size):
                 if not batch:
