@@ -30,9 +30,29 @@ class FakeStructuredRunnable:
         return {"value": "ok"}
 
 
+class FlakyStructuredRunnable:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def invoke(self, prompt, config=None):
+        del config
+        self.prompts.append(prompt)
+        if len(self.prompts) == 1:
+            return {"wrong": "shape"}
+        return {"value": "ok"}
+
+
 class FakeChatModel:
     def __init__(self) -> None:
         self.structured = FakeStructuredRunnable()
+
+    def with_structured_output(self, schema, method=None):
+        return self.structured
+
+
+class FlakyChatModel:
+    def __init__(self) -> None:
+        self.structured = FlakyStructuredRunnable()
 
     def with_structured_output(self, schema, method=None):
         return self.structured
@@ -183,6 +203,24 @@ class ObservabilityTests(unittest.TestCase):
             model_override=None,
             timeout_seconds=180.0,
         )
+
+    def test_invoke_structured_model_repairs_schema_validation_failure(self) -> None:
+        fake_model = FlakyChatModel()
+        with (
+            patch("doc_processor.parser.llm_utils.get_chat_model", return_value=fake_model),
+            patch("doc_processor.parser.llm_utils.get_langchain_invoke_config", return_value=None),
+        ):
+            result = invoke_structured_model(
+                profile="label",
+                prompt="prompt",
+                payload={"x": 1},
+                schema=StructuredOutput,
+                config=ParserConfig(llm_repair_max_attempts=3, llm_retry_base_delay_sec=0),
+            )
+
+        self.assertEqual(result.value, "ok")
+        self.assertEqual(len(fake_model.structured.prompts), 2)
+        self.assertIn("[repair_instruction]", fake_model.structured.prompts[1])
 
     def test_run_parser_does_not_flush_langfuse_by_default(self) -> None:
         fake_result = WorkflowState(target_file=Path("sample.hwp"))
