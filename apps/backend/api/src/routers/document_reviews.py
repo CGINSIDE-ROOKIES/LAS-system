@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -31,6 +32,7 @@ from src.document_reviews.service import (
 )
 
 router = APIRouter(tags=["document-reviews"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=CreateDocumentReviewResponse, status_code=202)
@@ -54,6 +56,15 @@ async def create_document_review(
     original_path = storage.original_path_for(review_id, source_name)
     original_path.write_bytes(content)
     source_doc_type = storage.source_doc_type_from_name(source_name)
+    logger.info(
+        "document review create accepted: review_id=%s source_name=%s source_doc_type=%s bytes=%s content_type=%s storage_path=%s",
+        review_id,
+        source_name,
+        source_doc_type,
+        len(content),
+        file.content_type,
+        original_path,
+    )
 
     storage.create_job(
         conn,
@@ -84,6 +95,7 @@ async def create_document_review(
     conn.commit()
 
     background_tasks.add_task(run_document_review_job, review_id, parsed_options.model_dump(mode="json"))
+    logger.info("document review background task queued: review_id=%s", review_id)
     return CreateDocumentReviewResponse(
         review_id=review_id,
         status="queued",
@@ -115,6 +127,7 @@ def stream_document_review_events(
     with db_connection() as conn:
         if storage.get_job(conn, review_id) is None:
             raise HTTPException(status_code=404, detail="Document review not found.")
+    logger.info("document review event stream opened: review_id=%s after_seq=%s", review_id, after_seq)
 
     def generate():
         cursor = after_seq
@@ -128,6 +141,13 @@ def stream_document_review_events(
                 cursor = int(event["seq"])
                 yield _sse_event(event)
             if job and job["status"] in {"completed", "failed"} and not events:
+                logger.info(
+                    "document review event stream closed: review_id=%s cursor=%s status=%s stage=%s",
+                    review_id,
+                    cursor,
+                    job["status"],
+                    job["stage"],
+                )
                 break
             if not events and time.monotonic() - last_keepalive >= 15:
                 last_keepalive = time.monotonic()
@@ -150,9 +170,27 @@ def get_document_review_preview(
     artifact_kind = storage.preview_artifact_kind(job, kind)
     artifact = storage.get_artifact(conn, review_id, artifact_kind)
     if artifact is None:
+        logger.info(
+            "document review preview not ready: review_id=%s requested_kind=%s resolved_kind=%s status=%s stage=%s current_preview_kind=%s artifact_flags=%s",
+            review_id,
+            kind,
+            artifact_kind,
+            job["status"],
+            job["stage"],
+            job.get("current_preview_kind"),
+            storage.artifact_flags(conn, review_id),
+        )
         raise HTTPException(status_code=404, detail="Preview is not available yet.")
     path = Path(artifact["path"])
     if not path.exists():
+        logger.warning(
+            "document review preview artifact missing on disk: review_id=%s requested_kind=%s resolved_kind=%s path=%s storage_root=%s",
+            review_id,
+            kind,
+            artifact_kind,
+            path,
+            storage.storage_root(),
+        )
         raise HTTPException(status_code=404, detail="Preview artifact is missing.")
     return HTMLResponse(path.read_text(encoding="utf-8"))
 
@@ -189,6 +227,13 @@ def decide_document_review_suggestion(
     )
     if suggestion is None:
         raise HTTPException(status_code=404, detail="Suggestion not found.")
+    logger.info(
+        "document review suggestion decision saved: review_id=%s finding_id=%s action=%s comment_chars=%s",
+        review_id,
+        finding_id,
+        request.action,
+        len(request.comment or ""),
+    )
     storage.add_event(
         conn,
         review_id,

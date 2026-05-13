@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   Download,
@@ -74,12 +74,22 @@ export default function DocumentReviewTest() {
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const progress = Math.round((summary?.progress ?? 0) * 100);
+  const previewFlag = summary ? previewFlagFor(previewKind, summary) : null;
+  const previewAvailable = Boolean(reviewId && summary && previewFlag && summary.artifact_flags?.[previewFlag]);
   const previewSrc = useMemo(() => {
-    if (!reviewId) return "";
+    if (!reviewId || !previewAvailable) return "";
     const cacheKey = summary?.updated_at ? `&t=${encodeURIComponent(summary.updated_at)}` : "";
     return absoluteApiUrl(`/api/v1/document-reviews/${reviewId}/preview.html?kind=${previewKind}${cacheKey}`);
-  }, [previewKind, reviewId, summary?.updated_at]);
+  }, [previewAvailable, previewKind, reviewId, summary?.updated_at]);
   const acceptedEditableCount = suggestions.filter((item) => item.status === "accepted" && item.proposed_edit).length;
+
+  const refreshAll = useCallback(async (nextReviewId = reviewId) => {
+    if (!nextReviewId) return;
+    const nextSummary = await getDocumentReview(nextReviewId);
+    setSummary(nextSummary);
+    const nextSuggestions = await getDocumentReviewSuggestions(nextReviewId);
+    setSuggestions(nextSuggestions);
+  }, [reviewId]);
 
   useEffect(() => {
     return () => {
@@ -87,13 +97,13 @@ export default function DocumentReviewTest() {
     };
   }, []);
 
-  async function refreshAll(nextReviewId = reviewId) {
-    if (!nextReviewId) return;
-    const nextSummary = await getDocumentReview(nextReviewId);
-    setSummary(nextSummary);
-    const nextSuggestions = await getDocumentReviewSuggestions(nextReviewId);
-    setSuggestions(nextSuggestions);
-  }
+  useEffect(() => {
+    if (!reviewId || summary?.status === "completed" || summary?.status === "failed") return;
+    const interval = window.setInterval(() => {
+      void refreshAll(reviewId);
+    }, 2000);
+    return () => window.clearInterval(interval);
+  }, [refreshAll, reviewId, summary?.status]);
 
   function connectEvents(nextReviewId: string, eventsUrl?: string) {
     eventSourceRef.current?.close();
@@ -351,6 +361,7 @@ export default function DocumentReviewTest() {
                           key={kind}
                           size="sm"
                           variant={previewKind === kind ? "default" : "outline"}
+                          disabled={summary ? !summary.artifact_flags?.[previewFlagFor(kind, summary)] : kind !== "latest"}
                           onClick={() => setPreviewKind(kind)}
                         >
                           {kind}
@@ -368,7 +379,7 @@ export default function DocumentReviewTest() {
                       />
                     ) : (
                       <div className="flex h-full min-h-[320px] items-center justify-center rounded-md border bg-background text-sm text-muted-foreground">
-                        Upload a document to load a preview.
+                        {reviewId ? "Preview artifact is not ready yet." : "Upload a document to load a preview."}
                       </div>
                     )}
                   </CardContent>
@@ -458,6 +469,18 @@ export default function DocumentReviewTest() {
       </div>
     </SidebarProvider>
   );
+}
+
+function previewFlagFor(
+  kind: "latest" | "parser" | "risk" | "edited",
+  summary: DocumentReviewSummary
+): "parser_preview" | "risk_preview" | "edited_preview" {
+  if (kind === "parser") return "parser_preview";
+  if (kind === "risk") return "risk_preview";
+  if (kind === "edited") return "edited_preview";
+  if (summary.current_preview_kind === "edited") return "edited_preview";
+  if (summary.current_preview_kind === "risk") return "risk_preview";
+  return "parser_preview";
 }
 
 function riskClassName(level: string | null): string {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,8 @@ from psycopg2.extras import Json, RealDictCursor
 from doc_processor.contract_review import ContractReviewFinding, ContractReviewResult
 
 from .previews import finding_source_citations
+
+logger = logging.getLogger(__name__)
 
 _CONTENT_TYPES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -136,7 +139,15 @@ def add_event(
             (review_id, stage, Json(event_payload), review_id),
         )
         row = cur.fetchone()
-    return _event_to_dict(dict(row))
+    event = _event_to_dict(dict(row))
+    logger.info(
+        "document review event persisted: review_id=%s seq=%s stage=%s payload=%s",
+        review_id,
+        event["seq"],
+        stage,
+        _compact_log_payload(event_payload),
+    )
+    return event
 
 
 def list_events(
@@ -479,6 +490,16 @@ def _event_to_dict(row: dict[str, Any]) -> dict[str, Any]:
         "payload": row.get("payload") or {},
         "timestamp": timestamp.isoformat() if timestamp else None,
     }
+
+
+def _compact_log_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for key, value in payload.items():
+        if isinstance(value, str) and len(value) > 500:
+            compact[key] = f"{value[:500]}...<truncated>"
+        else:
+            compact[key] = value
+    return compact
 
 
 def _status_from_action(action: str) -> str:

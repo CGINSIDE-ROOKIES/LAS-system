@@ -7,7 +7,7 @@ from langgraph.types import Command, Send
 
 from document_processor import DocIR
 
-from ..logging_utils import log_info
+from ..logging_utils import log_info, log_warning
 from ..observability import traced_structure_analysis_node
 from ..state import WorkflowState
 from ..parser_types import ParserAnalysis, ParserDocumentMeta, ParserResult, RelevanceDecision, RelevanceMode, WorkflowDelta, WorkflowMeta
@@ -222,9 +222,10 @@ def boundary_llm_batch(state: WorkflowState) -> Command[str]:
             state.parser_config,
         )
     except Exception as exc:  # pragma: no cover
-        log_info(
+        log_warning(
             state.parser_config,
-            "[structure_analysis.llm_analysis.boundary_batch] failed",
+            "[structure_analysis.llm_analysis.boundary_batch] failed: %s",
+            exc,
         )
         return Command(
             update={"errors": [f"Boundary LLM review failed: {exc}"]},
