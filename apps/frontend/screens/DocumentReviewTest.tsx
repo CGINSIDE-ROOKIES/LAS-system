@@ -78,6 +78,9 @@ export default function DocumentReviewTest() {
   const [busy, setBusy] = useState<string | null>(null);
   const [commentByFinding, setCommentByFinding] = useState<Record<string, string>>({});
   const eventSourceRef = useRef<EventSource | null>(null);
+  const seenEventKeysRef = useRef<Set<string>>(new Set());
+  const toastedEventKeysRef = useRef<Set<string>>(new Set());
+  const sseErrorNotifiedRef = useRef(false);
 
   const progress = Math.round((summary?.progress ?? 0) * 100);
   const previewFlag = summary ? previewFlagFor(previewKind, summary) : null;
@@ -114,6 +117,7 @@ export default function DocumentReviewTest() {
 
   function connectEvents(nextReviewId: string, eventsUrl?: string) {
     eventSourceRef.current?.close();
+    sseErrorNotifiedRef.current = false;
     const source = new EventSource(absoluteApiUrl(eventsUrl ?? `/api/v1/document-reviews/${nextReviewId}/events`));
     eventSourceRef.current = source;
 
@@ -121,11 +125,23 @@ export default function DocumentReviewTest() {
       source.addEventListener(name, (event) => {
         try {
           const payload = JSON.parse((event as MessageEvent).data) as DocumentReviewEvent;
-          setEvents((prev) => [payload, ...prev].slice(0, 100));
+          const eventKey = `${payload.seq}:${payload.type}`;
+          const isNewEvent = !seenEventKeysRef.current.has(eventKey);
+          if (isNewEvent) {
+            seenEventKeysRef.current.add(eventKey);
+            setEvents((prev) => [payload, ...prev].slice(0, 100));
+          }
           void refreshAll(nextReviewId);
-          if (payload.type === "failed") toast.error(payload.error || "Document review failed.");
-          if (payload.type === "hitl_waiting") toast.info("HITL decisions are ready.");
-          if (payload.type === "completed") toast.success("Document review completed.");
+          if (isNewEvent && !toastedEventKeysRef.current.has(eventKey)) {
+            toastedEventKeysRef.current.add(eventKey);
+            if (payload.type === "failed") toast.error(payload.error || "Document review failed.");
+            if (payload.type === "hitl_waiting") toast.info("HITL decisions are ready.");
+            if (payload.type === "completed") toast.success("Document review completed.");
+          }
+          if (payload.type === "completed" || payload.type === "failed") {
+            source.close();
+            if (eventSourceRef.current === source) eventSourceRef.current = null;
+          }
         } catch {
           // Ignore malformed event payloads in the test harness.
         }
@@ -133,10 +149,11 @@ export default function DocumentReviewTest() {
     }
 
     source.onerror = () => {
-      setEvents((prev) => [
-        { type: "failed" as const, seq: -1, error: "SSE connection error or closed." },
-        ...prev,
-      ].slice(0, 100));
+      if (eventSourceRef.current !== source || source.readyState === EventSource.CLOSED) return;
+      if (!sseErrorNotifiedRef.current) {
+        sseErrorNotifiedRef.current = true;
+        toast.warning("Event stream disconnected; status polling is still active.");
+      }
     };
   }
 
@@ -159,6 +176,9 @@ export default function DocumentReviewTest() {
     setEvents([]);
     setSuggestions([]);
     setSummary(null);
+    seenEventKeysRef.current.clear();
+    toastedEventKeysRef.current.clear();
+    sseErrorNotifiedRef.current = false;
     try {
       const created = await createDocumentReview(file, options);
       setReviewId(created.review_id);

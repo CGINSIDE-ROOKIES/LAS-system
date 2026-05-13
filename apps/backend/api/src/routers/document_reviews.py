@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import psycopg2.extensions
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import ValidationError
 
@@ -123,14 +123,22 @@ def get_document_review(
 def stream_document_review_events(
     review_id: str,
     after_seq: int = Query(default=0, ge=0),
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
 ) -> StreamingResponse:
+    initial_after_seq = max(after_seq, _last_event_seq(last_event_id))
     with db_connection() as conn:
         if storage.get_job(conn, review_id) is None:
             raise HTTPException(status_code=404, detail="Document review not found.")
-    logger.info("document review event stream opened: review_id=%s after_seq=%s", review_id, after_seq)
+    logger.info(
+        "document review event stream opened: review_id=%s after_seq=%s last_event_id=%s cursor=%s",
+        review_id,
+        after_seq,
+        last_event_id,
+        initial_after_seq,
+    )
 
     def generate():
-        cursor = after_seq
+        cursor = initial_after_seq
         last_keepalive = time.monotonic()
         yield "retry: 3000\n\n"
         while True:
@@ -300,6 +308,15 @@ def _sse_event(event: dict) -> str:
     }
     data = json.dumps(payload, ensure_ascii=False)
     return f"id: {event['seq']}\nevent: {event['stage']}\ndata: {data}\n\n"
+
+
+def _last_event_seq(last_event_id: str | None) -> int:
+    if not last_event_id:
+        return 0
+    try:
+        return max(0, int(last_event_id))
+    except ValueError:
+        return 0
 
 
 def _events_url(review_id: str) -> str:
