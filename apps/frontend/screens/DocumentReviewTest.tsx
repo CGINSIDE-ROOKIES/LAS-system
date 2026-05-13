@@ -1,14 +1,18 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
+  CheckCircle2,
+  CircleDashed,
   Download,
   FileSearch,
   Loader2,
+  MessageSquare,
   Play,
   RefreshCw,
   Send,
   Upload,
   X,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -61,6 +65,8 @@ const DEFAULT_OPTIONS = JSON.stringify(
   2
 );
 
+const SUMMARY_POLL_INTERVAL_MS = 15_000;
+
 export default function DocumentReviewTest() {
   const [file, setFile] = useState<File | null>(null);
   const [optionsText, setOptionsText] = useState(DEFAULT_OPTIONS);
@@ -98,10 +104,11 @@ export default function DocumentReviewTest() {
   }, []);
 
   useEffect(() => {
-    if (!reviewId || summary?.status === "completed" || summary?.status === "failed") return;
+    if (!reviewId || !summary || !isActivelyProcessing(summary.status)) return;
     const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       void refreshAll(reviewId);
-    }, 2000);
+    }, SUMMARY_POLL_INTERVAL_MS);
     return () => window.clearInterval(interval);
   }, [refreshAll, reviewId, summary?.status]);
 
@@ -167,14 +174,22 @@ export default function DocumentReviewTest() {
 
   async function handleDecision(findingId: string, action: "accept" | "reject" | "feedback") {
     if (!reviewId) return;
+    if (action === "feedback" && !commentByFinding[findingId]?.trim()) {
+      toast.error("Enter a feedback comment first.");
+      return;
+    }
+
     setBusy(`${action}:${findingId}`);
     try {
-      await decideDocumentReviewSuggestion(reviewId, findingId, {
+      const updated = await decideDocumentReviewSuggestion(reviewId, findingId, {
         action,
         comment: commentByFinding[findingId] || undefined,
       });
+      setSuggestions((prev) =>
+        prev.map((item) => (item.finding_id === findingId ? updated : item))
+      );
       await refreshAll();
-      toast.success(`Decision saved: ${action}`);
+      toast.success(`${statusLabel(actionToStatus(action))}.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Decision failed.");
     } finally {
@@ -395,13 +410,24 @@ export default function DocumentReviewTest() {
                       {suggestions.length === 0 && (
                         <p className="text-sm text-muted-foreground">No suggestions available.</p>
                       )}
-                      {suggestions.map((item) => (
-                        <div key={item.finding_id} className="rounded-md border bg-background p-3">
+                      {suggestions.map((item) => {
+                        const savedComment = decisionComment(item);
+                        return (
+                        <div
+                          key={item.finding_id}
+                          className={cn(
+                            "rounded-md border bg-background p-3 transition-colors",
+                            suggestionStateClassName(item.status)
+                          )}
+                        >
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <div>
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge className={riskClassName(item.risk_level)}>{item.risk_level ?? "risk"}</Badge>
-                                <Badge variant="outline">{item.status}</Badge>
+                                <Badge className={statusBadgeClassName(item.status)} variant="outline">
+                                  {statusIcon(item.status)}
+                                  {statusLabel(item.status)}
+                                </Badge>
                                 {item.proposed_edit && <Badge variant="secondary">edit</Badge>}
                               </div>
                               <h3 className="mt-2 text-sm font-semibold">{item.title || item.finding_id}</h3>
@@ -419,9 +445,14 @@ export default function DocumentReviewTest() {
                               {item.diff}
                             </pre>
                           )}
+                          {savedComment && (
+                            <div className="mt-2 rounded-md border bg-background/70 px-3 py-2 text-xs">
+                              <span className="font-medium">Saved feedback:</span> {savedComment}
+                            </div>
+                          )}
                           <Textarea
                             className="mt-3 min-h-[64px]"
-                            placeholder="Decision comment"
+                            placeholder="Feedback comment"
                             value={commentByFinding[item.finding_id] ?? ""}
                             onChange={(event) =>
                               setCommentByFinding((prev) => ({
@@ -433,6 +464,7 @@ export default function DocumentReviewTest() {
                           <div className="mt-3 flex flex-wrap gap-2">
                             <Button
                               size="sm"
+                              variant={item.status === "accepted" ? "default" : "outline"}
                               disabled={!item.proposed_edit || busy === `accept:${item.finding_id}`}
                               onClick={() => void handleDecision(item.finding_id, "accept")}
                             >
@@ -441,7 +473,7 @@ export default function DocumentReviewTest() {
                             </Button>
                             <Button
                               size="sm"
-                              variant="outline"
+                              variant={item.status === "rejected" ? "destructive" : "outline"}
                               disabled={busy === `reject:${item.finding_id}`}
                               onClick={() => void handleDecision(item.finding_id, "reject")}
                             >
@@ -450,15 +482,17 @@ export default function DocumentReviewTest() {
                             </Button>
                             <Button
                               size="sm"
-                              variant="secondary"
+                              variant={item.status === "feedback" ? "default" : "secondary"}
                               disabled={busy === `feedback:${item.finding_id}`}
                               onClick={() => void handleDecision(item.finding_id, "feedback")}
                             >
+                              <MessageSquare />
                               Feedback
                             </Button>
                           </div>
                         </div>
-                      ))}
+                      );
+                      })}
                     </div>
                   </CardContent>
                 </Card>
@@ -481,6 +515,54 @@ function previewFlagFor(
   if (summary.current_preview_kind === "edited") return "edited_preview";
   if (summary.current_preview_kind === "risk") return "risk_preview";
   return "parser_preview";
+}
+
+function isActivelyProcessing(status: DocumentReviewSummary["status"]): boolean {
+  return status === "queued" || status === "running" || status === "applying";
+}
+
+function actionToStatus(action: "accept" | "reject" | "feedback"): DocumentReviewSuggestion["status"] {
+  if (action === "accept") return "accepted";
+  if (action === "reject") return "rejected";
+  return "feedback";
+}
+
+function statusLabel(status: DocumentReviewSuggestion["status"]): string {
+  if (status === "accepted") return "Accepted";
+  if (status === "rejected") return "Rejected";
+  if (status === "feedback") return "Feedback requested";
+  return "Pending";
+}
+
+function statusIcon(status: DocumentReviewSuggestion["status"]) {
+  if (status === "accepted") return <CheckCircle2 className="mr-1 h-3 w-3" />;
+  if (status === "rejected") return <XCircle className="mr-1 h-3 w-3" />;
+  if (status === "feedback") return <MessageSquare className="mr-1 h-3 w-3" />;
+  return <CircleDashed className="mr-1 h-3 w-3" />;
+}
+
+function suggestionStateClassName(status: DocumentReviewSuggestion["status"]): string {
+  return cn(
+    status === "accepted" && "border-emerald-500/60 bg-emerald-50/70",
+    status === "rejected" && "border-red-500/60 bg-red-50/70",
+    status === "feedback" && "border-blue-500/60 bg-blue-50/70"
+  );
+}
+
+function statusBadgeClassName(status: DocumentReviewSuggestion["status"]): string {
+  return cn(
+    "inline-flex items-center",
+    status === "accepted" && "border-emerald-600 text-emerald-700",
+    status === "rejected" && "border-red-600 text-red-700",
+    status === "feedback" && "border-blue-600 text-blue-700"
+  );
+}
+
+function decisionComment(item: DocumentReviewSuggestion): string {
+  const decision = item.payload.decision;
+  if (!decision || typeof decision !== "object" || !("comment" in decision)) return "";
+  const comment = (decision as { comment?: unknown }).comment;
+  return typeof comment === "string" ? comment : "";
 }
 
 function riskClassName(level: string | null): string {
