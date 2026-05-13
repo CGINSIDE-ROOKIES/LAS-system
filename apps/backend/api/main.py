@@ -7,6 +7,7 @@
 import logging
 import logging.config
 import os
+import warnings
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
@@ -14,9 +15,20 @@ import tomllib
 
 from dotenv import load_dotenv
 
+try:
+    from langchain_core._api.deprecation import LangChainPendingDeprecationWarning
+except Exception:  # pragma: no cover - defensive fallback for dependency changes
+    LangChainPendingDeprecationWarning = PendingDeprecationWarning
+
 # ─── 환경 변수 로드 ────────────────────────────────────────────────────────────
 # 시스템 환경 변수보다 .env 파일의 값을 우선 적용.
 load_dotenv(override=True)
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"The default value of `allowed_objects` will change in a future version\..*",
+    category=LangChainPendingDeprecationWarning,
+)
 
 
 def _resolve_app_version() -> str:
