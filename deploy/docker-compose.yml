@@ -21,8 +21,10 @@ services:
       start_period: 20s
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - OPENAI_EMBEDDING_DIMENSIONS=${OPENAI_EMBEDDING_DIMENSIONS:-1024}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_API_URL=${GEMINI_API_URL:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash-lite}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-large}
       - QUERY_PARSER_MODEL=${QUERY_PARSER_MODEL:-}
@@ -37,14 +39,28 @@ services:
       - QDRANT_VECTOR_NAME_MAP=${QDRANT_VECTOR_NAME_MAP:-law_article=body}
       - OPENSEARCH_URL=${OPENSEARCH_URL:-http://opensearch:9200}
       - OPENSEARCH_INDEX=${OPENSEARCH_INDEX:-law_article,legal_case,legal_relation}
+      - OPENSEARCH_API_KEY=${OPENSEARCH_API_KEY:-}
       - OPENSEARCH_USERNAME=${OPENSEARCH_USERNAME:-}
       - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-}
+      - OPENSEARCH_SEARCH_TEXT_FIELD=${OPENSEARCH_SEARCH_TEXT_FIELD:-search_text}
       - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - LLM_MODEL=${LLM_MODEL:-}
+      - LLM_CHAT_COMPLETIONS_URL=${LLM_CHAT_COMPLETIONS_URL:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-2048}
+      - LAW_SLOT_SCORE_THRESHOLD=${LAW_SLOT_SCORE_THRESHOLD:-0.55}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - LANGFUSE_HOST=${LANGFUSE_HOST:-}
       - DATABASE_URL=${DATABASE_URL:-postgresql://user:password@postgres:5432/las}
+      - DOCUMENT_REVIEW_STORAGE_DIR=${DOCUMENT_REVIEW_STORAGE_DIR:-/app/storage/document_reviews}
+      - DOC_PROCESSOR_LLM_PROVIDER=${DOC_PROCESSOR_LLM_PROVIDER:-}
+      - DOC_PROCESSOR_LLM_MODEL=${DOC_PROCESSOR_LLM_MODEL:-}
+      - DOC_PROCESSOR_LLM_BASE_URL=${DOC_PROCESSOR_LLM_BASE_URL:-}
+      - DOC_PROCESSOR_LLM_API_KEY=${DOC_PROCESSOR_LLM_API_KEY:-}
+      - DOC_PROCESSOR_LLM_STRUCTURED_METHOD=${DOC_PROCESSOR_LLM_STRUCTURED_METHOD:-json_mode}
+    volumes:
+      - document-review-storage:/app/storage/document_reviews
 
   law-updater:
     build:
@@ -109,3 +125,4 @@ services:
 
 volumes:
   law-updater-data:
+  document-review-storage:
