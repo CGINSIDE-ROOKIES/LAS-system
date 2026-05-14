@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from html import escape
+import logging
 from pathlib import Path
 from typing import Iterable
 
 from doc_processor.api import ParseDocumentResult, TextAnnotation, TextEdit, render_review_html
 from doc_processor.contract_review import ContractReviewFinding, ContractReviewResult
+
+logger = logging.getLogger(__name__)
 
 _CATEGORY_COLORS = {
     "clause_heading": "#A7F3D0",
@@ -62,6 +65,8 @@ def render_edited_preview(source_path: str | Path, edits: list[TextEdit]) -> str
 
 def _parser_annotations(parse_result: ParseDocumentResult) -> Iterable[TextAnnotation]:
     for paragraph in parse_result.paragraphs:
+        if paragraph.has_tables or paragraph.has_images:
+            continue
         category = str(paragraph.category or "other")
         label_parts = []
         if paragraph.clause_no:
@@ -101,11 +106,89 @@ def _render(*, source_path: str | Path, annotations: list[TextAnnotation], title
     result = render_review_html(source_path=source_path, annotations=annotations, title=title)
     if result.ok and result.html:
         return result.html
-    issues = [
-        getattr(issue, "message", str(issue))
-        for issue in getattr(result.validation, "issues", [])
-    ]
+
+    issues = _validation_issue_details(result)
+    logger.warning(
+        "document review preview annotation render failed: title=%s source_path=%s annotation_count=%s issues=%s",
+        title,
+        source_path,
+        len(annotations),
+        issues,
+    )
+
+    filtered_annotations = _filter_invalid_annotations(annotations, result)
+    if len(filtered_annotations) < len(annotations):
+        retry = render_review_html(source_path=source_path, annotations=filtered_annotations, title=title)
+        if retry.ok and retry.html:
+            return _inject_preview_diagnostics(
+                retry.html,
+                skipped_count=len(annotations) - len(filtered_annotations),
+                issues=issues,
+            )
+
+    plain = render_review_html(source_path=source_path, annotations=[], title=title)
+    if plain.ok and plain.html:
+        return _inject_preview_diagnostics(
+            plain.html,
+            skipped_count=len(annotations),
+            issues=issues,
+        )
+
     return _fallback_html(title=title, issues=issues)
+
+
+def _validation_issue_details(result: object) -> list[str]:
+    details: list[str] = []
+    for issue in getattr(getattr(result, "validation", None), "issues", []) or []:
+        code = getattr(issue, "code", None)
+        target_kind = getattr(issue, "target_kind", None)
+        target_id = getattr(issue, "target_id", None)
+        message = getattr(issue, "message", str(issue))
+        target = f"{target_kind}:{target_id}" if target_kind and target_id else target_id
+        if code and target:
+            details.append(f"{code} ({target}): {message}")
+        elif code:
+            details.append(f"{code}: {message}")
+        else:
+            details.append(str(message))
+    return details
+
+
+def _filter_invalid_annotations(
+    annotations: list[TextAnnotation],
+    result: object,
+) -> list[TextAnnotation]:
+    invalid_targets = {
+        (str(getattr(issue, "target_kind", "")), str(getattr(issue, "target_id", "")))
+        for issue in getattr(getattr(result, "validation", None), "issues", []) or []
+        if getattr(issue, "target_kind", None) and getattr(issue, "target_id", None)
+    }
+    if not invalid_targets:
+        return annotations
+    return [
+        annotation
+        for annotation in annotations
+        if (str(annotation.target_kind), annotation.target_id) not in invalid_targets
+    ]
+
+
+def _inject_preview_diagnostics(html: str, *, skipped_count: int, issues: list[str]) -> str:
+    if skipped_count <= 0 and not issues:
+        return html
+    issue_items = "".join(f"<li>{escape(issue)}</li>" for issue in issues[:20])
+    extra = max(0, len(issues) - 20)
+    if extra:
+        issue_items += f"<li>{extra} more issues omitted.</li>"
+    diagnostics = (
+        "<details style=\"max-width:900px;margin:0 auto 12px auto;padding:8px 12px;"
+        "border:1px solid #f59e0b;background:#fffbeb;color:#92400e;font:13px system-ui,sans-serif\">"
+        f"<summary>{skipped_count} preview annotations were skipped.</summary>"
+        f"<ul style=\"margin:8px 0 0 18px;padding:0\">{issue_items}</ul>"
+        "</details>"
+    )
+    if "<body>" in html:
+        return html.replace("<body>", f"<body>{diagnostics}", 1)
+    return diagnostics + html
 
 
 def _fallback_html(*, title: str, issues: list[str]) -> str:
