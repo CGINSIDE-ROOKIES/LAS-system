@@ -105,7 +105,7 @@ def generate(
     http_json: Any,
 ) -> tuple[str, dict[str, int] | None]:
     if not api_key:
-        raise LLMError("GEMINI_API_KEY가 필요합니다.")
+        raise LLMError("LLM_API_KEY가 필요합니다.")
     payload = build_payload(
         prompt_text=prompt_text,
         system_prompt=system_prompt,
@@ -130,7 +130,7 @@ def stream(
     usage_out: dict[str, int] | None = None,
 ) -> Iterator[str]:
     if not api_key:
-        raise LLMError("GEMINI_API_KEY가 필요합니다.")
+        raise LLMError("LLM_API_KEY가 필요합니다.")
     payload = build_payload(
         prompt_text=prompt_text,
         system_prompt=system_prompt,

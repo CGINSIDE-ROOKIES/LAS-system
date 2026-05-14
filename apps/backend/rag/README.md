@@ -8,7 +8,7 @@ retrieval/generation 파이프라인 패키지.
 
 - Qdrant·OpenSearch 데이터는 서버에서 운영 중이며, 로컬 인덱싱 없이 바로 연결해 사용한다.
 - 로컬 Docker(Qdrant/OpenSearch)는 더 이상 사용하지 않는다.
-- `.env`에 서버 연결 정보를 설정하면 바로 검색·평가가 가능하다.
+- `apps/backend/.env`에 서버 연결 정보를 설정하면 바로 검색·평가가 가능하다.
 
 ---
 
@@ -16,13 +16,13 @@ retrieval/generation 파이프라인 패키지.
 
 1. 작업 디렉토리 이동
 ```bash
-cd /home/user/projects/LAS-system/apps/backend/rag
+cd /home/user/projects/LAS-system/apps/backend
 ```
 
 2. 환경변수 로드
 ```bash
 cp .env.example .env   # 최초 1회, 서버 연결 정보 입력
-set -a && source .env && set +a
+cd rag
 ```
 
 3. 검색 실행
@@ -80,7 +80,7 @@ QDRANT_URL=http://...
 QDRANT_API_KEY=...
 
 OPENSEARCH_URL=http://...
-OPENSEARCH_USER=...
+OPENSEARCH_USERNAME=...
 OPENSEARCH_PASSWORD=...
 ```
 
@@ -89,28 +89,31 @@ OPENSEARCH_PASSWORD=...
 임베딩은 OpenAI-compatible API 경로만 사용한다.
 
 ```env
+EMBEDDING_PROVIDER=openai_compat
 EMBEDDING_MODEL=text-embedding-3-large
-OPENAI_API_KEY=...
-# OPENAI_BASE_URL=https://api.openai.com/v1
-# OPENAI_EMBEDDING_DIMENSIONS=
+EMBEDDING_API_KEY=...
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_DIMENSIONS=1024
 ```
 
-`OPENAI_EMBEDDING_DIMENSIONS`를 지정하는 경우 Qdrant에 저장된 벡터 차원과 반드시 일치해야 한다.
+`EMBEDDING_DIMENSIONS`를 지정하는 경우 Qdrant에 저장된 벡터 차원과 반드시 일치해야 한다.
 
 ### LLM (generation CLI 사용 시)
 
 ```env
 # openai_compat (기본값)
 LLM_PROVIDER=openai_compat
-LLM_CHAT_COMPLETIONS_URL=http://...
 LLM_MODEL=...
+LLM_URL=http://.../v1/chat/completions
 LLM_API_KEY=...
 
 # Gemini 사용 시
 # LLM_PROVIDER=gemini
-# GEMINI_API_KEY=...
-# GEMINI_MODEL=gemini-1.5-flash
+# LLM_MODEL=gemini-1.5-flash
+# LLM_API_KEY=...
 ```
+
+`QUERY_PARSER_LLM_*` can override parser-only settings. `GRAPH_LLM_*` can override graph-planner settings. When omitted, both inherit `LLM_*`.
 
 ---
 

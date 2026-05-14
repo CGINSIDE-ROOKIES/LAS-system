@@ -17,7 +17,7 @@ from doc_processor.parser_types import RelevanceMode
 RELEVANT_ENV_KEYS = (
     "LANGFUSE_PUBLIC_KEY",
     "LANGFUSE_SECRET_KEY",
-    "LANGFUSE_BASE_URL",
+    "LANGFUSE_HOST",
     "LANGFUSE_TIMEOUT",
     "LANGFUSE_FLUSH_AT",
     "LANGFUSE_FLUSH_INTERVAL",

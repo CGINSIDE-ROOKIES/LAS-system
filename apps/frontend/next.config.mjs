@@ -7,9 +7,7 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const allowedFrameOrigins = process.env.ALLOWED_FRAME_ORIGINS
   ? process.env.ALLOWED_FRAME_ORIGINS.split(",").map((o) => o.trim())
   : [];
-const backendInternalUrl = (
-  process.env.BACKEND_INTERNAL_URL || "http://backend-api:8000"
-).replace(/\/$/, "");
+const backendInternalUrl = (process.env.BACKEND_INTERNAL_URL || "").replace(/\/$/, "");
 
 const frameAncestors =
   allowedFrameOrigins.length > 0

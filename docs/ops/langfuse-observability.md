@@ -160,10 +160,10 @@ span의 시작/종료 시각은 Langfuse가 자동으로 기록한다. 단계별
 ## 5. 환경 설정
 
 ```bash
-# apps/backend/rag/.env
+# apps/backend/.env
 LANGFUSE_PUBLIC_KEY=pk-...
 LANGFUSE_SECRET_KEY=sk-...
-LANGFUSE_HOST=https://cloud.langfuse.com  # self-hosted 시 변경
+LANGFUSE_HOST=https://cloud.langfuse.com
 ```
 
 두 키 중 하나라도 없으면 Langfuse 전체가 자동 비활성화된다(`langfuse_client.py:18`).

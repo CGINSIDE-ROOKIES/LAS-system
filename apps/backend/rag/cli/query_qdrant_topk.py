@@ -17,9 +17,7 @@ import json
 import os
 import sys
 
-from dotenv import load_dotenv
-
-load_dotenv()
+from rag_pipeline.env_config import load_backend_env
 
 from retrieval_common import (
     DEFAULT_EMBEDDING_MODEL,
@@ -27,6 +25,8 @@ from retrieval_common import (
     require_env_or_arg,
     search_qdrant,
 )
+
+load_backend_env()
 
 
 #  ── 결과 출력 ────────────────────────────────────────────────────────────────
@@ -132,12 +132,8 @@ def run_single_query(args: argparse.Namespace, question: str) -> int:
     qdrant_url = require_env_or_arg(
         args.qdrant_url, "QDRANT_URL", "http://localhost:6333"
     )
-    # 콤마 구분 복수 컬렉션 지원 (CLI 인자 > QDRANT_COLLECTIONS > QDRANT_COLLECTION 순)
-    raw_collections = (
-        args.collections
-        or os.getenv("QDRANT_COLLECTIONS", "")
-        or os.getenv("QDRANT_COLLECTION", "")
-    ).strip()
+    # 콤마 구분 복수 컬렉션 지원 (CLI 인자 > QDRANT_COLLECTIONS 순)
+    raw_collections = (args.collections or os.getenv("QDRANT_COLLECTIONS", "")).strip()
     if not raw_collections:
         raise SystemExit("Missing required setting: --collections or QDRANT_COLLECTIONS")
     collections = [c.strip() for c in raw_collections.split(",") if c.strip()]

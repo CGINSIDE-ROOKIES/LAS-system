@@ -15,9 +15,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-load_dotenv()
+from rag_pipeline.env_config import load_backend_env
 
 from query_hybrid_rrf import fuse_rrf, fuse_rrf_multi
 from retrieval_common import (
@@ -26,6 +24,8 @@ from retrieval_common import (
     search_bm25,
     search_qdrant,
 )
+
+load_backend_env()
 
 
 @dataclass
@@ -89,7 +89,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     p.add_argument("--qdrant-url", default="", help="기본: QDRANT_URL")
-    p.add_argument("--qdrant-collection", default="", help="기본: QDRANT_COLLECTION")
+    p.add_argument("--qdrant-collection", default="", help="기본: QDRANT_COLLECTIONS")
     p.add_argument("--qdrant-api-key", default="", help="기본: QDRANT_API_KEY")
 
     p.add_argument("--opensearch-url", default="", help="기본: OPENSEARCH_URL")
@@ -203,7 +203,6 @@ def eval_backend(
     raw_collections = (
         args.qdrant_collection
         or os.getenv("QDRANT_COLLECTIONS", "")
-        or os.getenv("QDRANT_COLLECTION", "")
     ).strip()
     if not raw_collections:
         raise SystemExit("Missing required setting: --qdrant-collection or QDRANT_COLLECTIONS")

@@ -4,22 +4,23 @@ Legal AI Assistant FastAPI 백엔드 서버.
 
 ## 사전 준비
 
-- Qdrant·OpenSearch는 서버에서 운영 중. `.env`에 연결 정보 설정 필요.
-- PostgreSQL 연결 정보도 `.env`에 설정 필요.
+- Qdrant·OpenSearch는 서버에서 운영 중. `apps/backend/.env`에 연결 정보 설정 필요.
+- PostgreSQL 연결 정보도 `apps/backend/.env`에 설정 필요.
 
 ## 실행
 
 반드시 이 디렉토리(`apps/backend/api/`)에서 실행한다.
 
 ```bash
-cd apps/backend/api
+cd apps/backend
 cp .env.example .env   # 최초 1회
+cd api
 uv run uvicorn main:app --reload    # 개발 서버 (localhost:8000)
 ```
 
 ## 환경변수
 
-`.env` 파일에 아래 항목을 설정한다.
+`apps/backend/.env` 파일에 아래 항목을 설정한다.
 
 ```env
 # PostgreSQL
@@ -38,15 +39,17 @@ OPENSEARCH_URL=http://<서버IP>:9200
 OPENSEARCH_INDEX=las_legal_docs
 
 # 임베딩 (API only)
+EMBEDDING_PROVIDER=openai_compat
 EMBEDDING_MODEL=text-embedding-3-large
-OPENAI_API_KEY=...
-# OPENAI_BASE_URL=https://api.openai.com/v1
-# OPENAI_EMBEDDING_DIMENSIONS=
+EMBEDDING_API_KEY=...
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_DIMENSIONS=1024
 
 # LLM
 LLM_PROVIDER=gemini
-GEMINI_API_KEY=...
-GEMINI_MODEL=gemini-flash-latest
+LLM_MODEL=gemini-flash-latest
+LLM_API_KEY=...
+# openai_compat 사용 시: LLM_URL=http://host/v1/chat/completions
 LLM_MAX_TOKENS=4096
 ```
 
@@ -114,7 +117,7 @@ data: {"type": "error", "code": "PIPELINE_ERROR", "error": "..."}
 
 ### POST /api/v1/graph/query
 
-자연어 질의를 LLM이 Cypher로 변환해 Neo4j를 조회한다. `GRAPH_QUERY_MODE=llm_free` 환경변수가 필요하다.
+자연어 질의를 LLM이 Cypher로 변환해 Neo4j를 조회한다. `GRAPH_QUERY_MODE=llm_free` 환경변수가 필요하다. `GRAPH_LLM_*` 미설정 시 `QUERY_PARSER_LLM_*`, 그다음 `LLM_*` 설정을 사용한다.
 
 요청:
 ```json

@@ -311,28 +311,27 @@ class ContractReviewGraphState(BaseModel):
 
 def check_contract_review_env() -> ContractReviewEnvStatus:
     ensure_local_env_loaded()
-    _apply_doc_processor_llm_env_fallbacks()
 
     qdrant_url = os.getenv("QDRANT_URL", "").strip()
     qdrant_collections = _split_env_list("QDRANT_COLLECTIONS")
     opensearch_url = os.getenv("OPENSEARCH_URL", "").strip()
     opensearch_indices = _split_env_list("OPENSEARCH_INDEX")
-    provider = os.getenv("LLM_PROVIDER", "openai_compat").strip().lower()
+    provider = os.getenv("LLM_PROVIDER", "").strip().lower()
     embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-large").strip()
     missing: list[str] = []
     warnings: list[str] = []
-    embedding_dimensions = _parse_optional_int_env("OPENAI_EMBEDDING_DIMENSIONS", warnings)
+    embedding_dimensions = _parse_optional_int_env("EMBEDDING_DIMENSIONS", warnings)
     if embedding_dimensions is None:
         warnings.append(
-            "OPENAI_EMBEDDING_DIMENSIONS is not set; set it to 1024 for the current reduced-dimension Qdrant DB."
+            "EMBEDDING_DIMENSIONS is not set; set it to 1024 for the current reduced-dimension Qdrant DB."
         )
 
     if not qdrant_url:
         missing.append("QDRANT_URL")
     if not qdrant_collections:
         missing.append("QDRANT_COLLECTIONS")
-    if not os.getenv("OPENAI_API_KEY", "").strip():
-        missing.append("OPENAI_API_KEY")
+    if not os.getenv("EMBEDDING_API_KEY", "").strip():
+        missing.append("EMBEDDING_API_KEY")
 
     if opensearch_url and not opensearch_indices:
         warnings.append("OPENSEARCH_URL is set but OPENSEARCH_INDEX is empty; BM25 retrieval may be skipped.")
@@ -340,19 +339,24 @@ def check_contract_review_env() -> ContractReviewEnvStatus:
         warnings.append("OPENSEARCH_INDEX is set but OPENSEARCH_URL is empty; BM25 retrieval is disabled.")
 
     if provider == "gemini":
-        model = os.getenv("GEMINI_MODEL", "gemini-2.5-lite").strip()
-        if not os.getenv("GEMINI_API_KEY", "").strip():
-            missing.append("GEMINI_API_KEY")
+        model = os.getenv("LLM_MODEL", "").strip()
+        if not model:
+            missing.append("LLM_MODEL")
+        if not os.getenv("LLM_API_KEY", "").strip():
+            missing.append("LLM_API_KEY")
     elif provider == "openai_compat":
         model = os.getenv("LLM_MODEL", "").strip()
         if not model:
             missing.append("LLM_MODEL")
-        if not os.getenv("LLM_CHAT_COMPLETIONS_URL", "").strip():
-            missing.append("LLM_CHAT_COMPLETIONS_URL")
-        if not (os.getenv("LLM_API_KEY", "").strip() or os.getenv("OPENAI_API_KEY", "").strip()):
-            missing.append("LLM_API_KEY or OPENAI_API_KEY")
+        if not (
+            os.getenv("LLM_URL", "").strip()
+            or os.getenv("LLM_BASE_URL", "").strip()
+        ):
+            missing.append("LLM_URL or LLM_BASE_URL")
+        if not os.getenv("LLM_API_KEY", "").strip():
+            missing.append("LLM_API_KEY")
     else:
-        model = os.getenv("LLM_MODEL", "").strip() or os.getenv("GEMINI_MODEL", "").strip()
+        model = os.getenv("LLM_MODEL", "").strip()
         missing.append("LLM_PROVIDER=openai_compat|gemini")
 
     return ContractReviewEnvStatus(
@@ -1644,7 +1648,10 @@ def _split_env_list(name: str) -> list[str]:
     return [part.strip() for part in os.getenv(name, "").split(",") if part.strip()]
 
 
-def _parse_optional_int_env(name: str, warnings: list[str]) -> int | None:
+def _parse_optional_int_env(
+    name: str,
+    warnings: list[str],
+) -> int | None:
     raw = os.getenv(name, "").strip()
     if not raw:
         return None
@@ -1653,37 +1660,6 @@ def _parse_optional_int_env(name: str, warnings: list[str]) -> int | None:
     except ValueError:
         warnings.append(f"{name} must be an integer. Current value: {raw!r}.")
         return None
-
-
-def _apply_doc_processor_llm_env_fallbacks() -> None:
-    doc_provider = os.getenv("DOC_PROCESSOR_LLM_PROVIDER", "").strip()
-    if doc_provider and not os.getenv("LLM_PROVIDER", "").strip():
-        os.environ["LLM_PROVIDER"] = doc_provider
-
-    provider = os.getenv("LLM_PROVIDER", "openai_compat").strip().lower()
-    doc_model = os.getenv("DOC_PROCESSOR_LLM_MODEL", "").strip()
-    doc_api_key = os.getenv("DOC_PROCESSOR_LLM_API_KEY", "").strip()
-    opensearch_user = os.getenv("OPENSEARCH_USER", "").strip()
-    if opensearch_user and not os.getenv("OPENSEARCH_USERNAME", "").strip():
-        os.environ["OPENSEARCH_USERNAME"] = opensearch_user
-
-    if provider == "gemini":
-        if doc_model and not os.getenv("GEMINI_MODEL", "").strip():
-            os.environ["GEMINI_MODEL"] = doc_model
-        if not os.getenv("GEMINI_API_KEY", "").strip():
-            fallback_key = doc_api_key or os.getenv("GOOGLE_API_KEY", "").strip()
-            if fallback_key:
-                os.environ["GEMINI_API_KEY"] = fallback_key
-        return
-
-    if provider == "openai_compat":
-        if doc_model and not os.getenv("LLM_MODEL", "").strip():
-            os.environ["LLM_MODEL"] = doc_model
-        if doc_api_key and not os.getenv("LLM_API_KEY", "").strip():
-            os.environ["LLM_API_KEY"] = doc_api_key
-        doc_base_url = os.getenv("DOC_PROCESSOR_LLM_BASE_URL", "").strip()
-        if doc_base_url.endswith("/chat/completions") and not os.getenv("LLM_CHAT_COMPLETIONS_URL", "").strip():
-            os.environ["LLM_CHAT_COMPLETIONS_URL"] = doc_base_url
 
 
 def _as_int(value: Any) -> int | None:

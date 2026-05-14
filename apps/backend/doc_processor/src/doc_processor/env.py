@@ -17,20 +17,14 @@ def ensure_local_env_loaded() -> None:
         return
     _DOTENV_LOADED = True
 
-    package_root = Path(__file__).resolve().parents[2]
-    package_env = package_root / ".env"
-    cwd_env = Path.cwd() / ".env"
+    backend_env = Path(__file__).resolve().parents[3] / ".env"
 
     if load_dotenv is not None:
-        if package_env.exists():
-            load_dotenv(package_env, override=False)
-        if cwd_env.exists() and cwd_env != package_env:
-            load_dotenv(cwd_env, override=False)
+        if backend_env.exists():
+            load_dotenv(backend_env, override=False)
         return
 
-    _load_simple_env_file(package_env)
-    if cwd_env.exists() and cwd_env != package_env:
-        _load_simple_env_file(cwd_env)
+    _load_simple_env_file(backend_env)
 
 
 def _load_simple_env_file(path: Path) -> None:
