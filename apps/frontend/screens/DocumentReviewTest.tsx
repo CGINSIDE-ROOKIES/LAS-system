@@ -87,8 +87,9 @@ export default function DocumentReviewTest() {
   const previewAvailable = Boolean(reviewId && summary && previewFlag && summary.artifact_flags?.[previewFlag]);
   const previewSrc = useMemo(() => {
     if (!reviewId || !previewAvailable) return "";
+    const safeReviewId = encodeURIComponent(reviewId);
     const cacheKey = summary?.updated_at ? `&t=${encodeURIComponent(summary.updated_at)}` : "";
-    return absoluteApiUrl(`/api/v1/document-reviews/${reviewId}/preview.html?kind=${previewKind}${cacheKey}`);
+    return absoluteApiUrl(`/api/v1/document-reviews/${safeReviewId}/preview.html?kind=${previewKind}${cacheKey}`);
   }, [previewAvailable, previewKind, reviewId, summary?.updated_at]);
   const acceptedEditableCount = suggestions.filter((item) => item.status === "accepted" && item.proposed_edit).length;
 
