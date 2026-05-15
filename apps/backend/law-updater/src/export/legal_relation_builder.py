@@ -128,6 +128,10 @@ def _build_relation_text(record: dict[str, Any]) -> str:
     if article_displays:
         lines.append(f"관련 조문: {', '.join(article_displays)}")
 
+    subject_article_displays = record.get("subject_article_no_displays") or []
+    if subject_article_displays:
+        lines.append(f"심판대상 조문: {', '.join(subject_article_displays)}")
+
     referenced_case_numbers = [
         str(item).strip()
         for item in (record.get("_referenced_case_numbers") or [])
@@ -215,6 +219,33 @@ def _merge_article_refs(
     return merged
 
 
+def _merge_subject_article_refs(parsed: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    merged: dict[str, list[dict[str, Any]]] = {}
+
+    for item in parsed.get("structured_subject_article_refs") or []:
+        if not isinstance(item, dict):
+            continue
+        law_name = str(item.get("law_name") or "").strip()
+        article_key = str(item.get("article_key") or "").strip()
+        article_no_display = str(item.get("article_no_display") or "").strip()
+        if not law_name or not article_key or not article_no_display:
+            continue
+        merged.setdefault(law_name, [])
+        article = {
+            "article_key": article_key,
+            "article_no_display": article_no_display,
+            "reference_sources": ["structured_subject_field"],
+        }
+        if not any(
+            existing["article_key"] == article["article_key"]
+            and existing["article_no_display"] == article["article_no_display"]
+            for existing in merged[law_name]
+        ):
+            merged[law_name].append(article)
+
+    return merged
+
+
 
 def build_root_relation_payloads(
     *,
@@ -286,11 +317,14 @@ def build_root_relation_payloads(
         matched_law_names = find_related_law_names(body_text, family_law_names) if body_text else []
         article_refs_map = _merge_article_refs(parsed, body_text, family_law_names)
         article_refs = article_refs_map.get(law_name, [])
+        subject_article_refs_map = _merge_subject_article_refs(parsed)
+        subject_article_refs = subject_article_refs_map.get(law_name, [])
         has_structured_article_ref = any(
             str(item.get("law_name") or "").strip() == law_name
             for item in (parsed.get("structured_article_refs") or [])
             if isinstance(item, dict)
         )
+        has_subject_article_ref = bool(subject_article_refs)
         referenced_case_numbers = (
             extract_case_number_refs(body_text, exclude_numbers=[parsed.get("doc_number")])
             if body_text and "cited_case" in relation_rules
@@ -302,18 +336,31 @@ def build_root_relation_payloads(
             relation_types.append("cited_law")
         if article_refs and "related_law" in relation_rules:
             relation_types.append("related_law")
+        if has_subject_article_ref:
+            relation_types.append("challenged_law")
+            relation_types.append("challenged_article")
 
-        body_verified = bool(law_name in matched_law_names or article_refs or has_structured_article_ref)
+        body_verified = bool(law_name in matched_law_names or article_refs or has_structured_article_ref or has_subject_article_ref)
         relation_types = list(dict.fromkeys(relation_types))
         source_law_uid = str(hits[0].get("source_law_uid") or build_law_uid(None, None, law_name))
         preview_anchor = law_name if law_name in matched_law_names else (referenced_case_numbers[0] if referenced_case_numbers else None)
         evidence_preview = build_evidence_preview(body_text, law_name=law_name, anchor=preview_anchor)
         article_keys = [item["article_key"] for item in article_refs]
         article_no_displays = [item["article_no_display"] for item in article_refs]
+        subject_article_keys = [item["article_key"] for item in subject_article_refs]
+        subject_article_no_displays = [item["article_no_display"] for item in subject_article_refs]
         article_reference_sources = sorted(
             {
                 source
                 for item in article_refs
+                for source in (item.get("reference_sources") or [])
+                if str(source).strip()
+            }
+        )
+        subject_article_reference_sources = sorted(
+            {
+                source
+                for item in subject_article_refs
                 for source in (item.get("reference_sources") or [])
                 if str(source).strip()
             }
@@ -354,8 +401,14 @@ def build_root_relation_payloads(
             "article_keys": article_keys,
             "article_no_displays": article_no_displays,
             "article_reference_sources": article_reference_sources,
+            "subject_article_keys": subject_article_keys,
+            "subject_article_no_displays": subject_article_no_displays,
+            "subject_article_reference_sources": subject_article_reference_sources,
             "body_verified": body_verified,
-            "relation_confidence": _confidence(article_refs, matched_law_names, law_name, has_structured_article_ref) if body_verified else 0.45,
+            "relation_confidence": (
+                0.99 if has_subject_article_ref
+                else _confidence(article_refs, matched_law_names, law_name, has_structured_article_ref)
+            ) if body_verified else 0.45,
             "evidence_preview": evidence_preview,
             "display_text": _display_text(evidence_preview or body_text),
             "source_hit_count": len(hits),
@@ -539,8 +592,19 @@ def build_legal_relation_records(
                 )
 
             result = _dedup_family_search_hits(_merge_relation_rows(built_rows))
-            return [r for r in result if not _is_unverified_search_hit(r)]
+            filtered = [r for r in result if not _is_unverified_search_hit(r)]
+            dropped = len(result) - len(filtered)
+            if dropped:
+                logger.warning(
+                    "build_legal_relation_records: unverified_search_hit dropped=%d path=raw",
+                    dropped,
+                )
+            return filtered
 
+    if raw_related_base_dir is not None:
+        logger.warning(
+            "build_legal_relation_records: raw path had no data, using expanded fallback"
+        )
     expanded_dir = Path(expanded_base_dir)
     if raw_related_base_dir is not None and expanded_dir == Path("data/expanded/03_expanded_related_docs"):
         raw_dir = Path(raw_related_base_dir)
@@ -551,7 +615,14 @@ def build_legal_relation_records(
         rows.extend(list(_iter_jsonl(path)))
     if rows:
         result = _merge_relation_rows(rows)
-        return [r for r in result if not _is_unverified_search_hit(r)]
+        filtered = [r for r in result if not _is_unverified_search_hit(r)]
+        dropped = len(result) - len(filtered)
+        if dropped:
+            logger.warning(
+                "build_legal_relation_records: unverified_search_hit dropped=%d path=fallback",
+                dropped,
+            )
+        return filtered
 
     return []
 

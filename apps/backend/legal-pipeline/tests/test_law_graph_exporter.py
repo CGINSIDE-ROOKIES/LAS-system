@@ -178,6 +178,9 @@ def test_build_law_graph_export_rows_builds_case_nodes_and_case_relation_edges(t
                 "law_name": "최저임금법",
                 "article_keys": ["6"],
                 "article_no_displays": ["제6조"],
+                "subject_article_keys": ["6"],
+                "subject_article_no_displays": ["제6조"],
+                "subject_article_reference_sources": ["structured_subject_field"],
                 "source_group": "03_expanded_related_docs",
                 "source_file_path": "relation.json",
             },
@@ -228,6 +231,20 @@ def test_build_law_graph_export_rows_builds_case_nodes_and_case_relation_edges(t
     assert len(rows["case_related_to_article_edges"]) == 1
     article_edge = rows["case_related_to_article_edges"][0]
     assert article_edge["target_article_uid"] == "article::001::6"
+
+    assert len(rows["case_challenges_law_edges"]) == 1
+    challenge_law_edge = rows["case_challenges_law_edges"][0]
+    assert challenge_law_edge["edge_type"] == "CHALLENGES_LAW"
+    assert challenge_law_edge["source_canonical_case_id"] == "case::detc::180923"
+    assert challenge_law_edge["target_law_uid"] == "001"
+    assert challenge_law_edge["subject_article_keys"] == ["6"]
+
+    assert len(rows["case_challenges_article_edges"]) == 1
+    challenge_article_edge = rows["case_challenges_article_edges"][0]
+    assert challenge_article_edge["edge_type"] == "CHALLENGES_ARTICLE"
+    assert challenge_article_edge["source_canonical_case_id"] == "case::detc::180923"
+    assert challenge_article_edge["target_article_uid"] == "article::001::6"
+    assert challenge_article_edge["reference_sources"] == ["structured_subject_field"]
 
     assert len(rows["case_cites_case_edges"]) == 1
     case_edge = rows["case_cites_case_edges"][0]
