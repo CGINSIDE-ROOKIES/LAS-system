@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 
+from ..env_config import parse_bool_env, parse_int_env, read_llm_profile
 from ..generation.llm_client import generate_answer
 from .data.few_shot import FEW_SHOT_EXAMPLES
 from .data.law_names import ALIAS_MAP, LAW_NAME_LIST
@@ -19,8 +19,6 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PARSER_MODEL_GEMINI = "gemini-2.0-flash-lite"
 DEFAULT_PARSER_MODEL_OPENAI = "gpt-4o-mini"
-_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
-_OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
 _SYSTEM_PROMPT = """\
 당신은 법률 질문 분석기입니다.
@@ -89,36 +87,33 @@ class QueryParserConfig:
     url: str = ""
 
     def __post_init__(self) -> None:
-        if not self.url:
-            if self.provider == "gemini":
-                self.url = f"{_GEMINI_BASE_URL}/{self.model}:generateContent"
-            else:
-                self.url = _OPENAI_CHAT_URL
+        self.provider = self.provider.strip().lower()
 
     @classmethod
     def from_env(cls) -> QueryParserConfig:
         """환경변수에서 설정을 읽어 QueryParserConfig를 생성한다."""
-        provider = os.getenv("LLM_PROVIDER", "gemini").strip()
-        if provider == "gemini":
-            model = (
-                os.getenv("QUERY_PARSER_MODEL", "").strip()
-                or os.getenv("GEMINI_MODEL", "").strip()
-                or DEFAULT_PARSER_MODEL_GEMINI
-            )
-            api_key = os.getenv("GEMINI_API_KEY", "").strip()
-        else:
-            model = (
-                os.getenv("QUERY_PARSER_MODEL", "").strip()
-                or os.getenv("LLM_MODEL", "").strip()
-                or DEFAULT_PARSER_MODEL_OPENAI
-            )
-            api_key = (
-                os.getenv("LLM_API_KEY", "").strip()
-                or os.getenv("OPENAI_API_KEY", "").strip()
-            )
-        strict = os.getenv("QUERY_PARSER_STRICT", "").strip().lower() in ("1", "true")
-        timeout = int(os.getenv("QUERY_PARSER_TIMEOUT", "10").strip() or "10")
-        return cls(api_key=api_key, model=model, timeout=timeout, strict_mode=strict, provider=provider)
+        profile = read_llm_profile(
+            "QUERY_PARSER_LLM",
+            default_provider="gemini",
+            default_gemini_model=DEFAULT_PARSER_MODEL_GEMINI,
+            default_openai_model=DEFAULT_PARSER_MODEL_OPENAI,
+        )
+        strict = parse_bool_env(
+            "QUERY_PARSER_LLM_STRICT",
+            default=False,
+        )
+        timeout = parse_int_env(
+            "QUERY_PARSER_LLM_TIMEOUT",
+            default=10,
+        )
+        return cls(
+            api_key=profile.api_key,
+            model=profile.model,
+            timeout=timeout,
+            strict_mode=strict,
+            provider=profile.provider,
+            url=profile.url,
+        )
 
 
 # ── 프롬프트 빌더 ─────────────────────────────────────────────────────────────
@@ -230,6 +225,17 @@ class QueryParser:
             if not self._api_key_missing_warned:
                 logger.warning("query_parser fallback: LLM API key 미설정으로 파서를 건너뜁니다.")
                 self._api_key_missing_warned = True
+            return QueryParseResult(
+                law_names=[],
+                intent=None,
+                is_legal=True,
+                parser_fallback=True,
+            )
+
+        if not cfg.url:
+            if cfg.strict_mode:
+                raise ValueError("LLM URL이 비어 있습니다.")
+            logger.warning("query_parser fallback: LLM URL 미설정으로 파서를 건너뜁니다.")
             return QueryParseResult(
                 law_names=[],
                 intent=None,

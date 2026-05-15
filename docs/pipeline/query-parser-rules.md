@@ -177,7 +177,7 @@ LLM 프롬프트에 포함되는 4개의 예시:
 파싱이 실패하거나 LLM 응답에서 JSON을 추출할 수 없을 때:
 
 - `strict_mode=false` (기본): 경고 로그 출력 후 fallback 결과 반환
-- `strict_mode=true` (환경변수 `QUERY_PARSER_STRICT=1`): 예외 raise
+- `strict_mode=true` (환경변수 `QUERY_PARSER_LLM_STRICT=true`): 예외 raise
 
 **Fallback 결과**
 ```python
@@ -196,8 +196,9 @@ QueryParseResult(
 
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
-| `GEMINI_API_KEY` | (필수) | Gemini API 인증 키 |
-| `QUERY_PARSER_MODEL` | `gemini-2.0-flash-lite` | 파서에 사용할 모델. `GEMINI_MODEL` → 기본값 순으로 fallback |
-| `GEMINI_MODEL` | | `QUERY_PARSER_MODEL` 미설정 시 사용 |
-| `QUERY_PARSER_TIMEOUT` | `10` | 파서 API 타임아웃 (초). 짧게 설정해 latency 최소화 |
-| `QUERY_PARSER_STRICT` | `0` | `1` 또는 `true`로 설정 시 파싱 실패 예외 발생 |
+| `QUERY_PARSER_LLM_PROVIDER` | `LLM_PROVIDER` → `gemini` | `gemini` 또는 `openai_compat` |
+| `QUERY_PARSER_LLM_MODEL` | `LLM_MODEL` → provider 기본값 | 파서에 사용할 모델 |
+| `QUERY_PARSER_LLM_URL` | `LLM_URL` 또는 provider 기본 URL | OpenAI-compatible `/chat/completions` endpoint 또는 Gemini endpoint override |
+| `QUERY_PARSER_LLM_API_KEY` | `LLM_API_KEY` | 파서 LLM API 키 |
+| `QUERY_PARSER_LLM_TIMEOUT` | `10` | 파서 API 타임아웃 (초). 짧게 설정해 latency 최소화 |
+| `QUERY_PARSER_LLM_STRICT` | `false` | `true`로 설정 시 파싱 실패 예외 발생 |

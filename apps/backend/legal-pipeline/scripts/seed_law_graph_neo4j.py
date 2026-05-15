@@ -5,12 +5,11 @@ import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.common.env import load_backend_env
 from src.export.law_graph_neo4j_seed import build_seed_manifest, iter_seed_operations, load_graph_seed_rows
 
 
@@ -34,15 +33,15 @@ def _load_driver():
         raise RuntimeError("neo4j package is required to seed the graph. Add it to the project dependencies first.") from exc
 
     neo4j_uri = os.getenv("NEO4J_URI") or None
-    neo4j_username = os.getenv("NEO4J_USERNAME") or None
+    neo4j_username = os.getenv("NEO4J_USER") or None
     neo4j_password = os.getenv("NEO4J_PASSWORD") or None
     if not neo4j_uri or not neo4j_username or not neo4j_password:
-        raise RuntimeError("NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD must be configured.")
+        raise RuntimeError("NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD must be configured.")
     return GraphDatabase.driver(neo4j_uri, auth=(neo4j_username, neo4j_password))
 
 
 def main() -> None:
-    load_dotenv()
+    load_backend_env()
     args = parse_args()
     rows = load_graph_seed_rows(args.graph_dir)
     manifest = build_seed_manifest(rows)

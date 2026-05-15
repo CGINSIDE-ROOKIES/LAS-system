@@ -11,8 +11,7 @@ if str(REPO_ROOT) not in sys.path:
 import argparse
 import os
 
-from dotenv import load_dotenv
-
+from src.common.env import load_backend_env
 from src.common.io_utils import _write_json
 from src.export.dataset_builder import build_and_write_datasets
 from src.export.dataset_validation import validate_appendix_merge_outputs
@@ -59,7 +58,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    load_dotenv()
+    load_backend_env()
     args = parse_args()
 
     scope = load_collection_scope(args.scope)

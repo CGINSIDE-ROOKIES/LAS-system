@@ -7,8 +7,8 @@ import urllib.parse
 from typing import Any
 
 from .common import (
+    DEFAULT_EMBEDDING_API_BASE_URL,
     DEFAULT_EMBEDDING_MODEL,
-    DEFAULT_OPENAI_API_BASE_URL,
     RetrievalError,
     SNIPPET_MAX_LEN,
     dedup_normalized_rows,
@@ -148,7 +148,7 @@ def search_qdrant(
     timeout: int,
     embedding_model: str = DEFAULT_EMBEDDING_MODEL,
     embedding_api_key: str | None = None,
-    embedding_api_base_url: str = DEFAULT_OPENAI_API_BASE_URL,
+    embedding_api_base_url: str = DEFAULT_EMBEDDING_API_BASE_URL,
     embedding_dimensions: int | None = None,
     api_key: str | None = None,
     doc_types: list[str] | None = None,

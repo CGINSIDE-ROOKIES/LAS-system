@@ -3,30 +3,29 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Protocol
 
 import httpx
 import numpy as np
 import tiktoken
-from dotenv import load_dotenv
 
+from src.common.env import load_backend_env
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(PROJECT_ROOT / ".env")
+load_backend_env()
 
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
-DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
-DEFAULT_OPENAI_MAX_INPUT_TOKENS = 8192
-DEFAULT_OPENAI_MAX_BATCH_TOKENS = 300000
-DEFAULT_OPENAI_MAX_RETRIES = 5
-DEFAULT_OPENAI_RETRY_BASE_DELAY_SEC = 1.0
+DEFAULT_EMBEDDING_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_EMBEDDING_MAX_INPUT_TOKENS = 8192
+DEFAULT_EMBEDDING_MAX_BATCH_TOKENS = 300000
+DEFAULT_EMBEDDING_MAX_RETRIES = 5
+DEFAULT_EMBEDDING_RETRY_BASE_DELAY_SEC = 1.0
 NORMALIZE_EMBEDDINGS = True
 EMBEDDING_DTYPE = "float32"
 
 
 @dataclass(frozen=True)
 class EmbeddingSettings:
+    provider: str
     model_name: str
     openai_base_url: str
     openai_dimensions: int | None
@@ -48,28 +47,40 @@ class EmbeddingBackend(Protocol):
         ...
 
 
+def _env(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return default
+
+
 def load_embedding_settings() -> EmbeddingSettings:
-    model_name = os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL).strip() or DEFAULT_EMBEDDING_MODEL
-    openai_dimensions_raw = os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "").strip()
+    provider = _env("EMBEDDING_PROVIDER", default="openai_compat").lower()
+    if provider == "openai":
+        provider = "openai_compat"
+    model_name = _env("EMBEDDING_MODEL", default=DEFAULT_EMBEDDING_MODEL)
+    openai_dimensions_raw = _env("EMBEDDING_DIMENSIONS")
     openai_dimensions = int(openai_dimensions_raw) if openai_dimensions_raw else None
-    max_input_tokens_raw = os.getenv("OPENAI_MAX_INPUT_TOKENS", "").strip()
-    max_batch_tokens_raw = os.getenv("OPENAI_MAX_BATCH_TOKENS", "").strip()
-    max_retries_raw = os.getenv("OPENAI_MAX_RETRIES", "").strip()
-    retry_delay_raw = os.getenv("OPENAI_RETRY_BASE_DELAY_SEC", "").strip()
+    max_input_tokens_raw = _env("EMBEDDING_MAX_INPUT_TOKENS")
+    max_batch_tokens_raw = _env("EMBEDDING_MAX_BATCH_TOKENS")
+    max_retries_raw = _env("EMBEDDING_MAX_RETRIES")
+    retry_delay_raw = _env("EMBEDDING_RETRY_BASE_DELAY_SEC")
 
     return EmbeddingSettings(
+        provider=provider,
         model_name=model_name,
-        openai_base_url=os.getenv("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL).rstrip("/"),
+        openai_base_url=_env("EMBEDDING_BASE_URL", default=DEFAULT_EMBEDDING_BASE_URL).rstrip("/"),
         openai_dimensions=openai_dimensions,
         openai_max_input_tokens=(
-            int(max_input_tokens_raw) if max_input_tokens_raw else DEFAULT_OPENAI_MAX_INPUT_TOKENS
+            int(max_input_tokens_raw) if max_input_tokens_raw else DEFAULT_EMBEDDING_MAX_INPUT_TOKENS
         ),
         openai_max_batch_tokens=(
-            int(max_batch_tokens_raw) if max_batch_tokens_raw else DEFAULT_OPENAI_MAX_BATCH_TOKENS
+            int(max_batch_tokens_raw) if max_batch_tokens_raw else DEFAULT_EMBEDDING_MAX_BATCH_TOKENS
         ),
-        openai_max_retries=int(max_retries_raw) if max_retries_raw else DEFAULT_OPENAI_MAX_RETRIES,
+        openai_max_retries=int(max_retries_raw) if max_retries_raw else DEFAULT_EMBEDDING_MAX_RETRIES,
         openai_retry_base_delay_sec=(
-            float(retry_delay_raw) if retry_delay_raw else DEFAULT_OPENAI_RETRY_BASE_DELAY_SEC
+            float(retry_delay_raw) if retry_delay_raw else DEFAULT_EMBEDDING_RETRY_BASE_DELAY_SEC
         ),
         normalize_embeddings=NORMALIZE_EMBEDDINGS,
         dtype=EMBEDDING_DTYPE,
@@ -78,9 +89,12 @@ def load_embedding_settings() -> EmbeddingSettings:
 
 class OpenAIEmbeddingBackend:
     def __init__(self, settings: EmbeddingSettings):
-        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if settings.provider not in {"openai_compat"}:
+            raise RuntimeError(f"Unsupported EMBEDDING_PROVIDER: {settings.provider}")
+
+        api_key = _env("EMBEDDING_API_KEY")
         if not api_key:
-            raise RuntimeError("OPENAI_API_KEY environment variable is not set")
+            raise RuntimeError("EMBEDDING_API_KEY environment variable is not set")
 
         self.model_name = settings.model_name
         self._dimensions = settings.openai_dimensions

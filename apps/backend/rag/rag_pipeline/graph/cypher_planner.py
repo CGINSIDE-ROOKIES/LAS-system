@@ -1,6 +1,6 @@
 """NL → Cypher 템플릿 플래너.
 
-LLM(Gemini Flash)으로 슬롯(법령명, 조문번호, 관계 타입)을 추출하고,
+LLM으로 슬롯(법령명, 조문번호, 관계 타입)을 추출하고,
 코드에서 안전하게 Cypher를 조립한다. 자유형 Cypher 생성은 금지.
 """
 
@@ -8,15 +8,15 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass
 from typing import Any
 
+from ..env_config import parse_int_env, read_llm_profile
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "gemini-1.5-flash"
-_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 _VALID_RELATION_TYPES = frozenset({"child_law", "delegation", "reference", "structure"})
 
@@ -218,22 +218,34 @@ def _parse_slots(text: str) -> GraphQuerySlots:
 class CypherPlannerConfig:
     api_key: str
     model: str = _DEFAULT_MODEL
+    provider: str = "gemini"
+    url: str = ""
     timeout: int = 10
-
-    @property
-    def url(self) -> str:
-        return f"{_GEMINI_BASE_URL}/{self.model}:generateContent"
 
     @classmethod
     def from_env(cls) -> "CypherPlannerConfig":
-        model = (
-            os.getenv("QUERY_PARSER_MODEL", "").strip()
-            or os.getenv("GEMINI_MODEL", "").strip()
-            or _DEFAULT_MODEL
+        profile = read_llm_profile(
+            "GRAPH_LLM",
+            default_provider="gemini",
+            default_gemini_model=_DEFAULT_MODEL,
+            default_openai_model="",
+            inherited_provider_vars=("QUERY_PARSER_LLM_PROVIDER",),
+            inherited_model_vars=("QUERY_PARSER_LLM_MODEL",),
+            inherited_url_vars=("QUERY_PARSER_LLM_URL",),
+            inherited_api_key_vars=("QUERY_PARSER_LLM_API_KEY",),
         )
-        api_key = os.getenv("GEMINI_API_KEY", "").strip()
-        timeout = int(os.getenv("QUERY_PARSER_TIMEOUT", "10").strip() or "10")
-        return cls(api_key=api_key, model=model, timeout=timeout)
+        timeout = parse_int_env(
+            "GRAPH_LLM_TIMEOUT",
+            "QUERY_PARSER_LLM_TIMEOUT",
+            default=10,
+        )
+        return cls(
+            api_key=profile.api_key,
+            model=profile.model,
+            provider=profile.provider,
+            url=profile.url,
+            timeout=timeout,
+        )
 
 
 class CypherPlanner:
@@ -255,14 +267,17 @@ class CypherPlanner:
         from ..generation.llm_client import generate_answer
 
         if not self._cfg.api_key:
-            logger.warning("cypher_planner: GEMINI_API_KEY 미설정, 슬롯 추출 건너뜀")
+            logger.warning("cypher_planner: LLM API key 미설정, 슬롯 추출 건너뜀")
+            return GraphQuerySlots(law_name=None, article_no=None, relation_type=None)
+        if not self._cfg.url:
+            logger.warning("cypher_planner: LLM URL 미설정, 슬롯 추출 건너뜀")
             return GraphQuerySlots(law_name=None, article_no=None, relation_type=None)
 
         raw_text = ""
         try:
             raw_text, _ = generate_answer(
                 _build_prompt(query),
-                provider="gemini",
+                provider=self._cfg.provider,
                 url=self._cfg.url,
                 model=self._cfg.model,
                 api_key=self._cfg.api_key,

@@ -13,11 +13,11 @@ GRAPH_QUERY_MODE:
 from __future__ import annotations
 
 import logging
-import os
 import re
 from dataclasses import dataclass
 from typing import Any
 
+from ..env_config import parse_float_env, parse_int_env, read_llm_profile
 from .cypher_planner import (
     CypherPlan,
     CypherPlanner,
@@ -29,7 +29,6 @@ from .cypher_planner import (
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "gemini-1.5-flash"
-_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 # ── CypherGuard ───────────────────────────────────────────────────────────────
 
@@ -200,24 +199,40 @@ def _infer_relation_type(cypher: str) -> str | None:
 class LlmCypherPlannerConfig:
     api_key: str
     model: str = _DEFAULT_MODEL
+    provider: str = "gemini"
+    url: str = ""
     timeout: int = 15
     max_tokens: int = 2048
     temperature: float = 0.0
 
-    @property
-    def url(self) -> str:
-        return f"{_GEMINI_BASE_URL}/{self.model}:generateContent"
-
     @classmethod
     def from_env(cls) -> "LlmCypherPlannerConfig":
-        model = (
-            os.getenv("QUERY_PARSER_MODEL", "").strip()
-            or os.getenv("GEMINI_MODEL", "").strip()
-            or _DEFAULT_MODEL
+        profile = read_llm_profile(
+            "GRAPH_LLM",
+            default_provider="gemini",
+            default_gemini_model=_DEFAULT_MODEL,
+            default_openai_model="",
+            inherited_provider_vars=("QUERY_PARSER_LLM_PROVIDER",),
+            inherited_model_vars=("QUERY_PARSER_LLM_MODEL",),
+            inherited_url_vars=("QUERY_PARSER_LLM_URL",),
+            inherited_api_key_vars=("QUERY_PARSER_LLM_API_KEY",),
         )
-        api_key = os.getenv("GEMINI_API_KEY", "").strip()
-        timeout = int(os.getenv("QUERY_PARSER_TIMEOUT", "15").strip() or "15")
-        return cls(api_key=api_key, model=model, timeout=timeout)
+        timeout = parse_int_env(
+            "GRAPH_LLM_TIMEOUT",
+            "QUERY_PARSER_LLM_TIMEOUT",
+            default=15,
+        )
+        max_tokens = parse_int_env("GRAPH_LLM_MAX_TOKENS", default=2048)
+        temperature = parse_float_env("GRAPH_LLM_TEMPERATURE", default=0.0)
+        return cls(
+            api_key=profile.api_key,
+            model=profile.model,
+            provider=profile.provider,
+            url=profile.url,
+            timeout=timeout,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
 
 
 # ── LlmCypherPlanner ─────────────────────────────────────────────────────────
@@ -240,7 +255,10 @@ class LlmCypherPlanner:
         from ..generation.llm_client import generate_answer
 
         if not self._cfg.api_key:
-            logger.warning("llm_cypher_planner: GEMINI_API_KEY 미설정, 건너뜀")
+            logger.warning("llm_cypher_planner: LLM API key 미설정, 건너뜀")
+            return None
+        if not self._cfg.url:
+            logger.warning("llm_cypher_planner: LLM URL 미설정, 건너뜀")
             return None
 
         # LLM 호출 전 사전 필터 — 쿼리에 금지 키워드가 직접 포함된 경우 즉시 차단
@@ -254,7 +272,7 @@ class LlmCypherPlanner:
         try:
             raw_text, _ = generate_answer(
                 _build_prompt(query),
-                provider="gemini",
+                provider=self._cfg.provider,
                 url=self._cfg.url,
                 model=self._cfg.model,
                 api_key=self._cfg.api_key,

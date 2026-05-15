@@ -1,11 +1,11 @@
 import os
 
-from dotenv import load_dotenv
+from rag_pipeline.env_config import load_backend_env
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
-load_dotenv()
+load_backend_env()
 
 config = context.config
 

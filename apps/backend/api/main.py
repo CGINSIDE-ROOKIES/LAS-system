@@ -13,7 +13,7 @@ from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 import tomllib
 
-from dotenv import load_dotenv
+from rag_pipeline.env_config import load_backend_env
 
 try:
     from langchain_core._api.deprecation import LangChainPendingDeprecationWarning
@@ -21,8 +21,8 @@ except Exception:  # pragma: no cover - defensive fallback for dependency change
     LangChainPendingDeprecationWarning = PendingDeprecationWarning
 
 # ─── 환경 변수 로드 ────────────────────────────────────────────────────────────
-# 시스템 환경 변수보다 .env 파일의 값을 우선 적용.
-load_dotenv(override=True)
+# 로컬 실행 시 apps/backend/.env를 읽는다. 배포 환경변수는 우선한다.
+load_backend_env()
 
 warnings.filterwarnings(
     "ignore",
