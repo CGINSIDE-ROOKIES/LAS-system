@@ -46,26 +46,27 @@ Required retrieval settings:
 
 - `QDRANT_URL`
 - `QDRANT_COLLECTIONS`
-- `OPENAI_API_KEY` for query embeddings
-- `OPENAI_EMBEDDING_DIMENSIONS=1024` for the current reduced-dimension Qdrant DB
+- `EMBEDDING_API_KEY` for query embeddings
+- `EMBEDDING_DIMENSIONS=1024` for the current reduced-dimension Qdrant DB
 
 Optional hybrid BM25 settings:
 
 - `OPENSEARCH_URL`
 - `OPENSEARCH_INDEX`
 
-Gemini review generation settings:
+Review generation settings:
 
 - `LLM_PROVIDER=gemini`
-- `GEMINI_API_KEY`
-- `GEMINI_MODEL`, for example `gemini-2.5-flash-lite`
+- `LLM_API_KEY`
+- `LLM_MODEL`, for example `gemini-2.5-flash-lite`
 
 For notebook convenience, the env hook can fall back from parser LLM variables
 when the RAG generation variables are missing:
 
 - `DOC_PROCESSOR_LLM_PROVIDER -> LLM_PROVIDER`
-- `DOC_PROCESSOR_LLM_MODEL -> GEMINI_MODEL` when provider is `gemini`
-- `DOC_PROCESSOR_LLM_API_KEY -> GEMINI_API_KEY` when provider is `gemini`
+- `DOC_PROCESSOR_LLM_MODEL -> LLM_MODEL`
+- `DOC_PROCESSOR_LLM_API_KEY -> LLM_API_KEY`
+- `DOC_PROCESSOR_LLM_URL -> LLM_URL`
 
 In `apps/backend/api`, these should be provided by existing dependencies:
 

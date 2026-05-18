@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .common import DEFAULT_EMBEDDING_MODEL, DEFAULT_OPENAI_API_BASE_URL
+from .common import DEFAULT_EMBEDDING_API_BASE_URL, DEFAULT_EMBEDDING_MODEL
 
 
 @dataclass
@@ -23,9 +23,10 @@ class RetrievalConfig:
     opensearch_password: str | None = None
     # BM25 match 대상 필드명(인덱스 매핑에 맞춰 변경 가능)
     opensearch_search_text_field: str = "search_text"
+    embedding_provider: str = "openai_compat"
     embedding_model: str = DEFAULT_EMBEDDING_MODEL
     embedding_api_key: str | None = None
-    embedding_api_base_url: str = DEFAULT_OPENAI_API_BASE_URL
+    embedding_api_base_url: str = DEFAULT_EMBEDDING_API_BASE_URL
     embedding_dimensions: int | None = None
 
     # 파이프라인 파라미터

@@ -75,7 +75,7 @@ class _RetryClient:
 
 def test_load_embedding_settings_for_openai(monkeypatch):
     monkeypatch.setenv("EMBEDDING_MODEL", "text-embedding-3-large")
-    monkeypatch.setenv("OPENAI_EMBEDDING_DIMENSIONS", "1024")
+    monkeypatch.setenv("EMBEDDING_DIMENSIONS", "1024")
 
     settings = load_embedding_settings()
 
@@ -83,10 +83,21 @@ def test_load_embedding_settings_for_openai(monkeypatch):
     assert settings.openai_dimensions == 1024
 
 
+def test_load_embedding_settings_uses_embedding_names(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_DIMENSIONS", "768")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://embeddings.local/v1")
+
+    settings = load_embedding_settings()
+
+    assert settings.provider == "openai_compat"
+    assert settings.openai_dimensions == 768
+    assert settings.openai_base_url == "http://embeddings.local/v1"
+
+
 def test_openai_backend_encodes_and_normalizes(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
     monkeypatch.setenv("EMBEDDING_MODEL", "text-embedding-3-large")
-    monkeypatch.setenv("OPENAI_EMBEDDING_DIMENSIONS", "3")
+    monkeypatch.setenv("EMBEDDING_DIMENSIONS", "3")
     monkeypatch.setattr("src.common.embedding_backend.httpx.Client", _FakeClient)
 
     backend = OpenAIEmbeddingBackend(load_embedding_settings())
@@ -100,10 +111,10 @@ def test_openai_backend_encodes_and_normalizes(monkeypatch):
 
 
 def test_openai_backend_truncates_and_splits_batches(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
     monkeypatch.setenv("EMBEDDING_MODEL", "text-embedding-3-large")
-    monkeypatch.setenv("OPENAI_MAX_INPUT_TOKENS", "4")
-    monkeypatch.setenv("OPENAI_MAX_BATCH_TOKENS", "5")
+    monkeypatch.setenv("EMBEDDING_MAX_INPUT_TOKENS", "4")
+    monkeypatch.setenv("EMBEDDING_MAX_BATCH_TOKENS", "5")
     monkeypatch.setattr("src.common.embedding_backend.httpx.Client", _FakeClient)
 
     backend = OpenAIEmbeddingBackend(load_embedding_settings())
@@ -123,9 +134,9 @@ def test_openai_backend_truncates_and_splits_batches(monkeypatch):
 
 
 def test_openai_backend_retries_retryable_status(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
     monkeypatch.setenv("EMBEDDING_MODEL", "text-embedding-3-large")
-    monkeypatch.setenv("OPENAI_MAX_RETRIES", "2")
+    monkeypatch.setenv("EMBEDDING_MAX_RETRIES", "2")
     monkeypatch.setattr("src.common.embedding_backend.httpx.Client", _RetryClient)
     monkeypatch.setattr("src.common.embedding_backend.time.sleep", lambda _delay: None)
 

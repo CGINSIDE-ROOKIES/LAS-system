@@ -4,10 +4,11 @@ This document is the frontend contract for `POST /api/v1/document-reviews` and r
 
 ## Local Backend Setup
 
-From `apps/backend/api`:
+From `apps/backend`:
 
 ```bash
 cp .env.example .env
+cd api
 docker compose -f docker-compose.dev.yml up -d postgres
 uv sync
 uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
@@ -21,11 +22,11 @@ QDRANT_URL=http://<qdrant-host>:6333
 QDRANT_COLLECTIONS=law_article,legal_case,legal_relation
 OPENSEARCH_URL=http://<opensearch-host>:9200
 OPENSEARCH_INDEX=law_article,legal_case,legal_relation
-OPENAI_API_KEY=<embedding-key>
-OPENAI_EMBEDDING_DIMENSIONS=1024
+EMBEDDING_API_KEY=<embedding-key>
+EMBEDDING_DIMENSIONS=1024
 LLM_PROVIDER=gemini
-GEMINI_API_KEY=<gemini-key>
-GEMINI_MODEL=gemini-2.5-flash-lite
+LLM_API_KEY=<gemini-key>
+LLM_MODEL=gemini-2.5-flash-lite
 NEO4J_URI=bolt://<neo4j-host>:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=<neo4j-password>
@@ -42,7 +43,7 @@ Notes:
 From `apps/frontend`:
 
 ```bash
-cp .env.example .env.local
+cp .env.example .env
 pnpm install
 pnpm dev
 ```

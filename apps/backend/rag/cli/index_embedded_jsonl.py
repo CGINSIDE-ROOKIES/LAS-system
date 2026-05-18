@@ -3,8 +3,8 @@
 
 [빠른 실행 방법]
 1) 환경변수 로드
+   cd apps/backend
    cp .env.example .env
-   set -a && source .env && set +a
 2) 인덱싱 실행
    uv run python cli/index_embedded_jsonl.py --batch-size 256
 3) 업로드 없이 입력 확인만
@@ -36,9 +36,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-from dotenv import load_dotenv
+from rag_pipeline.env_config import load_backend_env
 
-load_dotenv()
+load_backend_env()
 
 
 @dataclass
@@ -444,7 +444,12 @@ def main() -> None:
         raise SystemExit("--batch-size must be > 0")
 
     qdrant_url = os.getenv("QDRANT_URL", "").strip()
-    qdrant_collection = os.getenv("QDRANT_COLLECTION", "").strip()
+    qdrant_collections = [
+        item.strip()
+        for item in os.getenv("QDRANT_COLLECTIONS", "").split(",")
+        if item.strip()
+    ]
+    qdrant_collection = qdrant_collections[0] if qdrant_collections else ""
     qdrant_api_key = os.getenv("QDRANT_API_KEY", "").strip() or None
 
     opensearch_url = os.getenv("OPENSEARCH_URL", "").strip()
@@ -453,7 +458,7 @@ def main() -> None:
         if not qdrant_url:
             raise SystemExit("Missing required env var: QDRANT_URL")
         if not qdrant_collection:
-            raise SystemExit("Missing required env var: QDRANT_COLLECTION")
+            raise SystemExit("Missing required env var: QDRANT_COLLECTIONS")
         if not opensearch_url:
             raise SystemExit("Missing required env var: OPENSEARCH_URL")
         if not opensearch_index:

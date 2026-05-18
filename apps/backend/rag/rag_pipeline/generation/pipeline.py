@@ -15,6 +15,13 @@ from typing import Any, Iterator, TypedDict
 
 logger = logging.getLogger(__name__)
 
+from ..env_config import (
+    read_embedding_api_key,
+    read_embedding_base_url,
+    read_embedding_dimensions,
+    read_embedding_model,
+    read_embedding_provider,
+)
 from ..observability.langfuse_client import score_trace
 from ..observability.tracing import end_span, get_trace_id, start_generation_span, start_span, start_trace, update_trace
 from ..retrieval.common import DEFAULT_EMBEDDING_MODEL, RetrievalError, embed_query
@@ -219,10 +226,11 @@ class RagPipeline:
                     opensearch_username=os.getenv("OPENSEARCH_USERNAME") or None,
                     opensearch_password=os.getenv("OPENSEARCH_PASSWORD") or None,
                     opensearch_search_text_field=os.getenv("OPENSEARCH_SEARCH_TEXT_FIELD", "search_text"),
-                    embedding_model=os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
-                    embedding_api_key=os.getenv("OPENAI_API_KEY") or None,
-                    embedding_api_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-                    embedding_dimensions=int(d) if (d := os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "").strip()) else None,
+                    embedding_provider=read_embedding_provider(),
+                    embedding_model=read_embedding_model(DEFAULT_EMBEDDING_MODEL),
+                    embedding_api_key=read_embedding_api_key() or None,
+                    embedding_api_base_url=read_embedding_base_url(),
+                    embedding_dimensions=read_embedding_dimensions(),
                     law_slot_score_threshold=float(os.getenv("LAW_SLOT_SCORE_THRESHOLD", "0.55").strip()),
                 ),
                 generation=GenerationConfig.from_env(),
@@ -289,6 +297,10 @@ class RagPipeline:
             input={"model": rcfg.embedding_model},
         )
         try:
+            if rcfg.embedding_provider not in {"openai_compat"}:
+                raise RetrievalError(
+                    f"지원하지 않는 EMBEDDING_PROVIDER: {rcfg.embedding_provider}"
+                )
             vector = embed_query(
                 embed_text,
                 rcfg.embedding_model,

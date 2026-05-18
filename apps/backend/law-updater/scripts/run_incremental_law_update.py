@@ -13,8 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from dotenv import load_dotenv
-
+from src.common.env import load_backend_env
 from src.collector.law_delta_collector import collect_daily_law_delta
 from src.collector.legal_case_hydrator import hydrate_canonical_cases_for_family_result
 from src.collector.legal_doc_collector import collect_related_doc_candidates_for_family_result
@@ -184,7 +183,7 @@ def _build_empty_patch_manifest(*, patch_dir: Path, delta_batch_id: str) -> dict
 
 
 def main() -> None:
-    load_dotenv()
+    load_backend_env()
     args = parse_args()
     _log(
         "workflow start"

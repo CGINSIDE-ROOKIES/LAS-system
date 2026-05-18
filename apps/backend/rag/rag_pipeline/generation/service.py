@@ -2,40 +2,20 @@
 
 from __future__ import annotations
 
-import os
 import time
 from dataclasses import dataclass
 from typing import Iterator
 
+from ..env_config import parse_float_env, parse_int_env, read_llm_profile
 from .llm_client import SUPPORTED_PROVIDERS, generate_answer, stream_answer
 from ..retrieval.common import LLMError
 
 DEFAULT_PROVIDER = "openai_compat"
-# 팀 기본 운용 모델. 환경변수 GEMINI_MODEL로 언제든 덮어쓸 수 있다.
+# 팀 기본 운용 모델. 환경변수 LLM_MODEL로 덮어쓸 수 있다.
 DEFAULT_GEMINI_MODEL = "gemini-2.5-lite"
 DEFAULT_LLM_TIMEOUT = 120
 DEFAULT_MAX_TOKENS = 2048
 DEFAULT_TEMPERATURE = 0.2
-
-
-def _parse_int_env(name: str, default: int) -> int:
-    raw = os.getenv(name, str(default)).strip()
-    if not raw:
-        return default
-    try:
-        return int(raw)
-    except ValueError as exc:
-        raise LLMError(f"{name}는 정수여야 합니다. 현재 값: {raw!r}") from exc
-
-
-def _parse_float_env(name: str, default: float) -> float:
-    raw = os.getenv(name, str(default)).strip()
-    if not raw:
-        return default
-    try:
-        return float(raw)
-    except ValueError as exc:
-        raise LLMError(f"{name}는 숫자(float)여야 합니다. 현재 값: {raw!r}") from exc
 
 
 @dataclass
@@ -57,38 +37,36 @@ class GenerationConfig:
             if not self.model:
                 raise LLMError("openai_compat 사용 시 model(LLM_MODEL)이 필요합니다.")
             if not self.url:
-                raise LLMError("openai_compat 사용 시 url(LLM_CHAT_COMPLETIONS_URL)이 필요합니다.")
+                raise LLMError("openai_compat 사용 시 url(LLM_URL 또는 LLM_BASE_URL)이 필요합니다.")
             if not self.api_key:
-                raise LLMError("openai_compat 사용 시 api_key(LLM_API_KEY 또는 OPENAI_API_KEY)가 필요합니다.")
+                raise LLMError("openai_compat 사용 시 api_key(LLM_API_KEY)가 필요합니다.")
 
     @classmethod
     def from_env(cls) -> GenerationConfig:
         """환경변수에서 설정을 읽어 GenerationConfig를 생성한다."""
-        provider = os.getenv("LLM_PROVIDER", DEFAULT_PROVIDER).strip()
+        profile = read_llm_profile(
+            "LLM",
+            default_provider=DEFAULT_PROVIDER,
+            default_gemini_model=DEFAULT_GEMINI_MODEL,
+            default_openai_model="",
+            inherit_global=False,
+        )
 
-        if provider == "gemini":
-            model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
-            url = (
-                os.getenv("GEMINI_API_URL", "").strip()
-                or f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-            )
-            api_key = os.getenv("GEMINI_API_KEY", "").strip()
-        else:
-            model = os.environ["LLM_MODEL"].strip()
-            url = os.environ["LLM_CHAT_COMPLETIONS_URL"].strip()
-            api_key = (
-                os.getenv("LLM_API_KEY", "").strip()
-                or os.getenv("OPENAI_API_KEY", "").strip()
-            )
+        try:
+            timeout = parse_int_env("LLM_TIMEOUT", default=DEFAULT_LLM_TIMEOUT)
+            max_tokens = parse_int_env("LLM_MAX_TOKENS", default=DEFAULT_MAX_TOKENS)
+            temperature = parse_float_env("LLM_TEMPERATURE", default=DEFAULT_TEMPERATURE)
+        except ValueError as exc:
+            raise LLMError(f"LLM 숫자 환경변수 파싱 실패: {exc}") from exc
 
         return cls(
-            provider=provider,
-            url=url,
-            model=model,
-            api_key=api_key,
-            timeout=_parse_int_env("LLM_TIMEOUT", DEFAULT_LLM_TIMEOUT),
-            max_tokens=_parse_int_env("LLM_MAX_TOKENS", DEFAULT_MAX_TOKENS),
-            temperature=_parse_float_env("LLM_TEMPERATURE", DEFAULT_TEMPERATURE),
+            provider=profile.provider,
+            url=profile.url,
+            model=profile.model,
+            api_key=profile.api_key,
+            timeout=timeout,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
 
