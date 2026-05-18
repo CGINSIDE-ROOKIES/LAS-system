@@ -21,6 +21,8 @@ def load_graph_seed_rows(
         "refers_to_article_edges": list(_iter_jsonl(base_dir / "graph_edges_refers_to_article.jsonl")),
         "case_related_to_law_edges": list(_iter_jsonl(base_dir / "graph_edges_case_related_to_law.jsonl")),
         "case_related_to_article_edges": list(_iter_jsonl(base_dir / "graph_edges_case_related_to_article.jsonl")),
+        "case_challenges_law_edges": list(_iter_jsonl(base_dir / "graph_edges_case_challenges_law.jsonl")),
+        "case_challenges_article_edges": list(_iter_jsonl(base_dir / "graph_edges_case_challenges_article.jsonl")),
         "case_cites_case_edges": list(_iter_jsonl(base_dir / "graph_edges_case_cites_case.jsonl")),
     }
 
@@ -37,6 +39,8 @@ def build_seed_manifest(rows: dict[str, list[dict[str, Any]]]) -> dict[str, int]
         "refers_to_article_edge_count": len(rows["refers_to_article_edges"]),
         "case_related_to_law_edge_count": len(rows["case_related_to_law_edges"]),
         "case_related_to_article_edge_count": len(rows["case_related_to_article_edges"]),
+        "case_challenges_law_edge_count": len(rows["case_challenges_law_edges"]),
+        "case_challenges_article_edge_count": len(rows["case_challenges_article_edges"]),
         "case_cites_case_edge_count": len(rows["case_cites_case_edges"]),
     }
 
@@ -115,6 +119,22 @@ MERGE (source)-[r:RELATED_TO_ARTICLE {edge_id: row.edge_id}]->(target)
 SET r += row
 """.strip()
 
+CASE_CHALLENGES_LAW_QUERY = """
+UNWIND $rows AS row
+MATCH (source:Case {canonical_case_id: row.source_canonical_case_id})
+MATCH (target:Law {law_uid: row.target_law_uid})
+MERGE (source)-[r:CHALLENGES_LAW {edge_id: row.edge_id}]->(target)
+SET r += row
+""".strip()
+
+CASE_CHALLENGES_ARTICLE_QUERY = """
+UNWIND $rows AS row
+MATCH (source:Case {canonical_case_id: row.source_canonical_case_id})
+MATCH (target:Article {article_uid: row.target_article_uid})
+MERGE (source)-[r:CHALLENGES_ARTICLE {edge_id: row.edge_id}]->(target)
+SET r += row
+""".strip()
+
 CASE_CITES_CASE_QUERY = """
 UNWIND $rows AS row
 MATCH (source:Case {canonical_case_id: row.source_canonical_case_id})
@@ -136,5 +156,7 @@ def iter_seed_operations(rows: dict[str, list[dict[str, Any]]]) -> list[tuple[st
         (REFERS_TO_ARTICLE_QUERY, rows["refers_to_article_edges"]),
         (CASE_RELATED_TO_LAW_QUERY, rows["case_related_to_law_edges"]),
         (CASE_RELATED_TO_ARTICLE_QUERY, rows["case_related_to_article_edges"]),
+        (CASE_CHALLENGES_LAW_QUERY, rows["case_challenges_law_edges"]),
+        (CASE_CHALLENGES_ARTICLE_QUERY, rows["case_challenges_article_edges"]),
         (CASE_CITES_CASE_QUERY, rows["case_cites_case_edges"]),
     ]

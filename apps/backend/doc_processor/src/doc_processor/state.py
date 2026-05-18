@@ -24,6 +24,8 @@ class ParserConfig(BaseModel):
     boundary_review_enabled: bool = True
     label_review_enabled: bool = True
     max_concurrent_workers: int = 4
+    llm_repair_max_attempts: int = Field(default=3, ge=1, le=5)
+    llm_retry_base_delay_sec: float = Field(default=1.0, ge=0.0, le=60.0)
     llm_timeout_seconds: float | None = 180.0
     console_logging_enabled: bool = True
     console_log_level: str = "INFO"

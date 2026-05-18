@@ -5,57 +5,82 @@ from pathlib import Path
 
 from document_processor import DocIR, DocumentInput
 from document_processor.api import (
-    apply_text_edits,
+    apply_document_edits,
     get_document_context,
     list_editable_targets,
+    read_document,
     render_review_html,
-    validate_text_edits,
+    validate_document_edits,
+    validate_text_annotations,
 )
 from document_processor.edit_engine import _iter_doc_ir_paragraphs
 from document_processor.io_utils import TemporarySourcePath
 
 from .api_types import (
+    AnnotationTargetKind,
     AnnotationValidationCode,
     AnnotationValidationIssue,
     AnnotationValidationResult,
-    ApplyTextEditsRequest,
-    ApplyTextEditsResult,
+    AppliedEditResult,
+    ApplyDocumentEditsResult,
     ClauseSummary,
     DocumentContextResult,
+    DocumentEdit,
     DocumentParagraphContext,
     DocumentRunContext,
     EditableTarget,
     EditValidationCode,
     EditValidationIssue,
     EditValidationResult,
-    GetDocumentContextRequest,
-    ListEditableTargetsRequest,
+    InsertPosition,
     ListEditableTargetsResult,
     ParagraphPreview,
-    ParseDocumentRequest,
     ParseDocumentResult,
-    RenderReviewHtmlRequest,
+    ReadDocumentResult,
     ResolvedTextAnnotation,
     ReviewHtmlResult,
+    StructuralEdit,
+    StructuralOperationKind,
+    StyleEdit,
+    StyleTargetKind,
     TargetKind,
     TextAnnotation,
     TextEdit,
-    ValidateTextEditsRequest,
+    TextTargetKind,
 )
 from .main import run_parser
-from .parser_types import ClauseEntry
+from .parser_types import ClauseEntry, RelevanceMode
 from .state import ParserConfig
 
 
-def parse_document(request: ParseDocumentRequest) -> ParseDocumentResult:
-    with _materialize_parse_source(request.document) as source_path:
+def parse_document(
+    *,
+    document: DocumentInput | None = None,
+    source_path: str | Path | None = None,
+    relevance_mode: RelevanceMode = RelevanceMode.KEYWORD_THEN_LLM,
+    boundary_review_enabled: bool = True,
+    label_review_enabled: bool = True,
+    max_concurrent_workers: int = 4,
+    llm_repair_max_attempts: int = 3,
+    prompt_profile: str = "default",
+    include_paragraphs: bool = True,
+    include_clauses: bool = True,
+    include_editable_targets: bool = False,
+    max_paragraphs: int | None = 120,
+    max_editable_targets: int | None = 200,
+    paragraph_excerpt_length: int | None = 240,
+) -> ParseDocumentResult:
+    source = _resolve_parse_document(document=document, source_path=source_path)
+    with _materialize_parse_source(source) as materialized_source_path:
         state = run_parser(
-            source_path,
+            materialized_source_path,
             config=ParserConfig(
-                relevance_mode=request.relevance_mode,
-                boundary_review_enabled=request.boundary_review_enabled,
-                label_review_enabled=request.label_review_enabled,
-                prompt_profile=request.prompt_profile,
+                relevance_mode=relevance_mode,
+                boundary_review_enabled=boundary_review_enabled,
+                label_review_enabled=label_review_enabled,
+                max_concurrent_workers=max_concurrent_workers,
+                llm_repair_max_attempts=llm_repair_max_attempts,
+                prompt_profile=prompt_profile,
             ),
         )
 
@@ -67,9 +92,9 @@ def parse_document(request: ParseDocumentRequest) -> ParseDocumentResult:
     if doc is None:
         raise ValueError("Parser did not produce a working_doc.")
 
-    requested_source_path = request.document.source_path
+    requested_source_path = str(source.source_path) if source.source_path is not None else None
     requested_source_name = (
-        request.document.source_name
+        source.source_name
         or (Path(requested_source_path).name if requested_source_path is not None else None)
     )
     response = ParseDocumentResult(
@@ -84,17 +109,17 @@ def parse_document(request: ParseDocumentRequest) -> ParseDocumentResult:
         warnings=[*state.errors, *result.notes],
     )
 
-    if request.include_clauses and state.parser_analysis is not None:
+    if include_clauses and state.parser_analysis is not None:
         response.clauses = [_clause_summary(entry) for entry in state.parser_analysis.clause_entries]
 
-    if request.include_paragraphs and state.parser_analysis is not None:
+    if include_paragraphs and state.parser_analysis is not None:
         paragraphs = state.parser_analysis.paragraphs
-        if request.max_paragraphs is not None:
-            paragraphs = paragraphs[: request.max_paragraphs]
+        if max_paragraphs is not None:
+            paragraphs = paragraphs[:max_paragraphs]
         response.paragraphs = [
             ParagraphPreview(
                 node_id=paragraph.node_id,
-                text_excerpt=_truncate(paragraph.text, request.paragraph_excerpt_length),
+                text_excerpt=_truncate(paragraph.text, paragraph_excerpt_length),
                 text_length=len(paragraph.text),
                 page_number=paragraph.page_number,
                 category=paragraph.category,
@@ -110,17 +135,31 @@ def parse_document(request: ParseDocumentRequest) -> ParseDocumentResult:
             for paragraph in paragraphs
         ]
 
-    if request.include_editable_targets:
+    if include_editable_targets:
         response.editable_targets = list_editable_targets(
-            ListEditableTargetsRequest(
-                document=DocumentInput(doc_ir=doc),
-                target_kinds=["paragraph", "run"],
-                only_writable=True,
-                max_targets=request.max_editable_targets,
-            )
+            document=DocumentInput(doc_ir=doc),
+            target_kinds=["paragraph", "run"],
+            only_writable=True,
+            max_targets=max_editable_targets,
         ).targets
 
     return response
+
+
+def _resolve_parse_document(
+    *,
+    document: DocumentInput | None,
+    source_path: str | Path | None,
+) -> DocumentInput:
+    if document is not None and source_path is not None:
+        raise ValueError("Specify either document or source_path, not both.")
+    if document is None:
+        if source_path is None:
+            raise ValueError("Provide either document or source_path.")
+        document = DocumentInput(source_path=source_path)
+    if document.doc_ir is not None:
+        raise ValueError("parse_document requires source_path or source_bytes, not doc_ir.")
+    return document
 
 
 @contextmanager
@@ -132,8 +171,8 @@ def _materialize_parse_source(document: DocumentInput):
         raise ValueError("parse_document requires source_path or source_bytes.")
 
     suffix = _parse_suffix(document)
-    with TemporarySourcePath(document.source_bytes, suffix=suffix) as source_path:
-        yield source_path
+    with TemporarySourcePath(document.source_bytes, suffix=suffix) as materialized_source_path:
+        yield materialized_source_path
 
 
 def _parse_suffix(document: DocumentInput) -> str:
@@ -179,36 +218,43 @@ def _find_paragraph_runs(doc: DocIR, paragraph_node_id: str):
 
 
 __all__ = [
+    "AnnotationTargetKind",
     "AnnotationValidationCode",
     "AnnotationValidationIssue",
     "AnnotationValidationResult",
-    "ApplyTextEditsRequest",
-    "ApplyTextEditsResult",
+    "AppliedEditResult",
+    "ApplyDocumentEditsResult",
     "ClauseSummary",
     "DocumentContextResult",
+    "DocumentEdit",
+    "DocumentInput",
     "DocumentParagraphContext",
     "DocumentRunContext",
     "EditableTarget",
     "EditValidationCode",
     "EditValidationIssue",
     "EditValidationResult",
-    "GetDocumentContextRequest",
-    "ListEditableTargetsRequest",
+    "InsertPosition",
     "ListEditableTargetsResult",
     "ParagraphPreview",
-    "ParseDocumentRequest",
     "ParseDocumentResult",
-    "RenderReviewHtmlRequest",
+    "ReadDocumentResult",
     "ResolvedTextAnnotation",
     "ReviewHtmlResult",
+    "StructuralEdit",
+    "StructuralOperationKind",
+    "StyleEdit",
+    "StyleTargetKind",
     "TargetKind",
     "TextAnnotation",
     "TextEdit",
-    "ValidateTextEditsRequest",
-    "apply_text_edits",
+    "TextTargetKind",
+    "apply_document_edits",
     "get_document_context",
     "list_editable_targets",
     "parse_document",
+    "read_document",
     "render_review_html",
-    "validate_text_edits",
+    "validate_document_edits",
+    "validate_text_annotations",
 ]

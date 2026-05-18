@@ -6,13 +6,16 @@ requires-python = "==3.13.*"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
+    "python-multipart",
     "python-dotenv>=1.0.0",
     "psycopg2-binary>=2.9",
     "sqlalchemy>=2.0",
     "alembic>=1.13",
     "rag-pipeline",
+    "doc-processor",
     "neo4j>=5.0",
 ]
 
 [tool.uv.sources]
 rag-pipeline = { path = "../rag", editable = true }
+doc-processor = { path = "../doc_processor", editable = true }

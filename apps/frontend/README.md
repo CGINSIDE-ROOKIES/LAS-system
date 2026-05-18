@@ -38,6 +38,14 @@ pnpm --filter @las/frontend dev
 
 접속: `http://localhost:3000`
 
+문서 검토 API 테스트 화면:
+
+```text
+http://localhost:3000/document-review-test
+```
+
+백엔드 설정과 API 계약은 `apps/backend/api/docs/document_reviews_frontend.md`를 참고하세요.
+
 ## 자주 쓰는 명령어
 
 ```bash

@@ -34,7 +34,7 @@ Plan:
 3. Make all read/validate/edit operations work from resolved DocIR, not by reparsing a path every time.
     - get_document_context
     - list_editable_targets
-    - validate_text_edits
+    - validate_document_edits
     - render_review_html
 4. Split apply into two capabilities behind one surface:
     - if only DocIR is available: apply in-memory and return updated DocIR

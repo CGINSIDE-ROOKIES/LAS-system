@@ -7,6 +7,7 @@
 import logging
 import logging.config
 import os
+import warnings
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
@@ -14,9 +15,20 @@ import tomllib
 
 from dotenv import load_dotenv
 
+try:
+    from langchain_core._api.deprecation import LangChainPendingDeprecationWarning
+except Exception:  # pragma: no cover - defensive fallback for dependency changes
+    LangChainPendingDeprecationWarning = PendingDeprecationWarning
+
 # ─── 환경 변수 로드 ────────────────────────────────────────────────────────────
 # 시스템 환경 변수보다 .env 파일의 값을 우선 적용.
 load_dotenv(override=True)
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"The default value of `allowed_objects` will change in a future version\..*",
+    category=LangChainPendingDeprecationWarning,
+)
 
 
 def _resolve_app_version() -> str:
@@ -82,7 +94,7 @@ from src.db import close_pool, init_pool
 from src.dependencies import warmup_dependencies
 from rag_pipeline.observability import initialize_langfuse, shutdown_langfuse
 from rag_pipeline.retrieval.common import EmbeddingError, LLMError, LLMTimeoutError, RetrievalError
-from src.routers import health, qa, graph, history
+from src.routers import document_reviews, graph, health, history, qa
 
 
 # ─── 앱 생명주기 관리 (Lifespan) ──────────────────────────────────────────────
@@ -185,3 +197,4 @@ app.include_router(health.router)
 app.include_router(qa.router, prefix="/api/v1/qa")
 app.include_router(history.router, prefix="/api/v1/qa")
 app.include_router(graph.router, prefix="/api/v1/graph")
+app.include_router(document_reviews.router, prefix="/api/v1/document-reviews")
