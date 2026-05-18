@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { useEffect, useState, Fragment } from "react";
 import {
-  LayoutDashboard, MessageSquare, FileSearch, FilePen,
-  Clock, Settings, Check, ArrowRight,
-  Search, Bell, TrendingUp, Newspaper, Scale, PanelLeft,
+  FilePen, Clock, Check, ArrowRight,
+  Search, Bell, TrendingUp, Newspaper,
 } from "lucide-react";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/AppSidebar";
 
 // ─── 디자인 토큰 ─────────────────────────────────────────────────────────────
 
@@ -124,15 +124,6 @@ const PILL_TONE: Record<string, { bg: string; border: string; color: string }> =
   rose:    { bg: T.roseSoft,   border: T.roseSoft,   color: T.rose      },
 };
 
-const NAV_ITEMS = [
-  { id: "home",    label: "홈",             Icon: LayoutDashboard, href: "/"                },
-  { id: "qna",     label: "법령 Q&A",       Icon: MessageSquare,   href: "/chat"            },
-  { id: "review",  label: "계약서 검토",     Icon: FileSearch,      href: "/contract-review" },
-  { id: "draft",   label: "계약서 초안 작성", Icon: FilePen,         href: "/contract-draft"  },
-  { id: "history", label: "히스토리",        Icon: Clock,           href: "/history"         },
-  { id: "settings",label: "설정",            Icon: Settings,        href: "/settings"        },
-];
-
 // ─── 공통 컴포넌트 ────────────────────────────────────────────────────────────
 
 function Pill({
@@ -180,182 +171,22 @@ function SectionHead({
 // ─── 사이드바 ─────────────────────────────────────────────────────────────────
 
 // 텍스트를 opacity+maxWidth로 부드럽게 fade 처리하는 헬퍼
-function SbFade({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
-  return (
-    <div style={{
-      overflow: "hidden", whiteSpace: "nowrap",
-      maxWidth: collapsed ? 0 : 200,
-      opacity: collapsed ? 0 : 1,
-      transition: "max-width .2s cubic-bezier(.4,0,.2,1), opacity .15s ease",
-      flexShrink: 0,
-    }}>
-      {children}
-    </div>
-  );
-}
-
-function Sidebar({ collapsed }: { collapsed: boolean }) {
-  const pathname = usePathname();
-  const [usageHovered, setUsageHovered] = useState(false);
-
-  const activeId =
-    pathname === "/"                ? "home"    :
-    pathname === "/chat"            ? "qna"     :
-    pathname === "/contract-review" ? "review"  :
-    pathname === "/contract-draft"  ? "draft"   :
-    pathname === "/history"         ? "history" :
-    pathname === "/settings"        ? "settings": "home";
-
-  const brandGrad = `linear-gradient(135deg,#5C70FF,${T.primary})`;
-  const tr = "width .2s cubic-bezier(.4,0,.2,1), padding .2s cubic-bezier(.4,0,.2,1)";
-
-  return (
-    <aside style={{
-      width: collapsed ? 72 : 248, flexShrink: 0,
-      background: T.bgSb, color: T.sbText,
-      display: "flex", flexDirection: "column",
-      borderRight: `1px solid ${T.sbBorder}`,
-      transition: tr, overflow: "hidden",
-      willChange: "width", position: "relative",
-    }}>
-      {/* 브랜드 */}
-      <div style={{
-        padding: "20px 16px",
-        display: "flex", alignItems: "center", gap: 10,
-        borderBottom: `1px solid ${T.sbBorder}`, minHeight: 76,
-      }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: 10, background: brandGrad, flexShrink: 0,
-          display: "flex", alignItems: "center", justifyContent: "center", color: "#fff",
-          boxShadow: "0 6px 14px rgba(61,82,245,.35)",
-        }}>
-          <Scale size={20} strokeWidth={1.9} />
-        </div>
-        <SbFade collapsed={collapsed}>
-          <div style={{ paddingLeft: 2 }}>
-            <div style={{ color: T.sbStrong, fontWeight: 700, fontSize: 14.5, letterSpacing: "-.01em" }}>LAS</div>
-            <div style={{ fontSize: 11, color: T.sbTextDim, marginTop: 1 }}>AI 법무지원시스템</div>
-          </div>
-        </SbFade>
-      </div>
-
-      {/* 내비 */}
-      <nav style={{ padding: "4px 14px", flex: 1, overflowY: "auto", overflowX: "hidden" }}>
-        <div style={{
-          fontSize: 10.5, fontWeight: 600, letterSpacing: ".08em",
-          color: T.sbTextDim, textTransform: "uppercase",
-          overflow: "hidden",
-          maxHeight: collapsed ? 0 : 40,
-          opacity: collapsed ? 0 : 1,
-          transition: "max-height .2s cubic-bezier(.4,0,.2,1), opacity .15s ease",
-          paddingTop: collapsed ? 0 : 14, paddingBottom: collapsed ? 0 : 8,
-          paddingLeft: 8,
-        }}>메뉴</div>
-        <ul style={{ display: "flex", flexDirection: "column", gap: 2, listStyle: "none", padding: 0, margin: 0 }}>
-          {NAV_ITEMS.map(n => {
-            const isActive = n.id === activeId;
-            return (
-              <li key={n.id}>
-                <Link
-                  href={n.href}
-                  title={collapsed ? n.label : undefined}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 10,
-                    padding: "9px 8px", borderRadius: 8, overflow: "hidden",
-                    background: isActive ? T.sbActive : "transparent",
-                    color: isActive ? T.sbStrong : T.sbText,
-                    fontWeight: isActive ? 600 : 500, fontSize: 13.5,
-                    textDecoration: "none", position: "relative",
-                  }}>
-                  {isActive && (
-                    <span style={{
-                      position: "absolute", left: 0, top: 6, bottom: 6, width: 3,
-                      background: T.primary, borderRadius: "0 3px 3px 0",
-                      opacity: collapsed ? 0 : 1,
-                      transition: "opacity .15s ease",
-                    }} />
-                  )}
-                  <n.Icon size={17} strokeWidth={1.7} style={{ flexShrink: 0 }} />
-                  <SbFade collapsed={collapsed}>{n.label}</SbFade>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
-
-      {/* 사용량 미니 인디케이터 */}
-      {!collapsed && (
-        <div
-          style={{ padding: "4px 14px 10px", position: "relative" }}
-          onMouseEnter={() => setUsageHovered(true)}
-          onMouseLeave={() => setUsageHovered(false)}
-        >
-          <div style={{ height: 3, background: "rgba(255,255,255,.08)", borderRadius: 99, overflow: "hidden" }}>
-            <div style={{ width: "64%", height: "100%", background: T.primary }} />
-          </div>
-          <div style={{ marginTop: 5, fontSize: 10.5, color: T.sbTextDim, display: "flex", justifyContent: "space-between" }}>
-            <span>320 / 500 질의</span>
-            <span style={{ color: T.sbStrong }}>64%</span>
-          </div>
-          {usageHovered && (
-            <div style={{
-              position: "absolute", bottom: "calc(100% + 4px)", left: 14, right: 14,
-              background: "#1a2040", border: "1px solid rgba(255,255,255,.12)",
-              borderRadius: 8, padding: "7px 10px",
-              fontSize: 11.5, color: T.sbText, zIndex: 100,
-              whiteSpace: "nowrap",
-            }}>
-              법령 Q&amp;A 84 · 검토 11 · 초안 6
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 유저 */}
-      <div style={{
-        borderTop: `1px solid ${T.sbBorder}`,
-        padding: "12px 14px",
-        display: "flex", alignItems: "center", gap: 10, overflow: "hidden",
-      }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-          background: "linear-gradient(135deg,#7B91FF,#3D52F5)",
-          color: "#ffffff", fontWeight: 700, fontSize: 13,
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>{MOCK_USER.initial}</div>
-        <SbFade collapsed={collapsed}>
-          <div>
-            <div style={{ color: T.sbStrong, fontSize: 13, fontWeight: 600 }}>{MOCK_USER.name}</div>
-            <div style={{ fontSize: 11.5, color: T.sbTextDim }}>{MOCK_USER.dept}</div>
-          </div>
-        </SbFade>
-      </div>
-    </aside>
-  );
-}
 
 // ─── 탑바 ────────────────────────────────────────────────────────────────────
 
-function TopBar({ onToggle }: { onToggle: () => void }) {
+function TopBar() {
   return (
     <header style={{
       display: "flex", alignItems: "center", gap: 16,
       padding: "18px 24px 18px 12px", borderBottom: `1px solid ${T.border}`,
       background: T.bgCanvas, position: "sticky", top: 0, zIndex: 5,
     }}>
-      <button
-        type="button"
-        onClick={onToggle}
+      <SidebarTrigger
         style={{
-          display: "flex", alignItems: "center", justifyContent: "center",
           width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-          background: "transparent", border: `1px solid ${T.border}`,
-          color: T.ink400, cursor: "pointer",
+          border: `1px solid ${T.border}`, color: T.ink400,
         }}
-      >
-        <PanelLeft size={16} />
-      </button>
+      />
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 12, color: T.ink500, fontWeight: 500 }}>대시보드</div>
         <div style={{ fontSize: 16, color: T.ink900, fontWeight: 700, letterSpacing: "-.01em" }}>홈</div>
@@ -787,9 +618,8 @@ function NoticesWidget() {
 // ─── 메인 ─────────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const [collapsed, setCollapsed] = useState(false);
-
   return (
+    <SidebarProvider>
     <div style={{
       width: "100%", height: "100vh", display: "flex",
       background: T.bgApp, overflow: "hidden",
@@ -797,19 +627,19 @@ export default function Dashboard() {
       color: T.ink800, fontSize: 14, lineHeight: 1.45,
       letterSpacing: "-.005em",
     }}>
-      <Sidebar collapsed={collapsed} />
+      <AppSidebar />
       <main style={{
         flex: 1, minWidth: 0, display: "flex", flexDirection: "column",
         overflowY: "auto", background: T.bgCanvas,
       }}>
-        <TopBar onToggle={() => setCollapsed(c => !c)} />
+        <TopBar />
         <div style={{ padding: "16px 40px 40px", display: "flex", flexDirection: "column", gap: 28 }}>
           <Hero />
           <FeatureCards />
           <section style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
-            <HistoryWidget />
+            <DraftsWidget />
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <DraftsWidget />
+              <HistoryWidget />
               <UsageWidget />
               <NoticesWidget />
             </div>
@@ -817,5 +647,6 @@ export default function Dashboard() {
         </div>
       </main>
     </div>
+    </SidebarProvider>
   );
 }

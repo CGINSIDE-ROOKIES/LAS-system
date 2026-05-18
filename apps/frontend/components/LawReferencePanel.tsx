@@ -30,8 +30,11 @@ export function LawReferencePanel({ citations }: LawReferencePanelProps) {
 
       <div className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-3">
         {citations.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-center text-xs text-muted-foreground leading-relaxed">
+          <div className="flex h-full flex-col items-center justify-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+              <BookOpen className="h-5 w-5 text-muted-foreground/50" />
+            </div>
+            <p className="text-center text-[13.5px] text-muted-foreground leading-relaxed">
               질문을 입력하면<br />관련 법령 조문이 표시됩니다.
             </p>
           </div>

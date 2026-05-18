@@ -44,19 +44,19 @@ const Index = () => {
           </div>
 
           {/* Right: 탭 패널 */}
-          <div className="hidden w-[380px] shrink-0 flex-col lg:flex">
+          <div className="hidden w-[380px] shrink-0 flex-col lg:flex bg-secondary/20">
             {/* 탭 바 */}
-            <div className="flex shrink-0 border-b border-border">
+            <div className="flex shrink-0 border-b border-border bg-card">
               {(["reference", "graph"] as const).map((tab) => (
                 <button
                   key={tab}
                   type="button"
                   onClick={() => setRightTab(tab)}
                   className={cn(
-                    "flex-1 py-2.5 text-xs font-medium transition-colors",
+                    "flex-1 py-3 text-xs transition-colors",
                     rightTab === tab
-                      ? "border-b-2 border-primary text-primary"
-                      : "text-muted-foreground hover:text-foreground"
+                      ? "border-b-2 border-primary text-primary font-semibold"
+                      : "font-medium text-muted-foreground hover:text-foreground"
                   )}
                 >
                   {tab === "reference" ? "관련 법령" : "법령 그래프"}

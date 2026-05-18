@@ -103,7 +103,7 @@ function ScrollableChips({
         tabIndex={canScrollLeft ? 0 : -1}
         aria-hidden={!canScrollLeft}
         className={cn(
-          "shrink-0 rounded-full p-1 text-muted-foreground transition-all hover:bg-accent hover:text-foreground",
+          "shrink-0 rounded-full p-1.5 text-muted-foreground transition-all hover:bg-secondary hover:text-foreground",
           !canScrollLeft && "invisible"
         )}
       >
@@ -113,7 +113,7 @@ function ScrollableChips({
       <div
         ref={scrollRef}
         className={cn(
-          "flex flex-1 flex-nowrap gap-2 overflow-x-scroll py-0.5 [&::-webkit-scrollbar]:hidden [scrollbar-width:none]",
+          "flex flex-1 flex-nowrap gap-[10px] overflow-x-scroll py-0.5 [&::-webkit-scrollbar]:hidden [scrollbar-width:none]",
           !isOverflowing && "justify-center"
         )}
       >
@@ -123,7 +123,7 @@ function ScrollableChips({
             type="button"
             onClick={() => onSelect(q)}
             disabled={disabled}
-            className="shrink-0 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-[0_0_10px_rgba(186,230,253,0.25),0_2px_6px_rgba(0,0,0,0.04)] transition-all hover:-translate-y-0.5 hover:shadow-[0_0_14px_rgba(186,230,253,0.4),0_4px_8px_rgba(0,0,0,0.05)] hover:border-primary hover:text-primary disabled:opacity-50 first:ml-3 last:mr-3"
+            className="shrink-0 rounded-full border border-border bg-card px-4 py-2 text-[13px] text-muted-foreground shadow-sm transition-all hover:border-primary hover:text-primary hover:bg-card disabled:opacity-50 first:ml-3 last:mr-3"
           >
             {q}
           </button>
@@ -136,7 +136,7 @@ function ScrollableChips({
         tabIndex={canScrollRight ? 0 : -1}
         aria-hidden={!canScrollRight}
         className={cn(
-          "shrink-0 rounded-full p-1 text-muted-foreground transition-all hover:bg-accent hover:text-foreground",
+          "shrink-0 rounded-full p-1.5 text-muted-foreground transition-all hover:bg-secondary hover:text-foreground",
           !canScrollRight && "invisible"
         )}
       >
@@ -523,24 +523,24 @@ export function ChatContainer({ onCitationsChange, onQuestionSubmit, onNewChat }
             <div className="mb-8 text-center">
               {/* Icon with glow ring */}
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mx-auto mb-6 relative w-fit">
-                <div className="absolute inset-0 rounded-2xl bg-primary/20 blur-xl scale-150" />
-                <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/20 shadow-lg">
+                <div className="absolute inset-0 rounded-2xl scale-150" style={{ background: "hsl(var(--primary)/.12)", filter: "blur(52px)" }} />
+                <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl shadow-lg" style={{ background: "hsl(var(--primary)/.1)", border: "1px solid hsl(var(--primary)/.18)" }}>
                   <Scale className="h-8 w-8 text-primary" />
                 </div>
               </div>
 
               {/* Title */}
               <h1
-                className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/60 bg-clip-text text-transparent"
-                style={{ animationDelay: "120ms" }}
+                className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both font-bold text-foreground"
+                style={{ animationDelay: "120ms", fontSize: "33px", letterSpacing: "-.02em", lineHeight: 1.22 }}
               >
                 무엇이 궁금하신가요?
               </h1>
 
               {/* Subtitle */}
               <p
-                className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 text-sm text-muted-foreground leading-relaxed"
-                style={{ animationDelay: "220ms" }}
+                className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both mt-3 text-muted-foreground leading-relaxed"
+                style={{ animationDelay: "220ms", fontSize: "14px", lineHeight: 1.65 }}
               >
                 노동법 및 하도급법 관련 질문에 대해
                 <br />
