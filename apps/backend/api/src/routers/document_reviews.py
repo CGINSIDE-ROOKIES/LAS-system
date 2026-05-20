@@ -15,6 +15,7 @@ from src.db import db_connection, get_db
 from src.document_reviews import storage
 from src.document_reviews.models import (
     ApplyDocumentReviewResponse,
+    CONTRACT_SOURCE_DOC_TYPES,
     CreateDocumentReviewResponse,
     DocumentReviewOptions,
     DocumentReviewSuggestion,
@@ -28,6 +29,7 @@ from src.document_reviews.service import (
     DocumentReviewServiceError,
     apply_document_review,
     resume_document_review,
+    restore_preview_artifact,
     run_document_review_job,
 )
 
@@ -55,7 +57,11 @@ async def create_document_review(
     review_id = str(uuid4())
     original_path = storage.original_path_for(review_id, source_name)
     original_path.write_bytes(content)
-    source_doc_type = storage.source_doc_type_from_name(source_name)
+    source_doc_type = (
+        parsed_options.source_doc_type
+        or _legacy_contract_type_from_doc_types(parsed_options.doc_types)
+        or storage.source_doc_type_from_name(source_name)
+    )
     logger.info(
         "document review create accepted: review_id=%s source_name=%s source_doc_type=%s bytes=%s content_type=%s storage_path=%s",
         review_id,
@@ -178,6 +184,9 @@ def get_document_review_preview(
     artifact_kind = storage.preview_artifact_kind(job, kind)
     artifact = storage.get_artifact(conn, review_id, artifact_kind)
     if artifact is None:
+        restored_path = restore_preview_artifact(conn, review_id, artifact_kind, job)
+        if restored_path is not None:
+            return HTMLResponse(restored_path.read_text(encoding="utf-8"))
         logger.info(
             "document review preview not ready: review_id=%s requested_kind=%s resolved_kind=%s status=%s stage=%s current_preview_kind=%s artifact_flags=%s",
             review_id,
@@ -191,6 +200,9 @@ def get_document_review_preview(
         raise HTTPException(status_code=404, detail="Preview is not available yet.")
     path = Path(artifact["path"])
     if not path.exists():
+        restored_path = restore_preview_artifact(conn, review_id, artifact_kind, job)
+        if restored_path is not None:
+            return HTMLResponse(restored_path.read_text(encoding="utf-8"))
         logger.warning(
             "document review preview artifact missing on disk: review_id=%s requested_kind=%s resolved_kind=%s path=%s storage_root=%s",
             review_id,
@@ -333,3 +345,9 @@ def _suggestions_url(review_id: str) -> str:
 
 def _download_url(review_id: str) -> str:
     return f"/api/v1/document-reviews/{review_id}/download"
+
+
+def _legacy_contract_type_from_doc_types(doc_types: list[str] | None) -> str | None:
+    if not doc_types:
+        return None
+    return next((doc_type for doc_type in doc_types if doc_type in CONTRACT_SOURCE_DOC_TYPES), None)

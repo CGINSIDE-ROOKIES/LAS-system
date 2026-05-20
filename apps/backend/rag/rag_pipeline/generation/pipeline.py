@@ -57,6 +57,8 @@ _NO_RESULT_ANSWER = (
     "관련 법령·판례 문서를 찾지 못했습니다. "
     "질문을 더 구체적으로 입력하시거나, 법령 필터가 설정되어 있다면 해제 후 다시 시도해보세요."
 )
+_DEFAULT_RETRIEVAL_DOC_TYPES = ["law", "prec", "detc", "decc", "expc"]
+_RETRIEVAL_DOC_TYPE_SET = set(_DEFAULT_RETRIEVAL_DOC_TYPES)
 
 
 @dataclass
@@ -127,6 +129,13 @@ class LegalDbQueryResult(TypedDict):
     document_count: int
     has_evidence: bool
     filters: LegalDbQueryFilters
+
+
+def _normalize_retrieval_doc_types(doc_types: list[str] | None) -> list[str] | None:
+    if doc_types is None:
+        return None
+    filtered = [doc_type for doc_type in doc_types if doc_type in _RETRIEVAL_DOC_TYPE_SET]
+    return filtered or list(_DEFAULT_RETRIEVAL_DOC_TYPES)
 
 
 # ── 프롬프트 빌더 ─────────────────────────────────────────────────────────────
@@ -260,6 +269,8 @@ class RagPipeline:
         Returns:
             (llm_rows, context_text, law_context_status, law_context_added)
         """
+        doc_types = _normalize_retrieval_doc_types(doc_types)
+
         rcfg = self._cfg.retrieval
         effective_top_k = top_k or rcfg.top_k
         candidate_k = max(effective_top_k, rcfg.candidate_k)
@@ -560,7 +571,7 @@ class RagPipeline:
         tool 반환값, JSON 응답에 그대로 넣기 쉽다.
         """
         owns_trace = trace is None
-        effective_doc_types = list(doc_types) if doc_types is not None else None
+        effective_doc_types = _normalize_retrieval_doc_types(doc_types)
         effective_law_names = list(law_names) if law_names is not None else None
         if intent == "case_law":
             effective_law_names = None
