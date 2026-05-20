@@ -66,6 +66,13 @@ ARTICLE_REFERENCE_KEYS_BY_TARGET = {
     "decc": (),
 }
 
+SUBJECT_ARTICLE_REFERENCE_KEYS_BY_TARGET = {
+    "prec": (),
+    "detc": ("심판대상조문",),
+    "expc": (),
+    "decc": (),
+}
+
 GENERIC_TEXT_KEYS = (
     "전문",
     "본문",
@@ -279,6 +286,7 @@ def parse_case_payload(
         exclude_numbers=[meta.get("doc_number")],
     )
     structured_article_refs = extract_structured_article_refs(target, payload)
+    structured_subject_article_refs = extract_structured_subject_article_refs(target, payload)
 
     body_type = "text"
     if len(body_text) < 100:
@@ -293,6 +301,7 @@ def parse_case_payload(
         "body_sections": body_sections,
         "structured_case_refs": structured_case_refs,
         "structured_article_refs": structured_article_refs,
+        "structured_subject_article_refs": structured_subject_article_refs,
         "source_format": payload.get("_response_format"),
         "source_content_type": payload.get("_response_content_type"),
         "source_url": payload.get("_response_url"),
@@ -320,7 +329,13 @@ def find_related_law_names(text: str, family_law_names: list[str]) -> list[str]:
 
 _SUBARTICLE_UNIT_BLOCK = r"(?P<unit_block>(?:\s*제\s*\d+\s*(?:항|호|목))*)"
 FIRST_ARTICLE_PATTERN = re.compile(rf"^제(\d+)조(?:의(\d+))?{_SUBARTICLE_UNIT_BLOCK}")
-CONTINUED_ARTICLE_PATTERN = re.compile(rf"^(?:,|및|와|과|또는|혹은|·)(?:제)?(\d+)조(?:의(\d+))?{_SUBARTICLE_UNIT_BLOCK}")
+CONTINUED_ARTICLE_PATTERN = re.compile(rf"^(?:,|및|와|과|또는|혹은|·)\s*(?:제)?(\d+)조(?:의(\d+))?{_SUBARTICLE_UNIT_BLOCK}")
+SUBJECT_LAW_ARTICLE_PATTERN = re.compile(
+    rf"(?P<law_name>(?:구\s*)?[가-힣0-9ㆍ·\s]+?"
+    rf"(?:특례법|특별법|법률|시행령|시행규칙|규칙|고시|지침|법|령))"
+    rf"\s*(?:\([^)]*\)\s*)*"
+    rf"(?P<article>제\d+조(?:의\d+)?{_SUBARTICLE_UNIT_BLOCK})"
+)
 CASE_NUMBER_REF_PATTERN = re.compile(r"(?<!\d)(?P<year>\d{2,4})(?P<case_type>[가-힣]{1,4})(?P<serial>\d{1,8})(?!\d)")
 ALLOWED_CASE_TYPE_TOKENS = {
     "가",
@@ -447,6 +462,17 @@ def _format_article_ref(main_no: str, branch_no: str | None, unit_block: str | N
         "item_no": units["item_no"],
         "subitem_no": units["subitem_no"],
     }
+
+
+def _normalize_subject_law_name(law_name: str) -> str:
+    normalized = re.sub(r"\s+", " ", str(law_name or "")).strip(" ,./")
+    normalized = re.sub(r"^구\s+", "", normalized).strip()
+    normalized = re.sub(
+        r"^.*부분\s*(?=[가-힣0-9ㆍ·\s]+(?:특례법|특별법|법률|시행령|시행규칙|규칙|고시|지침|법|령)$)",
+        "",
+        normalized,
+    ).strip()
+    return normalized
 
 
 def _is_valid_case_type_token(case_type: str) -> bool:
@@ -670,6 +696,62 @@ def extract_structured_article_refs(target: str, payload: dict[str, Any]) -> lis
                 }
                 if row not in results:
                     results.append(row)
+
+    return results
+
+
+def extract_structured_subject_article_refs(target: str, payload: dict[str, Any]) -> list[dict[str, str]]:
+    keys = SUBJECT_ARTICLE_REFERENCE_KEYS_BY_TARGET.get(target, ())
+    if not keys:
+        return []
+
+    results: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str | None, str | None, str | None]] = set()
+
+    for text in _find_all_recursive(payload, keys):
+        normalized_text = _normalize_structure(text)
+        if not normalized_text:
+            continue
+
+        for match in SUBJECT_LAW_ARTICLE_PATTERN.finditer(normalized_text):
+            law_name = _normalize_subject_law_name(match.group("law_name"))
+            article_match = FIRST_ARTICLE_PATTERN.match(match.group("article"))
+            if not law_name or article_match is None:
+                continue
+
+            cursor = match.end()
+            article_matches = [article_match]
+            while True:
+                continued_match = CONTINUED_ARTICLE_PATTERN.match(normalized_text[cursor:])
+                if not continued_match:
+                    break
+                article_matches.append(continued_match)
+                cursor += continued_match.end()
+
+            for item in article_matches:
+                main_no, branch_no = item.group(1), item.group(2)
+                article = _format_article_ref(main_no, branch_no, item.group("unit_block"))
+                row = {
+                    "law_name": law_name,
+                    "article_key": article["article_key"],
+                    "article_no_display": article["article_no_display"],
+                    "paragraph_no": article.get("paragraph_no"),
+                    "item_no": article.get("item_no"),
+                    "subitem_no": article.get("subitem_no"),
+                    "source": "structured_subject_field",
+                    "field_name": keys[0],
+                }
+                key = (
+                    row["law_name"],
+                    row["article_key"],
+                    row.get("paragraph_no"),
+                    row.get("item_no"),
+                    row.get("subitem_no"),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                results.append(row)
 
     return results
 

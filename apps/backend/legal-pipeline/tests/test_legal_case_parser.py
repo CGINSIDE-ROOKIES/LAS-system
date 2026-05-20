@@ -70,6 +70,76 @@ def test_parse_case_payload_from_detc_json_fixture_uses_jongguk_date():
     assert parsed["body_sections"][-1]["label"] == "전문"
 
 
+def test_parse_case_payload_extracts_detc_subject_article_refs():
+    payload = {
+        "DetcService": {
+            "헌재결정례일련번호": "17713",
+            "사건명": "구 파견근로자보호 등에 관한 법률 제45조 위헌제청",
+            "사건번호": "2011헌가34",
+            "종국일자": "20111124",
+            "심판대상조문": (
+                "구 파견근로자보호 등에 관한 법률(1998. 2. 20. 법률 제5512호로 "
+                "제정되고, 2006. 12. 21. 법률 제8076호로 개정되기 전의 것) "
+                "제45조"
+            ),
+            "전문": "본문",
+        }
+    }
+
+    parsed = parse_case_payload("detc", payload)
+
+    assert parsed["structured_article_refs"] == []
+    assert parsed["structured_subject_article_refs"] == [
+        {
+            "law_name": "파견근로자보호 등에 관한 법률",
+            "article_key": "45",
+            "article_no_display": "제45조",
+            "paragraph_no": None,
+            "item_no": None,
+            "subitem_no": None,
+            "source": "structured_subject_field",
+            "field_name": "심판대상조문",
+        }
+    ]
+
+
+def test_parse_case_payload_extracts_multiple_detc_subject_article_refs():
+    payload = {
+        "DetcService": {
+            "헌재결정례일련번호": "DET001",
+            "사건명": "경비업법 제15조 제3항 등 위헌확인",
+            "사건번호": "2007헌마1359",
+            "심판대상조문": "경비업법(2001. 4. 7. 법률 제6467호로 개정된 것) 제15조 제3항, 제28조 제4항 제2호",
+            "전문": "본문",
+        }
+    }
+
+    parsed = parse_case_payload("detc", payload)
+
+    assert parsed["structured_subject_article_refs"] == [
+        {
+            "law_name": "경비업법",
+            "article_key": "15",
+            "article_no_display": "제15조",
+            "paragraph_no": "3",
+            "item_no": None,
+            "subitem_no": None,
+            "source": "structured_subject_field",
+            "field_name": "심판대상조문",
+        },
+        {
+            "law_name": "경비업법",
+            "article_key": "28",
+            "article_no_display": "제28조",
+            "paragraph_no": "4",
+            "item_no": "2",
+            "subitem_no": None,
+            "source": "structured_subject_field",
+            "field_name": "심판대상조문",
+        },
+    ]
+
+
 def test_parse_case_payload_from_expc_html_fixture_uses_fallback_meta():
     payload = json.loads((FIXTURE_DIR / "expc_detail_html.json").read_text(encoding="utf-8"))
 

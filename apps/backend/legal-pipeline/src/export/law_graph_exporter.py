@@ -668,6 +668,8 @@ def _build_case_graph_from_relations(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     case_related_to_law_edges: dict[str, dict[str, Any]] = {}
     case_related_to_article_edges: dict[str, dict[str, Any]] = {}
+    case_challenges_law_edges: dict[str, dict[str, Any]] = {}
+    case_challenges_article_edges: dict[str, dict[str, Any]] = {}
     case_cites_case_edges: dict[str, dict[str, Any]] = {}
 
     for row in _iter_jsonl(legal_relations_path):
@@ -694,6 +696,21 @@ def _build_case_graph_from_relations(
                     },
                 )
 
+                if row.get("subject_article_keys"):
+                    edge_id = _case_edge_id("CASE_CHALLENGES_LAW", row.get("id"), source_case_id, law_uid)
+                    case_challenges_law_edges.setdefault(
+                        edge_id,
+                        {
+                            **_case_edge_common(row, edge_id, "CHALLENGES_LAW"),
+                            "source_canonical_case_id": source_case_id,
+                            "target_law_uid": law_uid,
+                            "target_law_name": row.get("law_name") or row.get("source_law_name"),
+                            "subject_article_keys": row.get("subject_article_keys") or [],
+                            "subject_article_no_displays": row.get("subject_article_no_displays") or [],
+                            "subject_article_reference_sources": row.get("subject_article_reference_sources") or [],
+                        },
+                    )
+
             for article_key in [str(item).strip() for item in (row.get("article_keys") or []) if str(item).strip()]:
                 article_uid = _article_uid(law_uid, article_key)
                 if not article_uid or article_uid not in article_nodes:
@@ -707,6 +724,23 @@ def _build_case_graph_from_relations(
                         "target_article_uid": article_uid,
                         "target_law_uid": law_uid,
                         "target_article_key": article_key,
+                    },
+                )
+
+            for article_key in [str(item).strip() for item in (row.get("subject_article_keys") or []) if str(item).strip()]:
+                article_uid = _article_uid(law_uid, article_key)
+                if not article_uid or article_uid not in article_nodes:
+                    continue
+                edge_id = _case_edge_id("CASE_CHALLENGES_ARTICLE", f"{row.get('id')}::{article_key}", source_case_id, article_uid)
+                case_challenges_article_edges.setdefault(
+                    edge_id,
+                    {
+                        **_case_edge_common(row, edge_id, "CHALLENGES_ARTICLE"),
+                        "source_canonical_case_id": source_case_id,
+                        "target_article_uid": article_uid,
+                        "target_law_uid": law_uid,
+                        "target_article_key": article_key,
+                        "reference_sources": row.get("subject_article_reference_sources") or [],
                     },
                 )
 
@@ -734,6 +768,8 @@ def _build_case_graph_from_relations(
     return (
         sorted(case_related_to_law_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
         sorted(case_related_to_article_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
+        sorted(case_challenges_law_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
+        sorted(case_challenges_article_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
         sorted(case_cites_case_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
     )
 
@@ -995,7 +1031,13 @@ def build_law_graph_export_rows(
                 target_article_details=[],
             )
 
-    case_related_to_law_edges, case_related_to_article_edges, case_cites_case_edges = _build_case_graph_from_relations(
+    (
+        case_related_to_law_edges,
+        case_related_to_article_edges,
+        case_challenges_law_edges,
+        case_challenges_article_edges,
+        case_cites_case_edges,
+    ) = _build_case_graph_from_relations(
         legal_relations_path=legal_relations_path,
         case_nodes=case_nodes,
         law_nodes=law_nodes,
@@ -1013,6 +1055,8 @@ def build_law_graph_export_rows(
         "refers_to_article_edges": sorted(refers_to_article_edges.values(), key=lambda row: str(row.get("edge_id") or "")),
         "case_related_to_law_edges": case_related_to_law_edges,
         "case_related_to_article_edges": case_related_to_article_edges,
+        "case_challenges_law_edges": case_challenges_law_edges,
+        "case_challenges_article_edges": case_challenges_article_edges,
         "case_cites_case_edges": case_cites_case_edges,
     }
 
@@ -1039,6 +1083,8 @@ def write_law_graph_export(
     write_jsonl(rows["refers_to_article_edges"], output_dir / "graph_edges_refers_to_article.jsonl")
     write_jsonl(rows["case_related_to_law_edges"], output_dir / "graph_edges_case_related_to_law.jsonl")
     write_jsonl(rows["case_related_to_article_edges"], output_dir / "graph_edges_case_related_to_article.jsonl")
+    write_jsonl(rows["case_challenges_law_edges"], output_dir / "graph_edges_case_challenges_law.jsonl")
+    write_jsonl(rows["case_challenges_article_edges"], output_dir / "graph_edges_case_challenges_article.jsonl")
     write_jsonl(rows["case_cites_case_edges"], output_dir / "graph_edges_case_cites_case.jsonl")
 
     manifest = {
@@ -1052,6 +1098,8 @@ def write_law_graph_export(
         "refers_to_article_edge_count": len(rows["refers_to_article_edges"]),
         "case_related_to_law_edge_count": len(rows["case_related_to_law_edges"]),
         "case_related_to_article_edge_count": len(rows["case_related_to_article_edges"]),
+        "case_challenges_law_edge_count": len(rows["case_challenges_law_edges"]),
+        "case_challenges_article_edge_count": len(rows["case_challenges_article_edges"]),
         "case_cites_case_edge_count": len(rows["case_cites_case_edges"]),
         "source_legal_corpus_path": str(legal_corpus_path),
         "source_legal_relations_path": str(legal_relations_path),

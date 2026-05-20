@@ -258,12 +258,14 @@ def resume_document_review(
     storage.update_job(conn, review_id, status="running", stage="review_progress", progress=0.82)
     storage.add_event(conn, review_id, "review_progress", {"progress": 0.82, "hitl_resume_started": True})
 
+    interrupted = False
     try:
         with _GRAPH_LOCK:
             output = _GRAPH.invoke(
                 Command(resume={"decisions": decisions}),
                 config=_graph_config(review_id, options),
             )
+        interrupted = "__interrupt__" in output
         state = ContractReviewGraphState.model_validate(output)
         if state.result is None:
             raise ValueError("Contract review graph did not return a resumed result.")
@@ -279,13 +281,31 @@ def resume_document_review(
             raise DocumentReviewServiceError(409, "Review checkpoint is no longer available.")
         result = _apply_decisions_to_result(ContractReviewResult.model_validate(stored_result), decisions)
 
-    has_accepted_edit = any(
-        finding.status == "accepted" and finding.proposed_edit is not None
-        for finding in result.findings
+    # Interactive Preview Synchronization: Re-render and save updated preview html
+    original_path = Path(job["original_artifact_path"])
+    risk_html = previews.render_risk_preview(original_path, result)
+    risk_preview_path = storage.risk_preview_path_for(review_id)
+    risk_preview_path.write_text(risk_html, encoding="utf-8")
+    storage.upsert_artifact(
+        conn,
+        review_id=review_id,
+        kind="risk_preview",
+        path=str(risk_preview_path),
+        content_type="text/html; charset=utf-8",
     )
-    next_status = "running" if has_accepted_edit else "completed"
-    next_stage = "review_progress" if has_accepted_edit else "completed"
-    next_progress = 0.82 if has_accepted_edit else 1.0
+
+    if interrupted:
+        next_status = "hitl_waiting"
+        next_stage = "hitl_waiting"
+        next_progress = 0.80
+    else:
+        has_accepted_edit = any(
+            finding.status == "accepted" and finding.proposed_edit is not None
+            for finding in result.findings
+        )
+        next_status = "running" if has_accepted_edit else "completed"
+        next_stage = "review_progress" if has_accepted_edit else "completed"
+        next_progress = 0.82 if has_accepted_edit else 1.0
 
     storage.update_job(
         conn,
@@ -294,15 +314,32 @@ def resume_document_review(
         stage=next_stage,
         progress=next_progress,
         contract_review_result=result.model_dump(mode="json"),
+        current_preview_kind="risk",
     )
     storage.save_suggestions_from_result(conn, review_id, result)
     storage.add_event(
         conn,
         review_id,
         "review_progress",
-        {"progress": next_progress, "decisions_applied": len(decisions)},
+        {
+            "progress": next_progress,
+            "decisions_applied": len(decisions),
+            "preview_url": _preview_url(review_id),
+        },
     )
-    if next_status == "completed":
+    if interrupted:
+        storage.add_event(
+            conn,
+            review_id,
+            "hitl_waiting",
+            {
+                "progress": next_progress,
+                "finding_count": len(result.findings),
+                "request_count": len(result.hitl_requests),
+                "suggestions_url": _suggestions_url(review_id),
+            },
+        )
+    elif next_status == "completed":
         storage.add_event(
             conn,
             review_id,
@@ -310,12 +347,13 @@ def resume_document_review(
             {"progress": 1.0, "preview_url": _preview_url(review_id)},
         )
     logger.info(
-        "document review resume completed: review_id=%s decisions=%s next_status=%s next_stage=%s accepted_edit=%s",
+        "document review resume completed: review_id=%s decisions=%s next_status=%s next_stage=%s accepted_edit=%s interrupted=%s",
         review_id,
         len(decisions),
         next_status,
         next_stage,
-        has_accepted_edit,
+        not interrupted and has_accepted_edit,
+        interrupted,
     )
     return ResumeDocumentReviewResponse(
         review_id=review_id,

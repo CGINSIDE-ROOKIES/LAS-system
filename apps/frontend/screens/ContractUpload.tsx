@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +26,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { createDocumentReview, DocumentReviewOptions } from "@/lib/document-review-api";
 
 type UploadStatus = "idle" | "uploading" | "success" | "error" | "processing";
 
@@ -50,11 +52,14 @@ const getFileExtension = (filename: string): string => {
 };
 
 const ContractUpload = () => {
+  const router = useRouter();
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<UploadedFile | null>(null);
+  const [rawFile, setRawFile] = useState<File | null>(null);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [contractType, setContractType] = useState<string>("");
+  const [isCreatingReview, setIsCreatingReview] = useState(false);
 
   const validateFile = (file: File): string | null => {
     const extension = getFileExtension(file.name);
@@ -103,6 +108,7 @@ const ContractUpload = () => {
       size: file.size,
       type: getFileExtension(file.name).replace(".", "").toUpperCase(),
     });
+    setRawFile(file);
 
     simulateUpload(file);
   }, [simulateUpload]);
@@ -136,12 +142,13 @@ const ContractUpload = () => {
 
   const handleRemoveFile = () => {
     setUploadedFile(null);
+    setRawFile(null);
     setUploadStatus("idle");
     setUploadProgress(0);
   };
 
-  const handleStartReview = () => {
-    if (!uploadedFile) {
+  const handleStartReview = async () => {
+    if (!rawFile) {
       toast.error("먼저 계약서를 업로드해주세요.");
       return;
     }
@@ -149,9 +156,29 @@ const ContractUpload = () => {
       toast.error("계약서 유형을 선택해주세요.");
       return;
     }
+    
+    setIsCreatingReview(true);
     toast.info("법률 검토를 시작합니다.", {
-      description: `${uploadedFile.name} 파일을 분석 중입니다.`,
+      description: `${rawFile.name} 파일을 분석 중입니다.`,
     });
+
+    try {
+      const options: DocumentReviewOptions = {
+        top_k: 8,
+        max_clauses: 10,
+        hitl_min_risk_level: "low",
+        include_review_html: true,
+        doc_types: contractType ? [contractType] : null,
+      };
+      
+      const response = await createDocumentReview(rawFile, options);
+      toast.success("분석이 시작되었습니다.");
+      router.push(`/contract-review/result?id=${response.review_id}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "분석 시작에 실패했습니다.");
+    } finally {
+      setIsCreatingReview(false);
+    }
   };
 
   const handleAskQuestions = () => {
@@ -348,10 +375,14 @@ const ContractUpload = () => {
                   <div className="grid gap-4 sm:grid-cols-3">
                     <Button
                       onClick={handleStartReview}
-                      disabled={uploadStatus !== "success"}
+                      disabled={uploadStatus !== "success" || isCreatingReview}
                       className="h-auto flex-col gap-2 py-6"
                     >
-                      <FileSearch className="h-6 w-6" />
+                      {isCreatingReview ? (
+                        <Loader2 className="h-6 w-6 animate-spin text-primary-foreground" />
+                      ) : (
+                        <FileSearch className="h-6 w-6" />
+                      )}
                       <div className="text-center">
                         <p className="font-medium">법률 검토 시작</p>
                         <p className="text-xs font-normal opacity-80">
