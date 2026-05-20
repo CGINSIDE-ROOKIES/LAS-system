@@ -23,11 +23,6 @@ DocumentReviewStage = Literal[
 ]
 PreviewKind = Literal["parser", "risk", "edited", "latest"]
 DecisionAction = Literal["accept", "reject", "feedback"]
-SourceDocType = Literal["subcontract", "employment", "service", "nda", "other"]
-
-CONTRACT_SOURCE_DOC_TYPES = {"subcontract", "employment", "service", "nda", "other"}
-LEGAL_RETRIEVAL_DOC_TYPES = {"law", "prec", "detc", "decc", "expc"}
-DEFAULT_LEGAL_RETRIEVAL_DOC_TYPES = ["law", "prec", "detc", "decc", "expc"]
 
 
 class DocumentReviewOptions(BaseModel):
@@ -46,9 +41,8 @@ class DocumentReviewOptions(BaseModel):
     max_generation_repair_attempts: int = Field(default=3, ge=1, le=5)
     max_generation_provider_retry_attempts: int = Field(default=3, ge=1, le=8)
     generation_provider_retry_base_delay_sec: float = Field(default=1.0, ge=0.0, le=60.0)
-    doc_types: list[str] | None = Field(default_factory=lambda: list(DEFAULT_LEGAL_RETRIEVAL_DOC_TYPES))
+    doc_types: list[str] | None = Field(default_factory=lambda: ["law", "prec", "detc", "decc", "expc"])
     law_names: list[str] | None = None
-    source_doc_type: SourceDocType | None = None
     include_review_html: bool = True
     review_title: str = Field(default="계약 리스크 검토", min_length=1, max_length=120)
     hitl_min_risk_level: RiskLevel = "low"

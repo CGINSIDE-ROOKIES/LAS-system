@@ -1,972 +1,795 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useRef, useState, useCallback } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import {
-  ShieldCheck,
-  ShieldAlert,
   AlertTriangle,
-  Download,
+  BookOpen,
+  Check,
+  ChevronRight,
+  Clock,
   Copy,
+  Download,
+  ExternalLink,
+  FileText,
   MessageSquare,
   RefreshCw,
   Scale,
-  FileText,
-  BookOpen,
-  ChevronRight,
-  Clock,
-  ExternalLink,
-  Loader2,
-  Check,
-  X,
-  Play,
   Send,
+  ShieldAlert,
+  ShieldCheck,
   Sparkles,
-  ArrowLeft,
-  Maximize2,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  absoluteApiUrl,
-  applyDocumentReview,
-  decideDocumentReviewSuggestion,
-  DocumentReviewEvent,
-  DocumentReviewStage,
-  DocumentReviewStatus,
-  DocumentReviewSuggestion,
-  DocumentReviewSummary,
-  getDocumentReview,
-  getDocumentReviewSuggestions,
-  resumeDocumentReview,
-} from "@/lib/document-review-api";
 
-// Types matching custom configuration
-type OverallStatus = "safe" | "attention" | "high-risk" | "processing";
+type RiskLevel = "crit" | "high" | "mid" | "low";
+type ReviewStatus = "safe" | "attention" | "high-risk";
+type SuggestionStatus = "pending" | "accepted" | "rejected" | "feedback";
+type ReferenceType = "precedent" | "interpretation" | "case" | "commentary";
 
-const riskConfig: Record<string, { label: string; bgClass: string; textClass: string; borderClass: string; badgeClass: string }> = {
+interface ContractClause {
+  id: string;
+  text: string;
+  riskLevel: RiskLevel | null;
+  issueId?: string;
+}
+
+interface LawReference {
+  lawName: string;
+  article: string;
+  snippet: string;
+}
+
+interface SupportingDocument {
+  title: string;
+  type: ReferenceType;
+  excerpt: string;
+}
+
+interface ReviewSuggestion {
+  id: string;
+  title: string;
+  riskLevel: RiskLevel;
+  clauseId: string;
+  selectedText: string;
+  guidance: string;
+  proposedEdit: string;
+  lawReferences: LawReference[];
+  supportingDocuments: SupportingDocument[];
+}
+
+const mockClauses: ContractClause[] = [
+  {
+    id: "c1",
+    text: '제1조 (목적) 본 계약은 갑(이하 "원사업자")과 을(이하 "수급사업자") 간의 소프트웨어 개발 용역에 관한 기본적인 사항을 정함을 목적으로 한다.',
+    riskLevel: null,
+  },
+  {
+    id: "c2",
+    text: "제2조 (계약기간) 본 계약의 기간은 2024년 1월 1일부터 2024년 12월 31일까지로 한다. 단, 갑의 사정에 따라 계약기간을 일방적으로 변경할 수 있다.",
+    riskLevel: "high",
+    issueId: "i1",
+  },
+  {
+    id: "c3",
+    text: "제3조 (대금) 갑은 을에게 총 계약금액 5억원을 지급한다. 대금 지급 시기는 갑의 내부 결재 완료 후 지급하며, 구체적인 지급일은 별도로 정하지 아니한다.",
+    riskLevel: "high",
+    issueId: "i2",
+  },
+  {
+    id: "c4",
+    text: "제4조 (납품) 을은 갑이 지정한 일시 및 장소에 목적물을 납품하여야 한다. 납품 후 갑의 검수 기간은 별도로 정하지 아니하며, 갑이 이의를 제기하지 않는 한 검수에 합격한 것으로 본다.",
+    riskLevel: "mid",
+    issueId: "i3",
+  },
+  {
+    id: "c5",
+    text: "제5조 (지식재산권) 본 계약에 의하여 을이 개발한 소프트웨어의 모든 지식재산권은 갑에게 귀속된다. 을은 개발 과정에서 발생한 모든 산출물에 대해 어떠한 권리도 주장할 수 없다.",
+    riskLevel: "mid",
+    issueId: "i4",
+  },
+  {
+    id: "c6",
+    text: "제6조 (비밀유지) 을은 본 계약과 관련하여 알게 된 갑의 영업비밀을 계약 종료 후에도 무기한 보호하여야 한다.",
+    riskLevel: "low",
+    issueId: "i5",
+  },
+  {
+    id: "c7",
+    text: "제7조 (손해배상) 을의 귀책사유로 갑에게 손해가 발생한 경우, 을은 갑에게 계약금액의 200%에 해당하는 손해배상금을 지급하여야 한다.",
+    riskLevel: "crit",
+    issueId: "i6",
+  },
+  {
+    id: "c8",
+    text: "제8조 (계약해지) 갑은 언제든지 본 계약을 해지할 수 있으며, 이 경우 기 지급된 대금의 반환을 요청할 수 있다. 을의 해지 요청은 갑의 서면 승인을 요한다.",
+    riskLevel: "high",
+    issueId: "i7",
+  },
+  {
+    id: "c9",
+    text: "제9조 (분쟁해결) 본 계약에 관한 분쟁은 갑의 본사 소재지를 관할하는 법원을 전속관할로 한다.",
+    riskLevel: "low",
+    issueId: "i8",
+  },
+];
+
+const mockSuggestions: ReviewSuggestion[] = [
+  {
+    id: "i1",
+    title: "계약기간 일방 변경 조항",
+    riskLevel: "high",
+    clauseId: "c2",
+    selectedText: "갑의 사정에 따라 계약기간을 일방적으로 변경할 수 있다.",
+    guidance:
+      "원사업자가 일방적으로 계약기간을 변경할 수 있는 조항은 수급사업자의 예측 가능성을 해치고 불공정 계약 변경으로 해석될 수 있습니다.",
+    proposedEdit: "계약기간의 변경은 갑과 을이 서면으로 합의한 경우에 한하며, 변경 시 30일 이전에 통보하여야 한다.",
+    lawReferences: [
+      {
+        lawName: "하도급법",
+        article: "제8조",
+        snippet: "원사업자는 수급사업자의 책임으로 돌릴 사유가 없는 경우 위탁 내용을 임의로 변경하여서는 아니 된다.",
+      },
+    ],
+    supportingDocuments: [
+      {
+        title: "하도급 거래 시 부당한 계약변경 사례집",
+        type: "case",
+        excerpt: "일방적 계약기간 변경은 부당한 위탁취소 또는 변경 사례로 검토될 수 있다.",
+      },
+    ],
+  },
+  {
+    id: "i2",
+    title: "대금 지급 시기 미정",
+    riskLevel: "high",
+    clauseId: "c3",
+    selectedText: "대금 지급 시기는 갑의 내부 결재 완료 후 지급하며, 구체적인 지급일은 별도로 정하지 아니한다.",
+    guidance:
+      "지급 시점을 내부 결재에만 연결하면 지급기일이 사실상 무기한 지연될 수 있어 분쟁 가능성이 큽니다.",
+    proposedEdit: "갑은 을의 납품 및 검수 완료일로부터 60일 이내에 대금을 지급하여야 한다.",
+    lawReferences: [
+      {
+        lawName: "하도급법",
+        article: "제13조",
+        snippet: "목적물 수령일부터 60일 이내의 가능한 짧은 기간으로 정한 지급기일까지 하도급대금을 지급하여야 한다.",
+      },
+    ],
+    supportingDocuments: [
+      {
+        title: "공정거래위원회 하도급대금 지급 관련 해석례",
+        type: "interpretation",
+        excerpt: "지급기일을 정하지 아니한 경우 목적물 수령일 기준 지급기한이 문제된다.",
+      },
+    ],
+  },
+  {
+    id: "i3",
+    title: "검수 기간 미명시",
+    riskLevel: "mid",
+    clauseId: "c4",
+    selectedText: "갑의 검수 기간은 별도로 정하지 아니하며",
+    guidance:
+      "검수 기준과 기간이 없으면 검수 지연과 대금 지급 지연이 함께 발생할 수 있습니다.",
+    proposedEdit: "갑은 납품일로부터 10영업일 이내에 검수를 완료하여야 하며, 기간 내 이의가 없으면 검수에 합격한 것으로 본다.",
+    lawReferences: [
+      {
+        lawName: "하도급법",
+        article: "제13조 제2항",
+        snippet: "원사업자는 검사의 기준 및 방법, 검사에 필요한 기간을 정하여야 한다.",
+      },
+    ],
+    supportingDocuments: [
+      {
+        title: "하도급 표준계약서 가이드라인",
+        type: "commentary",
+        excerpt: "검수 기간은 통상 10~15영업일로 명시할 것을 권고한다.",
+      },
+    ],
+  },
+  {
+    id: "i6",
+    title: "과도한 손해배상 예정",
+    riskLevel: "crit",
+    clauseId: "c7",
+    selectedText: "계약금액의 200%에 해당하는 손해배상금을 지급하여야 한다.",
+    guidance:
+      "계약금액을 초과하는 고정 손해배상 예정액은 과도한 부담으로 보일 수 있고 법원에서 감액될 가능성이 있습니다.",
+    proposedEdit: "손해배상액은 실제 발생한 통상손해를 기준으로 하며, 손해배상 예정액은 계약금액을 초과하지 아니한다.",
+    lawReferences: [
+      {
+        lawName: "민법",
+        article: "제398조",
+        snippet: "손해배상의 예정액이 부당히 과다한 경우에는 법원은 적당히 감액할 수 있다.",
+      },
+    ],
+    supportingDocuments: [
+      {
+        title: "과다 위약금 조항 관련 판례 경향",
+        type: "precedent",
+        excerpt: "예정 손해배상액이 계약 목적과 실제 손해에 비해 큰 경우 감액 판단이 이루어진다.",
+      },
+    ],
+  },
+  {
+    id: "i8",
+    title: "일방적 관할법원 지정",
+    riskLevel: "low",
+    clauseId: "c9",
+    selectedText: "갑의 본사 소재지를 관할하는 법원을 전속관할로 한다.",
+    guidance:
+      "전속관할 합의는 가능하지만 한쪽 당사자에게만 편리한 관할을 고정하면 협상상 불리한 조항으로 인식될 수 있습니다.",
+    proposedEdit: "분쟁 발생 시 민사소송법에 따른 관할법원에서 해결한다.",
+    lawReferences: [
+      {
+        lawName: "민사소송법",
+        article: "제29조",
+        snippet: "합의에 의한 관할은 일정한 법률관계에 기한 소에 관하여 서면으로 정할 수 있다.",
+      },
+    ],
+    supportingDocuments: [],
+  },
+];
+
+const riskConfig: Record<
+  RiskLevel,
+  { label: string; bgClass: string; textClass: string; borderClass: string; badgeClass: string; clauseClass: string }
+> = {
   crit: {
     label: "치명적 위험",
     bgClass: "bg-red-500/5 hover:bg-red-500/10 dark:bg-red-950/20 dark:hover:bg-red-950/30",
     textClass: "text-red-700 dark:text-red-400",
     borderClass: "border-red-200 dark:border-red-900/50",
-    badgeClass: "bg-red-600 text-white dark:bg-red-900 dark:text-red-200"
+    badgeClass: "bg-red-600 text-white dark:bg-red-900 dark:text-red-200",
+    clauseClass: "border-l-red-500 bg-red-50/80 dark:bg-red-950/20",
   },
   high: {
     label: "고위험",
     bgClass: "bg-rose-500/5 hover:bg-rose-500/10 dark:bg-rose-950/20 dark:hover:bg-rose-950/30",
     textClass: "text-rose-700 dark:text-rose-400",
     borderClass: "border-rose-200 dark:border-rose-900/50",
-    badgeClass: "bg-rose-600 text-white dark:bg-rose-900 dark:text-rose-200"
+    badgeClass: "bg-rose-600 text-white dark:bg-rose-900 dark:text-rose-200",
+    clauseClass: "border-l-rose-500 bg-rose-50/80 dark:bg-rose-950/20",
   },
   mid: {
     label: "주의",
     bgClass: "bg-amber-500/5 hover:bg-amber-500/10 dark:bg-amber-950/20 dark:hover:bg-amber-950/30",
     textClass: "text-amber-700 dark:text-amber-400",
     borderClass: "border-amber-200 dark:border-amber-900/50",
-    badgeClass: "bg-amber-500 text-white dark:bg-amber-800 dark:text-amber-200"
+    badgeClass: "bg-amber-500 text-white dark:bg-amber-800 dark:text-amber-200",
+    clauseClass: "border-l-amber-500 bg-amber-50/80 dark:bg-amber-950/20",
   },
   low: {
     label: "참고",
     bgClass: "bg-emerald-500/5 hover:bg-emerald-500/10 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/30",
     textClass: "text-emerald-700 dark:text-emerald-400",
     borderClass: "border-emerald-200 dark:border-emerald-900/50",
-    badgeClass: "bg-emerald-600 text-white dark:bg-emerald-900 dark:text-emerald-200"
+    badgeClass: "bg-emerald-600 text-white dark:bg-emerald-900 dark:text-emerald-200",
+    clauseClass: "border-l-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/20",
   },
 };
 
-const statusConfig: Record<OverallStatus, { label: string; icon: typeof ShieldCheck; className: string }> = {
+const statusConfig: Record<ReviewStatus, { label: string; icon: typeof ShieldCheck; className: string }> = {
   safe: { label: "안전함", icon: ShieldCheck, className: "text-emerald-600 dark:text-emerald-400" },
   attention: { label: "검토 권장", icon: AlertTriangle, className: "text-amber-600 dark:text-amber-400" },
   "high-risk": { label: "위험 조항 감지", icon: ShieldAlert, className: "text-rose-600 dark:text-rose-400" },
-  processing: { label: "분석 중...", icon: Loader2, className: "text-blue-600 dark:text-blue-400" },
 };
 
-const STAGE_LABELS: Record<DocumentReviewStage, string> = {
-  upload_saved: "파일 업로드 완료",
-  parser_started: "계약서 파싱 시작",
-  parser_completed: "계약서 텍스트 추출 완료",
-  review_started: "법률 검토 분석 시작",
-  review_progress: "조항별 분석 진행 중",
-  hitl_waiting: "사용자 의견 수렴 대기 중",
-  apply_started: "수정 조항 계약서 반영 시작",
-  apply_completed: "계약서 수정본 반영 완료",
-  completed: "법률 계약서 검토 완료",
-  failed: "분석 실패",
+const refTypeLabels: Record<ReferenceType, string> = {
+  precedent: "판례",
+  interpretation: "해석례",
+  case: "사례",
+  commentary: "해설",
 };
-
-const SUMMARY_POLL_INTERVAL_MS = 8_000;
 
 export default function ContractReviewResult() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const reviewId = searchParams.get("id") || "";
-
-  const [summary, setSummary] = useState<DocumentReviewSummary | null>(null);
-  const [suggestions, setSuggestions] = useState<DocumentReviewSuggestion[]>([]);
-  const [events, setEvents] = useState<DocumentReviewEvent[]>([]);
-  const [previewKind, setPreviewKind] = useState<"latest" | "parser" | "risk" | "edited">("latest");
-  const [busy, setBusy] = useState<string | null>(null);
-  const [commentByFinding, setCommentByFinding] = useState<Record<string, string>>({});
-  const [expandedFeedbackId, setExpandedFeedbackId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("all");
-
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const seenEventKeysRef = useRef<Set<string>>(new Set());
-  const toastedEventKeysRef = useRef<Set<string>>(new Set());
-  const sseErrorNotifiedRef = useRef(false);
-
-  const progress = Math.round((summary?.progress ?? 0) * 100);
-
-  // Dynamic preview handling
-  const previewFlag = summary ? previewFlagFor(previewKind, summary) : null;
-  const previewAvailable = Boolean(reviewId && summary && previewFlag && summary.artifact_flags?.[previewFlag]);
-  const previewSrc = useMemo(() => {
-    if (!reviewId || !previewAvailable) return "";
-    const safeReviewId = encodeURIComponent(reviewId);
-    const cacheKey = summary?.updated_at ? `&t=${encodeURIComponent(summary.updated_at)}` : "";
-    return absoluteApiUrl(`/api/v1/document-reviews/${safeReviewId}/preview.html?kind=${previewKind}${cacheKey}`);
-  }, [previewAvailable, previewKind, reviewId, summary?.updated_at]);
-
-  // Overall status rating derived from real risk metrics
-  const overallStatus: OverallStatus = useMemo(() => {
-    if (!summary) return "processing";
-    if (isActivelyProcessing(summary.status)) return "processing";
-    if (summary.status === "failed") return "high-risk";
-
-    const crit = summary.risk_counts?.crit ?? 0;
-    const high = summary.risk_counts?.high ?? 0;
-    const mid = summary.risk_counts?.mid ?? 0;
-
-    if (crit + high > 0) return "high-risk";
-    if (mid > 0) return "attention";
-    return "safe";
-  }, [summary]);
-
-  const StatusIcon = statusConfig[overallStatus].icon;
-
-  // Sorting & Filtering suggestions
-  const sortedSuggestions = useMemo(() => {
-    const riskSortOrder: Record<string, number> = {
-      crit: 0,
-      high: 1,
-      mid: 2,
-      low: 3,
-    };
-    return [...suggestions].sort((a, b) => {
-      const scoreA = riskSortOrder[a.risk_level ?? ""] ?? 99;
-      const scoreB = riskSortOrder[b.risk_level ?? ""] ?? 99;
-      return scoreA - scoreB;
-    });
-  }, [suggestions]);
-
-  const filteredSuggestions = useMemo(() => {
-    if (activeTab === "high") {
-      return sortedSuggestions.filter((s) => s.risk_level === "high" || s.risk_level === "crit");
-    }
-    return sortedSuggestions;
-  }, [sortedSuggestions, activeTab]);
+  const [activeIssueId, setActiveIssueId] = useState<string | null>(mockSuggestions[0]?.id ?? null);
+  const [decisions, setDecisions] = useState<Record<string, SuggestionStatus>>({});
+  const [commentByIssue, setCommentByIssue] = useState<Record<string, string>>({});
+  const [expandedFeedbackId, setExpandedFeedbackId] = useState<string | null>(null);
+  const clauseRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const issueRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const riskCounts = useMemo(() => {
-    const counts = { crit: 0, high: 0, mid: 0, low: 0 };
-    suggestions.forEach((s) => {
-      const level = s.risk_level;
-      if (level && level in counts) {
-        counts[level as keyof typeof counts]++;
-      }
-    });
-    return counts;
-  }, [suggestions]);
+    return mockSuggestions.reduce(
+      (counts, item) => ({ ...counts, [item.riskLevel]: counts[item.riskLevel] + 1 }),
+      { crit: 0, high: 0, mid: 0, low: 0 } satisfies Record<RiskLevel, number>
+    );
+  }, []);
 
-  const acceptedSuggestions = useMemo(() => {
-    return suggestions.filter((s) => s.status === "accepted");
-  }, [suggestions]);
-
-  const hasPendingDecisions = useMemo(() => {
-    return suggestions.some((s) => s.status === "pending");
-  }, [suggestions]);
-
-  const hasAppliedDecisions = useMemo(() => {
-    return suggestions.some((s) => s.status === "accepted" || s.status === "rejected" || s.status === "feedback");
-  }, [suggestions]);
-
-  const refreshAll = useCallback(async (nextReviewId = reviewId) => {
-    if (!nextReviewId) return;
-    try {
-      const nextSummary = await getDocumentReview(nextReviewId);
-      setSummary(nextSummary);
-      const nextSuggestions = await getDocumentReviewSuggestions(nextReviewId);
-      setSuggestions(nextSuggestions);
-
-      // Pre-fill comments in textareas from existing feedback if any
-      const comments: Record<string, string> = {};
-      nextSuggestions.forEach((s) => {
-        const comm = decisionComment(s);
-        if (comm) comments[s.finding_id] = comm;
-      });
-      setCommentByFinding((prev) => ({ ...comments, ...prev }));
-    } catch (error) {
-      console.error("의견을 불러오는 데 실패했습니다.", error);
+  const visibleSuggestions = useMemo(() => {
+    if (activeTab === "high") {
+      return mockSuggestions.filter((item) => item.riskLevel === "crit" || item.riskLevel === "high");
     }
-  }, [reviewId]);
+    return mockSuggestions;
+  }, [activeTab]);
 
-  const connectEvents = useCallback((nextReviewId: string, eventsUrl?: string) => {
-    eventSourceRef.current?.close();
-    sseErrorNotifiedRef.current = false;
-    const source = new EventSource(absoluteApiUrl(eventsUrl ?? `/api/v1/document-reviews/${nextReviewId}/events`));
-    eventSourceRef.current = source;
+  const decidedCount = Object.keys(decisions).length;
+  const reviewStatus: ReviewStatus = riskCounts.crit + riskCounts.high > 0 ? "high-risk" : riskCounts.mid > 0 ? "attention" : "safe";
+  const StatusIcon = statusConfig[reviewStatus].icon;
 
-    const EVENT_NAMES: DocumentReviewStage[] = [
-      "upload_saved",
-      "parser_started",
-      "parser_completed",
-      "review_started",
-      "review_progress",
-      "hitl_waiting",
-      "apply_started",
-      "apply_completed",
-      "completed",
-      "failed",
-    ];
+  const setClauseRef = useCallback((id: string, el: HTMLDivElement | null) => {
+    if (el) clauseRefs.current.set(id, el);
+  }, []);
 
-    for (const name of EVENT_NAMES) {
-      source.addEventListener(name, (event) => {
-        try {
-          const payload = JSON.parse((event as MessageEvent).data) as DocumentReviewEvent;
-          const eventKey = `${payload.seq}:${payload.type}`;
-          const isNewEvent = !seenEventKeysRef.current.has(eventKey);
-          if (isNewEvent) {
-            seenEventKeysRef.current.add(eventKey);
-            setEvents((prev) => [payload, ...prev].slice(0, 100));
-          }
-          void refreshAll(nextReviewId);
-          
-          if (isNewEvent && !toastedEventKeysRef.current.has(eventKey)) {
-            toastedEventKeysRef.current.add(eventKey);
-            if (payload.type === "failed") {
-              toast.error(payload.error || "법률 계약서 검토 중 에러가 발생했습니다.");
-            } else if (payload.type === "hitl_waiting") {
-              toast.info("의견 조정(HITL) 단계에 진입했습니다. 조항을 검토해주세요.");
-            } else if (payload.type === "completed") {
-              toast.success("계약서 검토 및 반영이 완벽하게 처리되었습니다!");
-            }
-          }
+  const setIssueRef = useCallback((id: string, el: HTMLDivElement | null) => {
+    if (el) issueRefs.current.set(id, el);
+  }, []);
 
-          if (payload.type === "completed" || payload.type === "failed") {
-            source.close();
-            if (eventSourceRef.current === source) eventSourceRef.current = null;
-          }
-        } catch {
-          // Ignore
-        }
-      });
-    }
+  const scrollToClause = useCallback((clauseId: string) => {
+    const el = clauseRefs.current.get(clauseId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("ring-2", "ring-primary");
+    window.setTimeout(() => el.classList.remove("ring-2", "ring-primary"), 1600);
+  }, []);
 
-    source.onerror = () => {
-      if (eventSourceRef.current !== source || source.readyState === EventSource.CLOSED) return;
-      if (!sseErrorNotifiedRef.current) {
-        sseErrorNotifiedRef.current = true;
-        toast.warning("실시간 정보 공유망 연결이 끊겼습니다. 상태 폴링으로 전환합니다.");
-      }
-    };
-  }, [refreshAll]);
+  const scrollToIssue = useCallback((issueId: string) => {
+    setActiveIssueId(issueId);
+    const el = issueRefs.current.get(issueId);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
 
-  useEffect(() => {
-    if (!reviewId) {
-      toast.error("유효하지 않은 링크입니다.");
-      router.push("/contract-review");
+  const copyText = (text: string) => {
+    void navigator.clipboard.writeText(text);
+    toast.success("클립보드에 복사되었습니다.");
+  };
+
+  const decide = (id: string, status: SuggestionStatus) => {
+    if (status === "feedback" && !commentByIssue[id]?.trim()) {
+      toast.error("보완 의견을 입력해주세요.");
       return;
     }
-    void refreshAll(reviewId);
-    connectEvents(reviewId);
-    return () => {
-      eventSourceRef.current?.close();
-    };
-  }, [reviewId, connectEvents, refreshAll, router]);
-
-  useEffect(() => {
-    if (!reviewId || !summary || !isActivelyProcessing(summary.status)) return;
-    const interval = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      void refreshAll(reviewId);
-    }, SUMMARY_POLL_INTERVAL_MS);
-    return () => window.clearInterval(interval);
-  }, [refreshAll, reviewId, summary]);
-
-  // Action methods
-  const handleDecision = async (findingId: string, action: "accept" | "reject" | "feedback") => {
-    if (!reviewId) return;
-    const comment = commentByFinding[findingId]?.trim();
-    if (action === "feedback" && !comment) {
-      toast.error("LLM에 전달할 수정 및 보완 피드백을 입력해주세요.");
-      return;
-    }
-
-    setBusy(`${action}:${findingId}`);
-    try {
-      const updated = await decideDocumentReviewSuggestion(reviewId, findingId, {
-        action,
-        comment: action === "feedback" ? comment : undefined,
-      });
-      setSuggestions((prev) =>
-        prev.map((item) => (item.finding_id === findingId ? updated : item))
-      );
-      toast.success(
-        action === "accept"
-          ? "수정 의견을 수락했습니다."
-          : action === "reject"
+    setDecisions((prev) => ({ ...prev, [id]: status }));
+    toast.success(
+      status === "accepted"
+        ? "수정 의견을 수락했습니다."
+        : status === "rejected"
           ? "수정 의견을 제외했습니다."
-          : "의견 수정을 제출했습니다. 아래 재생성 버튼을 통해 반영할 수 있습니다."
-      );
-      await refreshAll();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "의사결정 반영에 실패했습니다.");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const handleResume = async () => {
-    if (!reviewId) return;
-    setBusy("resume");
-    toast.info("결정된 피드백 사항들을 반영하여 계약서 분석을 다시 시작합니다...");
-    try {
-      await resumeDocumentReview(reviewId);
-      await refreshAll();
-      toast.success("계약서 다시 쓰는 중... 잠시 기다려주세요.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "다시 분석하기 요청에 실패했습니다.");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const handleApply = async () => {
-    if (!reviewId) return;
-    setBusy("apply");
-    toast.info("수정안 수락 사항들을 계약서 문서 원본에 병합하는 중입니다...");
-    try {
-      await applyDocumentReview(reviewId);
-      await refreshAll();
-      setPreviewKind("latest");
-      toast.success("계약서 수정 최종 컴파일이 끝났습니다!");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "수정안 빌드에 실패했습니다.");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast.success("해당 조항 분석 정보가 클립보드에 복사되었습니다.");
+          : "보완 의견을 기록했습니다."
+    );
   };
 
   return (
     <SidebarProvider>
-      <div className="flex min-h-screen w-full font-sans bg-background">
+      <div className="flex min-h-screen w-full bg-background font-sans">
         <AppSidebar />
         <div className="flex flex-1 flex-col overflow-hidden">
           <header className="flex h-12 items-center justify-between border-b border-border bg-card px-4">
             <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => router.push("/contract-review")}
-                className="h-8 w-8 text-muted-foreground hover:text-foreground"
-              >
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
               <SidebarTrigger />
-              <Separator orientation="vertical" className="h-4 mx-1" />
-              <span className="text-sm font-medium truncate max-w-[200px] sm:max-w-xs">
-                {summary?.source_name ?? "계약서 상세 검토"}
+              <Separator orientation="vertical" className="mx-1 h-4" />
+              <span className="max-w-[220px] truncate text-sm font-medium sm:max-w-xs">
+                소프트웨어 개발 용역 하도급 계약서
               </span>
             </div>
-            
-            {summary && (
-              <Badge variant={summary.status === "failed" ? "destructive" : "outline"} className="text-xs">
-                {STAGE_LABELS[summary.stage] ?? summary.stage}
-              </Badge>
-            )}
+            <Badge variant="outline" className="text-xs">
+              검토 결과
+            </Badge>
           </header>
 
-          {/* Summary Dashboard Bar */}
-          {summary && (
-            <div className="border-b border-border bg-card/60 px-6 py-3 backdrop-blur-sm z-10">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className={cn("flex items-center gap-2 font-semibold text-base", statusConfig[overallStatus].className)}>
-                    <StatusIcon className={cn("h-5 w-5", overallStatus === "processing" && "animate-spin")} />
-                    <span>{statusConfig[overallStatus].label}</span>
-                  </div>
-                  <Separator orientation="vertical" className="h-5" />
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Badge variant="secondary" className="font-normal text-[11px]">
-                      {summary.source_doc_type === "employment" && "근로계약서"}
-                      {summary.source_doc_type === "subcontract" && "하도급 계약서"}
-                      {summary.source_doc_type === "service" && "용역 계약서"}
-                      {summary.source_doc_type === "nda" && "비밀유지계약서"}
-                      {summary.source_doc_type === "other" && "기타 계약서"}
-                      {!summary.source_doc_type && "미지정 유형"}
-                    </Badge>
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {new Date(summary.created_at).toLocaleDateString("ko-KR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                  </div>
+          <div className="z-10 border-b border-border bg-card/60 px-6 py-3 backdrop-blur-sm">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className={cn("flex items-center gap-2 text-base font-semibold", statusConfig[reviewStatus].className)}>
+                  <StatusIcon className="h-5 w-5" />
+                  <span>{statusConfig[reviewStatus].label}</span>
                 </div>
-
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    {riskCounts.crit + riskCounts.high > 0 && (
-                      <Badge className="bg-red-500/10 hover:bg-red-500/10 text-red-700 dark:text-red-400 border-red-200 dark:border-red-900/50 text-[11px] font-semibold gap-1">
-                        고위험/치명적 {riskCounts.crit + riskCounts.high}
-                      </Badge>
-                    )}
-                    {riskCounts.mid > 0 && (
-                      <Badge className="bg-amber-500/10 hover:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900/50 text-[11px] font-semibold">
-                        주의 {riskCounts.mid}
-                      </Badge>
-                    )}
-                    {riskCounts.low > 0 && (
-                      <Badge className="bg-emerald-500/10 hover:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50 text-[11px] font-semibold">
-                        참고 {riskCounts.low}
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Active Job Processing Loading View */}
-          {summary && isActivelyProcessing(summary.status) ? (
-            <div className="flex-1 flex flex-col items-center justify-center bg-muted/20 p-6">
-              <Card className="w-full max-w-md bg-card/80 border-border/60 shadow-xl backdrop-blur-sm relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 animate-pulse" />
-                <CardHeader className="pb-3 text-center">
-                  <CardTitle className="text-lg flex items-center justify-center gap-2">
-                    <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                    계약서 인공지능 분석 중
-                  </CardTitle>
-                  <CardDescription className="text-xs">
-                    법률 지식 베이스를 참고하여 조항 검토 조서를 준비하고 있습니다.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs font-semibold">
-                      <span>분석 진행 상태</span>
-                      <span>{progress}%</span>
-                    </div>
-                    <Progress value={progress} className="h-2.5 bg-muted/60" />
-                  </div>
-
-                  <Separator className="my-2" />
-
-                  {/* Checklist steps */}
-                  <div className="space-y-2.5 text-xs text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-emerald-500 font-bold" />
-                      <span className="text-foreground">계약서 원본 파일 업로드 완료</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {progress >= 30 ? (
-                        <Check className="h-4 w-4 text-emerald-500 font-bold" />
-                      ) : (
-                        <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                      )}
-                      <span className={cn(progress >= 30 && "text-foreground")}>
-                        조항 텍스트 분리 및 분석 토큰 추출
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {progress >= 60 ? (
-                        <Check className="h-4 w-4 text-emerald-500 font-bold" />
-                      ) : progress >= 30 ? (
-                        <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                      ) : (
-                        <span className="w-4 h-4 rounded-full border border-border inline-block" />
-                      )}
-                      <span className={cn(progress >= 60 && "text-foreground")}>
-                        판례 및 유관 법률 조문 연동 RAG 위험성 심사
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {progress >= 90 ? (
-                        <Check className="h-4 w-4 text-emerald-500 font-bold" />
-                      ) : progress >= 60 ? (
-                        <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                      ) : (
-                        <span className="w-4 h-4 rounded-full border border-border inline-block" />
-                      )}
-                      <span className={cn(progress >= 90 && "text-foreground")}>
-                        대화식 의견반영 컴파일 및 최종보고 조서 렌더링
-                      </span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          ) : (
-            /* Main review split workspace */
-            <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative pb-[84px]">
-              {/* Left Pane: Interactive Document Iframe Preview */}
-              <div className="flex-1 flex flex-col border-r border-border min-h-0 bg-muted/10">
-                <div className="flex items-center justify-between border-b border-border bg-card px-4 py-2">
-                  <span className="text-xs font-semibold flex items-center gap-1.5">
-                    <FileText className="h-3.5 w-3.5 text-primary" />
-                    계약서 실시간 미리보기
+                <Separator orientation="vertical" className="h-5" />
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Badge variant="secondary" className="font-normal text-[11px]">
+                    하도급 계약서
+                  </Badge>
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    2024. 1. 16. 14:30
                   </span>
-                  
-                  {summary && (
-                    <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-lg border border-border/40">
-                      {(["latest", "parser", "risk", "edited"] as const).map((kind) => {
-                        const flag = previewFlagFor(kind, summary);
-                        const isAvailable = Boolean(summary.artifact_flags?.[flag] || kind === "latest");
-                        return (
-                          <Button
-                            key={kind}
-                            size="sm"
-                            variant={previewKind === kind ? "default" : "ghost"}
-                            className={cn(
-                              "h-6 text-[10px] px-2 rounded-md transition-all font-medium",
-                              previewKind === kind ? "shadow-sm bg-background text-foreground hover:bg-background" : "text-muted-foreground"
-                            )}
-                            disabled={!isAvailable}
-                            onClick={() => setPreviewKind(kind)}
-                          >
-                            {kind === "latest" && "통합"}
-                            {kind === "parser" && "파싱"}
-                            {kind === "risk" && "위험"}
-                            {kind === "edited" && "수정본"}
-                          </Button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex-1 p-4 flex flex-col min-h-0">
-                  {previewSrc ? (
-                    <iframe
-                      key={previewSrc}
-                      className="w-full flex-1 rounded-xl border border-border/80 shadow-md bg-white overflow-hidden min-h-[300px]"
-                      src={previewSrc}
-                      title="계약서 조항 실시간 프리뷰"
-                    />
-                  ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 p-6 text-center shadow-inner">
-                      <FileText className="h-12 w-12 text-muted-foreground/30 mb-2" />
-                      <p className="text-xs text-muted-foreground">
-                        {reviewId ? "시각화용 계약서 원문이 빌드되는 중입니다." : "문서가 아직 분석 중이거나 업로드되지 않았습니다."}
-                      </p>
-                    </div>
-                  )}
                 </div>
               </div>
 
-              {/* Right Pane: AI suggestions list */}
-              <div className="w-full md:w-[480px] lg:w-[540px] shrink-0 flex flex-col bg-card min-h-0 border-t md:border-t-0 border-border">
-                <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-1 flex-col min-h-0">
-                  <div className="border-b border-border bg-card/40 px-4 pt-2">
-                    <TabsList className="w-full grid grid-cols-3 bg-muted/40 p-0.5 rounded-lg border border-border/20">
-                      <TabsTrigger value="all" className="text-xs py-1.5 font-medium rounded-md">
-                        전체 의견 ({suggestions.length})
-                      </TabsTrigger>
-                      <TabsTrigger value="high" className="text-xs py-1.5 font-medium rounded-md">
-                        핵심 위험 ({riskCounts.crit + riskCounts.high})
-                      </TabsTrigger>
-                      <TabsTrigger value="references" className="text-xs py-1.5 font-medium rounded-md">
-                        법률 근거
-                      </TabsTrigger>
-                    </TabsList>
-                  </div>
-
-                  <ScrollArea className="flex-1 min-h-0">
-                    <div className="p-4 space-y-4">
-                      {/* Suggestion Cards */}
-                      <TabsContent value="all" className="m-0 space-y-3 outline-none">
-                        {filteredSuggestions.length === 0 ? (
-                          <div className="text-center py-12 text-muted-foreground text-xs">
-                            감지된 법적 검토 의견 조항이 없습니다.
-                          </div>
-                        ) : (
-                          filteredSuggestions.map((item) => (
-                            <SuggestionCard
-                              key={item.finding_id}
-                              item={item}
-                              busy={busy}
-                              commentText={commentByFinding[item.finding_id] ?? ""}
-                              isExpanded={expandedFeedbackId === item.finding_id}
-                              onSetComment={(text) =>
-                                setCommentByFinding((prev) => ({ ...prev, [item.finding_id]: text }))
-                              }
-                              onToggleExpand={() =>
-                                setExpandedFeedbackId(expandedFeedbackId === item.finding_id ? null : item.finding_id)
-                              }
-                              onDecision={handleDecision}
-                              onCopy={handleCopy}
-                            />
-                          ))
-                        )}
-                      </TabsContent>
-
-                      <TabsContent value="high" className="m-0 space-y-3 outline-none">
-                        {filteredSuggestions.length === 0 ? (
-                          <div className="text-center py-12 text-muted-foreground text-xs">
-                            고위험군 또는 치명적인 검토 의견 조항이 없습니다.
-                          </div>
-                        ) : (
-                          filteredSuggestions.map((item) => (
-                            <SuggestionCard
-                              key={item.finding_id}
-                              item={item}
-                              busy={busy}
-                              commentText={commentByFinding[item.finding_id] ?? ""}
-                              isExpanded={expandedFeedbackId === item.finding_id}
-                              onSetComment={(text) =>
-                                setCommentByFinding((prev) => ({ ...prev, [item.finding_id]: text }))
-                              }
-                              onToggleExpand={() =>
-                                setExpandedFeedbackId(expandedFeedbackId === item.finding_id ? null : item.finding_id)
-                              }
-                              onDecision={handleDecision}
-                              onCopy={handleCopy}
-                            />
-                          ))
-                        )}
-                      </TabsContent>
-
-                      <TabsContent value="references" className="m-0 space-y-3 outline-none">
-                        {suggestions.filter((s) => s.source_citations?.length > 0).length === 0 ? (
-                          <div className="text-center py-12 text-muted-foreground text-xs">
-                            관련 근거 법령 및 판례 정보가 존재하지 않습니다.
-                          </div>
-                        ) : (
-                          suggestions
-                            .filter((s) => s.source_citations?.length > 0)
-                            .map((item) => (
-                              <Card key={item.finding_id} className="text-sm border-border bg-card shadow-sm hover:shadow transition-all">
-                                <CardContent className="space-y-3 p-4">
-                                  <div className="flex items-center gap-2">
-                                    {item.risk_level && riskConfig[item.risk_level] && (
-                                      <Badge className={cn("text-[10px] font-semibold px-2 py-0.5", riskConfig[item.risk_level].badgeClass)}>
-                                        {riskConfig[item.risk_level].label}
-                                      </Badge>
-                                    )}
-                                    <span className="font-semibold text-foreground truncate max-w-[280px]">{item.title}</span>
-                                  </div>
-                                  <Separator />
-                                  {item.source_citations.map((cite, idx) => (
-                                    <div key={idx} className="rounded-lg border border-border/80 bg-muted/40 p-3">
-                                      <div className="flex items-center gap-1.5 text-xs font-semibold text-primary mb-1.5">
-                                        <Scale className="h-3.5 w-3.5 text-blue-500" />
-                                        법령·지침 근거 #{idx + 1}
-                                      </div>
-                                      <p className="text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">{cite}</p>
-                                    </div>
-                                  ))}
-                                </CardContent>
-                              </Card>
-                            ))
-                        )}
-                      </TabsContent>
-                    </div>
-                  </ScrollArea>
-                </Tabs>
+              <div className="flex items-center gap-2">
+                <Badge className="border-red-200 bg-red-500/10 text-[11px] font-semibold text-red-700 hover:bg-red-500/10 dark:border-red-900/50 dark:text-red-400">
+                  고위험/치명적 {riskCounts.crit + riskCounts.high}
+                </Badge>
+                <Badge className="border-amber-200 bg-amber-500/10 text-[11px] font-semibold text-amber-700 hover:bg-amber-500/10 dark:border-amber-900/50 dark:text-amber-400">
+                  주의 {riskCounts.mid}
+                </Badge>
+                <Badge className="border-emerald-200 bg-emerald-500/10 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-500/10 dark:border-emerald-900/50 dark:text-emerald-400">
+                  참고 {riskCounts.low}
+                </Badge>
               </div>
-
-              {/* Floating Glassmorphic Sticky Bottom Action Bar */}
-              {summary && (
-                <div className="absolute bottom-0 left-0 w-full border-t border-border/80 bg-background/80 backdrop-blur-md px-6 py-4 flex items-center justify-between shadow-2xl z-20 transition-all">
-                  <div className="hidden lg:flex flex-col">
-                    <span className="text-[11px] font-semibold text-muted-foreground">현재 프로세스 검토 결정</span>
-                    <span className="text-xs text-foreground font-bold">
-                      {suggestions.filter(s => s.status !== "pending").length} / {suggestions.length} 개 조서 피드백 완료
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-3 w-full lg:w-auto justify-end">
-                    {/* Regenerate Trigger Button */}
-                    {summary.status === "hitl_waiting" && (
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "text-xs px-4 h-9 font-semibold transition-all shadow-sm flex items-center gap-1.5 border-blue-200 dark:border-blue-900/50 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 text-blue-700 dark:text-blue-400"
-                        )}
-                        disabled={!hasAppliedDecisions || busy !== null}
-                        onClick={handleResume}
-                      >
-                        {busy === "resume" ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Sparkles className="h-3.5 w-3.5" />
-                        )}
-                        의견 반영 및 재생성
-                      </Button>
-                    )}
-
-                    {/* Finalize Changes & Merge Button */}
-                    {summary.status === "hitl_waiting" && (
-                      <Button
-                        className={cn(
-                          "text-xs px-4 h-9 font-semibold transition-all shadow-sm flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white"
-                        )}
-                        disabled={acceptedSuggestions.length === 0 || busy !== null}
-                        onClick={handleApply}
-                      >
-                        {busy === "apply" ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Send className="h-3.5 w-3.5" />
-                        )}
-                        수정 계약서 컴파일하기
-                      </Button>
-                    )}
-
-                    {/* Download Link Button */}
-                    {summary.download_url && (
-                      <Button
-                        asChild
-                        className="text-xs px-4 h-9 font-bold bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600 text-white shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all"
-                      >
-                        <a href={absoluteApiUrl(summary.download_url)}>
-                          <Download className="mr-1.5 h-4 w-4" />
-                          수정된 계약서 다운로드 (.docx)
-                        </a>
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
-          )}
+          </div>
+
+          <div className="relative flex flex-1 flex-col overflow-hidden pb-[84px] md:flex-row">
+            <div className="flex min-h-0 flex-1 flex-col border-r border-border bg-muted/10">
+              <div className="flex items-center justify-between border-b border-border bg-card px-4 py-2">
+                <span className="flex items-center gap-1.5 text-xs font-semibold">
+                  <FileText className="h-3.5 w-3.5 text-primary" />
+                  계약서 원문 검토
+                </span>
+                <div className="hidden items-center gap-2 text-[11px] text-muted-foreground sm:flex">
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-2.5 w-2.5 rounded-sm bg-red-500/50" /> 치명적
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-2.5 w-2.5 rounded-sm bg-rose-500/40" /> 고위험
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-500/40" /> 주의
+                  </span>
+                </div>
+              </div>
+
+              <ScrollArea className="flex-1">
+                <div className="mx-auto max-w-3xl space-y-2 p-6">
+                  <h2 className="mb-6 text-center text-lg font-bold text-foreground">
+                    소프트웨어 개발 용역 하도급 계약서
+                  </h2>
+                  {mockClauses.map((clause) => (
+                    <div
+                      key={clause.id}
+                      ref={(el) => setClauseRef(clause.id, el)}
+                      className={cn(
+                        "rounded-md border-l-4 border-l-transparent px-4 py-3 text-sm leading-relaxed text-foreground transition-all",
+                        clause.riskLevel && riskConfig[clause.riskLevel].clauseClass,
+                        clause.issueId && "cursor-pointer hover:opacity-80",
+                        activeIssueId && clause.issueId === activeIssueId && "ring-2 ring-primary"
+                      )}
+                      onClick={() => clause.issueId && scrollToIssue(clause.issueId)}
+                    >
+                      {clause.text}
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </div>
+
+            <div className="flex min-h-0 w-full shrink-0 flex-col border-t border-border bg-card md:w-[480px] md:border-t-0 lg:w-[540px]">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col">
+                <div className="border-b border-border bg-card/40 px-4 pt-2">
+                  <TabsList className="grid w-full grid-cols-3 rounded-lg border border-border/20 bg-muted/40 p-0.5">
+                    <TabsTrigger value="all" className="rounded-md py-1.5 text-xs font-medium">
+                      전체 의견 ({mockSuggestions.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="high" className="rounded-md py-1.5 text-xs font-medium">
+                      핵심 위험 ({riskCounts.crit + riskCounts.high})
+                    </TabsTrigger>
+                    <TabsTrigger value="references" className="rounded-md py-1.5 text-xs font-medium">
+                      법률 근거
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+
+                <ScrollArea className="min-h-0 flex-1">
+                  <div className="space-y-4 p-4">
+                    <TabsContent value="all" className="m-0 space-y-3 outline-none">
+                      {visibleSuggestions.map((item) => (
+                        <SuggestionCard
+                          key={item.id}
+                          item={item}
+                          status={decisions[item.id] ?? "pending"}
+                          commentText={commentByIssue[item.id] ?? ""}
+                          isActive={activeIssueId === item.id}
+                          isExpanded={expandedFeedbackId === item.id}
+                          refCallback={(el) => setIssueRef(item.id, el)}
+                          onSetComment={(text) => setCommentByIssue((prev) => ({ ...prev, [item.id]: text }))}
+                          onToggleExpand={() => setExpandedFeedbackId(expandedFeedbackId === item.id ? null : item.id)}
+                          onDecision={decide}
+                          onCopy={copyText}
+                          onScrollToClause={scrollToClause}
+                        />
+                      ))}
+                    </TabsContent>
+
+                    <TabsContent value="high" className="m-0 space-y-3 outline-none">
+                      {visibleSuggestions.map((item) => (
+                        <SuggestionCard
+                          key={item.id}
+                          item={item}
+                          status={decisions[item.id] ?? "pending"}
+                          commentText={commentByIssue[item.id] ?? ""}
+                          isActive={activeIssueId === item.id}
+                          isExpanded={expandedFeedbackId === item.id}
+                          refCallback={(el) => setIssueRef(item.id, el)}
+                          onSetComment={(text) => setCommentByIssue((prev) => ({ ...prev, [item.id]: text }))}
+                          onToggleExpand={() => setExpandedFeedbackId(expandedFeedbackId === item.id ? null : item.id)}
+                          onDecision={decide}
+                          onCopy={copyText}
+                          onScrollToClause={scrollToClause}
+                        />
+                      ))}
+                    </TabsContent>
+
+                    <TabsContent value="references" className="m-0 space-y-3 outline-none">
+                      {mockSuggestions
+                        .filter((item) => item.lawReferences.length > 0 || item.supportingDocuments.length > 0)
+                        .map((item) => (
+                          <div key={item.id} className="rounded-lg border border-border bg-card p-4 text-sm shadow-sm">
+                            <div className="mb-3 flex items-center gap-2">
+                              <Badge className={cn("px-2 py-0.5 text-[10px] font-semibold", riskConfig[item.riskLevel].badgeClass)}>
+                                {riskConfig[item.riskLevel].label}
+                              </Badge>
+                              <span className="truncate font-semibold text-foreground">{item.title}</span>
+                            </div>
+                            <Separator className="mb-3" />
+                            <div className="space-y-2">
+                              {item.lawReferences.map((ref, idx) => (
+                                <div key={`${item.id}-law-${idx}`} className="rounded-lg border border-border/80 bg-muted/40 p-3">
+                                  <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-primary">
+                                    <Scale className="h-3.5 w-3.5 text-blue-500" />
+                                    {ref.lawName} {ref.article}
+                                  </div>
+                                  <p className="text-xs leading-relaxed text-muted-foreground">{ref.snippet}</p>
+                                </div>
+                              ))}
+                              {item.supportingDocuments.map((doc, idx) => (
+                                <div key={`${item.id}-doc-${idx}`} className="rounded-lg border border-border/80 p-3">
+                                  <div className="mb-1 flex items-center gap-2 text-xs font-medium text-foreground">
+                                    <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
+                                    <span>{doc.title}</span>
+                                    <Badge variant="secondary" className="text-[10px]">
+                                      {refTypeLabels[doc.type]}
+                                    </Badge>
+                                  </div>
+                                  <p className="text-xs leading-relaxed text-muted-foreground">{doc.excerpt}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                    </TabsContent>
+                  </div>
+                </ScrollArea>
+              </Tabs>
+            </div>
+
+            <div className="absolute bottom-0 left-0 z-20 flex w-full items-center justify-between border-t border-border/80 bg-background/80 px-6 py-4 shadow-2xl backdrop-blur-md">
+              <div className="hidden flex-col lg:flex">
+                <span className="text-[11px] font-semibold text-muted-foreground">현재 검토 결정</span>
+                <span className="text-xs font-bold text-foreground">
+                  {decidedCount} / {mockSuggestions.length} 개 조항 피드백 완료
+                </span>
+              </div>
+
+              <div className="flex w-full items-center justify-end gap-3 lg:w-auto">
+                <Button
+                  variant="outline"
+                  className="flex h-9 items-center gap-1.5 border-blue-200 px-4 text-xs font-semibold text-blue-700 shadow-sm hover:bg-blue-50/50 dark:border-blue-900/50 dark:text-blue-400 dark:hover:bg-blue-950/20"
+                  onClick={() => toast.info("재검토 흐름은 정리 대상이라 비활성화되어 있습니다.")}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  의견 반영 및 재생성
+                </Button>
+                <Button
+                  className="flex h-9 items-center gap-1.5 bg-indigo-600 px-4 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700"
+                  onClick={() => toast.info("문서 컴파일 기능은 현재 연결되어 있지 않습니다.")}
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  수정 계약서 컴파일하기
+                </Button>
+                <Button
+                  variant="outline"
+                  className="hidden h-9 px-4 text-xs font-semibold sm:inline-flex"
+                  onClick={() => toast.info("다운로드할 수정 문서가 없습니다.")}
+                >
+                  <Download className="mr-1.5 h-4 w-4" />
+                  다운로드
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </SidebarProvider>
   );
 }
 
-// Interactive Issue Suggestion Card component
 interface SuggestionCardProps {
-  item: DocumentReviewSuggestion;
-  busy: string | null;
+  item: ReviewSuggestion;
+  status: SuggestionStatus;
   commentText: string;
+  isActive: boolean;
   isExpanded: boolean;
+  refCallback: (el: HTMLDivElement | null) => void;
   onSetComment: (text: string) => void;
   onToggleExpand: () => void;
-  onDecision: (id: string, action: "accept" | "reject" | "feedback") => Promise<void>;
+  onDecision: (id: string, status: SuggestionStatus) => void;
   onCopy: (text: string) => void;
+  onScrollToClause: (clauseId: string) => void;
 }
 
 function SuggestionCard({
   item,
-  busy,
+  status,
   commentText,
+  isActive,
   isExpanded,
+  refCallback,
   onSetComment,
   onToggleExpand,
   onDecision,
   onCopy,
+  onScrollToClause,
 }: SuggestionCardProps) {
-  const currentComment = decisionComment(item);
-  const risk = item.risk_level && item.risk_level in riskConfig ? item.risk_level : "low";
-  const config = riskConfig[risk];
-
-  const statusLabel = {
+  const config = riskConfig[item.riskLevel];
+  const statusLabel: Record<SuggestionStatus, string> = {
     pending: "검토 대기",
     accepted: "수정안 수락됨",
     rejected: "수정 안 함",
     feedback: "수정 보완 요청",
-  }[item.status];
-
-  const isCardBusy = busy?.endsWith(item.finding_id);
+  };
 
   return (
     <div
+      ref={refCallback}
       className={cn(
-        "rounded-xl border transition-all duration-200 shadow-sm relative overflow-hidden hover:shadow-md",
+        "relative overflow-hidden rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md",
         config.borderClass,
         config.bgClass,
-        item.status === "accepted" && "ring-1 ring-emerald-500/20 bg-emerald-500/[0.02]",
-        item.status === "rejected" && "ring-1 ring-rose-500/20 bg-rose-500/[0.02]",
-        item.status === "feedback" && "ring-1 ring-blue-500/20 bg-blue-500/[0.02]"
+        isActive && "ring-1 ring-primary/30",
+        status === "accepted" && "ring-1 ring-emerald-500/20 bg-emerald-500/[0.02]",
+        status === "rejected" && "ring-1 ring-rose-500/20 bg-rose-500/[0.02]",
+        status === "feedback" && "ring-1 ring-blue-500/20 bg-blue-500/[0.02]"
       )}
     >
-      <div className="p-4 space-y-3">
-        {/* Header line */}
+      <div className="space-y-3 p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <Badge className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full border-none", config.badgeClass)}>
+            <Badge className={cn("rounded-full border-none px-2 py-0.5 text-[10px] font-semibold", config.badgeClass)}>
               {config.label}
             </Badge>
             <Badge
               variant="outline"
               className={cn(
-                "text-[9px] font-bold px-2 py-0.5 rounded-full border bg-background/60",
-                item.status === "accepted" && "border-emerald-500 text-emerald-600 dark:text-emerald-400",
-                item.status === "rejected" && "border-rose-500 text-rose-600 dark:text-rose-400",
-                item.status === "feedback" && "border-blue-500 text-blue-600 dark:text-blue-400",
-                item.status === "pending" && "border-muted-foreground/30 text-muted-foreground"
+                "rounded-full border bg-background/60 px-2 py-0.5 text-[9px] font-bold",
+                status === "accepted" && "border-emerald-500 text-emerald-600 dark:text-emerald-400",
+                status === "rejected" && "border-rose-500 text-rose-600 dark:text-rose-400",
+                status === "feedback" && "border-blue-500 text-blue-600 dark:text-blue-400",
+                status === "pending" && "border-muted-foreground/30 text-muted-foreground"
               )}
             >
-              {statusLabel}
+              {statusLabel[status]}
             </Badge>
           </div>
-          
+
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 text-muted-foreground hover:text-foreground rounded-full"
-            onClick={() => onCopy(`${item.title}\n\n감지조항: ${item.selected_text}\n\n수정의견: ${item.guidance}`)}
+            className="h-6 w-6 rounded-full text-muted-foreground hover:text-foreground"
+            onClick={() => onCopy(`${item.title}\n\n감지조항: ${item.selectedText}\n\n수정의견: ${item.guidance}`)}
             title="클립보드 복사"
           >
             <Copy className="h-3.5 w-3.5" />
           </Button>
         </div>
 
-        {/* Title */}
-        <h4 className="text-sm font-bold text-foreground leading-snug tracking-tight">
-          {item.title || item.finding_id}
-        </h4>
+        <h4 className="text-sm font-bold leading-snug tracking-tight text-foreground">{item.title}</h4>
 
-        {/* Selected clause blockquote */}
-        {item.selected_text && (
-          <div className="rounded-lg bg-muted/40 dark:bg-muted/10 border-l-[3px] border-primary/40 px-3 py-2 text-xs italic text-muted-foreground leading-relaxed">
-            "{item.selected_text}"
+        <div className="rounded-lg border-l-[3px] border-primary/40 bg-muted/40 px-3 py-2 text-xs italic leading-relaxed text-muted-foreground dark:bg-muted/10">
+          &quot;{item.selectedText}&quot;
+        </div>
+
+        <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground/90">{item.guidance}</p>
+
+        <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase text-primary">수정 제안</p>
+          <p className="mt-1 text-xs leading-relaxed text-foreground">{item.proposedEdit}</p>
+        </div>
+
+        {item.lawReferences.length > 0 && (
+          <div className="space-y-1.5">
+            {item.lawReferences.map((ref, idx) => (
+              <div key={idx} className="flex items-start gap-1.5 text-xs">
+                <Scale className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
+                <span>
+                  <span className="font-medium text-primary">
+                    {ref.lawName} {ref.article}
+                  </span>
+                  <span className="text-muted-foreground"> - {ref.snippet.slice(0, 70)}...</span>
+                </span>
+              </div>
+            ))}
           </div>
         )}
 
-        {/* Explanation guidance */}
-        {item.guidance && (
-          <p className="text-xs leading-relaxed text-foreground/90 whitespace-pre-wrap">
-            {item.guidance}
-          </p>
-        )}
-
-        {/* Proposed edit diff */}
-        {item.diff && (
-          <div className="rounded-lg border border-border/40 bg-zinc-950 p-2.5 font-mono text-[10px] text-zinc-100 overflow-auto max-h-48 leading-relaxed shadow-inner">
-            <div className="text-[9px] text-zinc-400 mb-1 border-b border-zinc-800 pb-1 font-sans flex items-center justify-between">
-              <span>수정 조항 미리보기(DIFF)</span>
-              <Badge variant="secondary" className="bg-zinc-800 text-zinc-300 text-[9px] hover:bg-zinc-800">코드 검증</Badge>
-            </div>
-            <pre className="whitespace-pre">{item.diff}</pre>
+        {item.supportingDocuments.length > 0 && (
+          <div className="space-y-1.5">
+            {item.supportingDocuments.map((doc, idx) => (
+              <div key={idx} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <ExternalLink className="h-3 w-3 shrink-0" />
+                <span>{doc.title}</span>
+                <Badge variant="secondary" className="text-[10px]">
+                  {refTypeLabels[doc.type]}
+                </Badge>
+              </div>
+            ))}
           </div>
         )}
 
-        {/* Saved feedback info */}
-        {currentComment && (
-          <div className="rounded-lg border border-blue-100 dark:border-blue-900/30 bg-blue-500/[0.04] px-3 py-2.5 text-xs text-blue-700 dark:text-blue-300 leading-relaxed flex items-start gap-1.5">
-            <MessageSquare className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />
-            <div>
-              <span className="font-bold">기존 전달 의견:</span> {currentComment}
-            </div>
-          </div>
-        )}
-
-        {/* Action Controls */}
-        <div className="pt-2 border-t border-border/40 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/40 pt-2">
           <div className="flex items-center gap-2">
-            {/* Accept Button */}
-            {item.proposed_edit && (
-              <Button
-                size="sm"
-                variant={item.status === "accepted" ? "default" : "outline"}
-                className={cn(
-                  "text-[11px] h-7 px-3 font-semibold",
-                  item.status === "accepted"
-                    ? "bg-emerald-600 hover:bg-emerald-700 text-white border-none"
-                    : "border-emerald-200 dark:border-emerald-900/50 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400"
-                )}
-                disabled={isCardBusy}
-                onClick={() => onDecision(item.finding_id, "accept")}
-              >
-                {busy === `accept:${item.finding_id}` ? (
-                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                ) : (
-                  <Check className="h-3 w-3 mr-1" />
-                )}
-                수락
-              </Button>
-            )}
-
-            {/* Reject Button */}
             <Button
               size="sm"
-              variant={item.status === "rejected" ? "destructive" : "outline"}
+              variant={status === "accepted" ? "default" : "outline"}
               className={cn(
-                "text-[11px] h-7 px-3 font-semibold",
-                item.status === "rejected"
-                  ? "bg-rose-600 hover:bg-rose-700 text-white border-none"
-                  : "border-rose-200 dark:border-rose-900/50 hover:bg-rose-50/50 dark:hover:bg-rose-950/20 text-rose-700 dark:text-rose-400"
+                "h-7 px-3 text-[11px] font-semibold",
+                status === "accepted"
+                  ? "border-none bg-emerald-600 text-white hover:bg-emerald-700"
+                  : "border-emerald-200 text-emerald-700 hover:bg-emerald-50/50 dark:border-emerald-900/50 dark:text-emerald-400 dark:hover:bg-emerald-950/20"
               )}
-              disabled={isCardBusy}
-              onClick={() => onDecision(item.finding_id, "reject")}
+              onClick={() => onDecision(item.id, "accepted")}
             >
-              {busy === `reject:${item.finding_id}` ? (
-                <Loader2 className="h-3 w-3 animate-spin mr-1" />
-              ) : (
-                <X className="h-3 w-3 mr-1" />
+              <Check className="mr-1 h-3 w-3" />
+              수락
+            </Button>
+            <Button
+              size="sm"
+              variant={status === "rejected" ? "destructive" : "outline"}
+              className={cn(
+                "h-7 px-3 text-[11px] font-semibold",
+                status !== "rejected" &&
+                  "border-rose-200 text-rose-700 hover:bg-rose-50/50 dark:border-rose-900/50 dark:text-rose-400 dark:hover:bg-rose-950/20"
               )}
+              onClick={() => onDecision(item.id, "rejected")}
+            >
+              <X className="mr-1 h-3 w-3" />
               수정 안 함
             </Button>
           </div>
 
-          {/* Feedback Area toggle */}
-          <Button
-            size="sm"
-            variant={item.status === "feedback" ? "default" : "ghost"}
-            className={cn(
-              "text-[11px] h-7 px-3 font-semibold border border-transparent",
-              item.status === "feedback"
-                ? "bg-blue-600 hover:bg-blue-700 text-white"
-                : "text-blue-600 dark:text-blue-400 hover:bg-blue-500/10"
-            )}
-            onClick={onToggleExpand}
-          >
-            <MessageSquare className="h-3.5 w-3.5 mr-1" />
-            보완 의견 피드백
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-3 text-[11px] font-semibold text-muted-foreground"
+              onClick={() => onScrollToClause(item.clauseId)}
+            >
+              원문 보기
+              <ChevronRight className="ml-0.5 h-3 w-3" />
+            </Button>
+            <Button
+              size="sm"
+              variant={status === "feedback" ? "default" : "ghost"}
+              className={cn(
+                "h-7 border border-transparent px-3 text-[11px] font-semibold",
+                status === "feedback" ? "bg-blue-600 text-white hover:bg-blue-700" : "text-blue-600 hover:bg-blue-500/10 dark:text-blue-400"
+              )}
+              onClick={onToggleExpand}
+            >
+              <MessageSquare className="mr-1 h-3.5 w-3.5" />
+              보완 의견
+            </Button>
+          </div>
         </div>
 
-        {/* Collapsible Feedback Comment Box */}
         {isExpanded && (
-          <div className="pt-2.5 border-t border-border/40 space-y-2.5 animate-in fade-in slide-in-from-top-1 duration-150">
+          <div className="animate-in fade-in slide-in-from-top-1 space-y-2.5 border-t border-border/40 pt-2.5 duration-150">
             <Textarea
-              className="min-h-[72px] text-xs resize-none bg-background focus-visible:ring-blue-500"
-              placeholder="LLM에 다시 작성을 요청할 세부 의견을 자세하게 입력해주세요. (예: 손해배상 배율을 200%에서 100%로 완화할 것)"
+              className="min-h-[72px] resize-none bg-background text-xs focus-visible:ring-blue-500"
+              placeholder="보완 요청 내용을 입력하세요."
               value={commentText}
-              onChange={(e) => onSetComment(e.target.value)}
+              onChange={(event) => onSetComment(event.target.value)}
             />
             <div className="flex justify-end">
               <Button
                 size="sm"
-                className="text-[11px] h-7 bg-blue-600 hover:bg-blue-700 text-white font-bold"
-                disabled={!commentText.trim() || isCardBusy}
-                onClick={() => onDecision(item.finding_id, "feedback")}
+                className="h-7 bg-blue-600 text-[11px] font-bold text-white hover:bg-blue-700"
+                disabled={!commentText.trim()}
+                onClick={() => onDecision(item.id, "feedback")}
               >
-                {busy === `feedback:${item.finding_id}` ? (
-                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                ) : (
-                  <Sparkles className="h-3 w-3 mr-1" />
-                )}
-                피드백 의견 제출
+                <RefreshCw className="mr-1 h-3 w-3" />
+                피드백 의견 저장
               </Button>
             </div>
           </div>
@@ -974,28 +797,4 @@ function SuggestionCard({
       </div>
     </div>
   );
-}
-
-// Helpers
-function previewFlagFor(
-  kind: "latest" | "parser" | "risk" | "edited",
-  summary: DocumentReviewSummary
-): "parser_preview" | "risk_preview" | "edited_preview" {
-  if (kind === "parser") return "parser_preview";
-  if (kind === "risk") return "risk_preview";
-  if (kind === "edited") return "edited_preview";
-  if (summary.current_preview_kind === "edited") return "edited_preview";
-  if (summary.current_preview_kind === "risk") return "risk_preview";
-  return "parser_preview";
-}
-
-function isActivelyProcessing(status: DocumentReviewStatus): boolean {
-  return status === "queued" || status === "running" || status === "applying";
-}
-
-function decisionComment(item: DocumentReviewSuggestion): string {
-  const decision = item.payload.decision;
-  if (!decision || typeof decision !== "object" || !("comment" in decision)) return "";
-  const comment = (decision as { comment?: unknown }).comment;
-  return typeof comment === "string" ? comment : "";
 }

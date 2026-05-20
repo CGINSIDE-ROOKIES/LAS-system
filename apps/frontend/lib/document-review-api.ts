@@ -31,7 +31,6 @@ export type DocumentReviewOptions = {
   generation_provider_retry_base_delay_sec?: number;
   doc_types?: string[] | null;
   law_names?: string[] | null;
-  source_doc_type?: "subcontract" | "employment" | "service" | "nda" | "other" | null;
   include_review_html?: boolean;
   review_title?: string;
   hitl_min_risk_level?: "none" | "low" | "mid" | "high" | "crit";

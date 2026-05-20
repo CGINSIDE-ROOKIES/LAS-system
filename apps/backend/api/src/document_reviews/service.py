@@ -10,7 +10,7 @@ import psycopg2.extensions
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
-from doc_processor.api import ParseDocumentResult, TextEdit, apply_document_edits, parse_document
+from doc_processor.api import TextEdit, apply_document_edits, parse_document
 from doc_processor.contract_review import (
     ClauseReviewResult,
     ContractReviewConfig,
@@ -26,10 +26,7 @@ from src.dependencies import get_generation_service, get_rag_pipeline
 from . import previews, storage
 from .models import (
     ApplyDocumentReviewResponse,
-    CONTRACT_SOURCE_DOC_TYPES,
-    DEFAULT_LEGAL_RETRIEVAL_DOC_TYPES,
     DocumentReviewOptions,
-    LEGAL_RETRIEVAL_DOC_TYPES,
     ResumeDocumentReviewResponse,
 )
 
@@ -114,20 +111,13 @@ def run_document_review_job(review_id: str, options_payload: dict[str, Any]) -> 
         parser_preview_path.write_text(parser_html, encoding="utf-8")
 
         with db_connection() as conn:
-            current_job = storage.get_job(conn, review_id)
-            preserved_doc_type = current_job.get("source_doc_type") if current_job else None
-            final_source_doc_type = (
-                preserved_doc_type
-                if preserved_doc_type in CONTRACT_SOURCE_DOC_TYPES
-                else parse_result.source_doc_type
-            )
             storage.update_job(
                 conn,
                 review_id,
                 status="running",
                 stage="parser_completed",
                 progress=0.35,
-                source_doc_type=final_source_doc_type,
+                source_doc_type=parse_result.source_doc_type,
                 parser_result=parse_result.model_dump(mode="json"),
                 current_preview_kind="parser",
             )
@@ -268,14 +258,12 @@ def resume_document_review(
     storage.update_job(conn, review_id, status="running", stage="review_progress", progress=0.82)
     storage.add_event(conn, review_id, "review_progress", {"progress": 0.82, "hitl_resume_started": True})
 
-    interrupted = False
     try:
         with _GRAPH_LOCK:
             output = _GRAPH.invoke(
                 Command(resume={"decisions": decisions}),
                 config=_graph_config(review_id, options),
             )
-        interrupted = "__interrupt__" in output
         state = ContractReviewGraphState.model_validate(output)
         if state.result is None:
             raise ValueError("Contract review graph did not return a resumed result.")
@@ -291,31 +279,13 @@ def resume_document_review(
             raise DocumentReviewServiceError(409, "Review checkpoint is no longer available.")
         result = _apply_decisions_to_result(ContractReviewResult.model_validate(stored_result), decisions)
 
-    # Interactive Preview Synchronization: Re-render and save updated preview html
-    original_path = Path(job["original_artifact_path"])
-    risk_html = previews.render_risk_preview(original_path, result)
-    risk_preview_path = storage.risk_preview_path_for(review_id)
-    risk_preview_path.write_text(risk_html, encoding="utf-8")
-    storage.upsert_artifact(
-        conn,
-        review_id=review_id,
-        kind="risk_preview",
-        path=str(risk_preview_path),
-        content_type="text/html; charset=utf-8",
+    has_accepted_edit = any(
+        finding.status == "accepted" and finding.proposed_edit is not None
+        for finding in result.findings
     )
-
-    if interrupted:
-        next_status = "hitl_waiting"
-        next_stage = "hitl_waiting"
-        next_progress = 0.80
-    else:
-        has_accepted_edit = any(
-            finding.status == "accepted" and finding.proposed_edit is not None
-            for finding in result.findings
-        )
-        next_status = "running" if has_accepted_edit else "completed"
-        next_stage = "review_progress" if has_accepted_edit else "completed"
-        next_progress = 0.82 if has_accepted_edit else 1.0
+    next_status = "running" if has_accepted_edit else "completed"
+    next_stage = "review_progress" if has_accepted_edit else "completed"
+    next_progress = 0.82 if has_accepted_edit else 1.0
 
     storage.update_job(
         conn,
@@ -324,32 +294,15 @@ def resume_document_review(
         stage=next_stage,
         progress=next_progress,
         contract_review_result=result.model_dump(mode="json"),
-        current_preview_kind="risk",
     )
     storage.save_suggestions_from_result(conn, review_id, result)
     storage.add_event(
         conn,
         review_id,
         "review_progress",
-        {
-            "progress": next_progress,
-            "decisions_applied": len(decisions),
-            "preview_url": _preview_url(review_id),
-        },
+        {"progress": next_progress, "decisions_applied": len(decisions)},
     )
-    if interrupted:
-        storage.add_event(
-            conn,
-            review_id,
-            "hitl_waiting",
-            {
-                "progress": next_progress,
-                "finding_count": len(result.findings),
-                "request_count": len(result.hitl_requests),
-                "suggestions_url": _suggestions_url(review_id),
-            },
-        )
-    elif next_status == "completed":
+    if next_status == "completed":
         storage.add_event(
             conn,
             review_id,
@@ -357,13 +310,12 @@ def resume_document_review(
             {"progress": 1.0, "preview_url": _preview_url(review_id)},
         )
     logger.info(
-        "document review resume completed: review_id=%s decisions=%s next_status=%s next_stage=%s accepted_edit=%s interrupted=%s",
+        "document review resume completed: review_id=%s decisions=%s next_status=%s next_stage=%s accepted_edit=%s",
         review_id,
         len(decisions),
         next_status,
         next_stage,
-        not interrupted and has_accepted_edit,
-        interrupted,
+        has_accepted_edit,
     )
     return ResumeDocumentReviewResponse(
         review_id=review_id,
@@ -509,95 +461,6 @@ def apply_document_review(
     )
 
 
-def restore_preview_artifact(
-    conn: psycopg2.extensions.connection,
-    review_id: str,
-    artifact_kind: str,
-    job: dict[str, Any] | None = None,
-) -> Path | None:
-    """Rebuild a preview file when the DB artifact row exists but the file is gone.
-
-    Preview HTML is derived data. In local/dev deployments the files can disappear
-    across restarts or storage root changes while the job row remains valid.
-    """
-    job = job or storage.get_job(conn, review_id)
-    if job is None:
-        return None
-
-    try:
-        if artifact_kind == "parser_preview":
-            original_path = Path(job["original_artifact_path"])
-            if not original_path.exists():
-                return None
-            parser_payload = job.get("parser_result")
-            html = (
-                previews.render_parser_preview(
-                    original_path,
-                    ParseDocumentResult.model_validate(parser_payload),
-                )
-                if parser_payload
-                else previews.render_original_preview(original_path)
-            )
-            path = storage.parser_preview_path_for(review_id)
-        elif artifact_kind == "risk_preview":
-            original_path = Path(job["original_artifact_path"])
-            result_payload = job.get("contract_review_result")
-            if not original_path.exists() or not result_payload:
-                return None
-            html = previews.render_risk_preview(
-                original_path,
-                ContractReviewResult.model_validate(result_payload),
-            )
-            path = storage.risk_preview_path_for(review_id)
-        elif artifact_kind == "edited_preview":
-            edited_path = _edited_artifact_path(conn, review_id, job)
-            if edited_path is None or not edited_path.exists():
-                return None
-            edits, _ = _accepted_edits(storage.accepted_suggestions(conn, review_id))
-            html = previews.render_edited_preview(edited_path, edits)
-            path = storage.edited_preview_path_for(review_id)
-        else:
-            return None
-    except Exception:
-        logger.warning(
-            "document review preview artifact restore failed: review_id=%s kind=%s",
-            review_id,
-            artifact_kind,
-            exc_info=True,
-        )
-        return None
-
-    path.write_text(html, encoding="utf-8")
-    storage.upsert_artifact(
-        conn,
-        review_id=review_id,
-        kind=artifact_kind,
-        path=str(path),
-        content_type="text/html; charset=utf-8",
-    )
-    logger.info(
-        "document review preview artifact restored: review_id=%s kind=%s path=%s",
-        review_id,
-        artifact_kind,
-        path,
-    )
-    return path
-
-
-def _edited_artifact_path(
-    conn: psycopg2.extensions.connection,
-    review_id: str,
-    job: dict[str, Any],
-) -> Path | None:
-    raw_path = job.get("edited_artifact_path")
-    if raw_path:
-        return Path(raw_path)
-    artifact = storage.get_artifact(conn, review_id, "edited")
-    if artifact and artifact.get("path"):
-        return Path(artifact["path"])
-    return None
-
-
 def _run_review_graph(
     *,
     review_id: str,
@@ -630,7 +493,7 @@ def _contract_config(options: DocumentReviewOptions) -> ContractReviewConfig:
         max_generation_repair_attempts=options.max_generation_repair_attempts,
         max_generation_provider_retry_attempts=options.max_generation_provider_retry_attempts,
         generation_provider_retry_base_delay_sec=options.generation_provider_retry_base_delay_sec,
-        doc_types=_legal_retrieval_doc_types(options.doc_types),
+        doc_types=options.doc_types,
         law_names=options.law_names,
         include_review_html=options.include_review_html,
         review_title=options.review_title,
@@ -661,16 +524,7 @@ def _log_options(options: DocumentReviewOptions) -> dict[str, Any]:
         "max_concurrent_risk_reviews": options.max_concurrent_risk_reviews,
         "max_generation_repair_attempts": options.max_generation_repair_attempts,
         "hitl_min_risk_level": options.hitl_min_risk_level,
-        "source_doc_type": options.source_doc_type,
-        "doc_types": _legal_retrieval_doc_types(options.doc_types),
     }
-
-
-def _legal_retrieval_doc_types(doc_types: list[str] | None) -> list[str] | None:
-    if doc_types is None:
-        return None
-    filtered = [doc_type for doc_type in doc_types if doc_type in LEGAL_RETRIEVAL_DOC_TYPES]
-    return filtered or list(DEFAULT_LEGAL_RETRIEVAL_DOC_TYPES)
 
 
 def _accepted_edits(rows: list[dict[str, Any]]) -> tuple[list[TextEdit], list[str]]:
