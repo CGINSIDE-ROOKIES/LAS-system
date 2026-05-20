@@ -95,6 +95,51 @@ class QueryLegalDbTest(unittest.TestCase):
         self.assertEqual(document["citation"], "근로기준법 제43조 (law-1)")
         self.assertEqual(result["citations"][0]["citation"], document["citation"])
 
+    def test_query_legal_db_ignores_contract_doc_type_values(self) -> None:
+        pipeline = RagPipeline(
+            RagPipelineConfig(
+                retrieval=RetrievalConfig(
+                    qdrant_url="http://qdrant.test",
+                    qdrant_collections=["law_article"],
+                    opensearch_url="",
+                    opensearch_indices=[],
+                ),
+                generation=GenerationConfig(
+                    url="http://llm.test/v1/chat/completions",
+                    model="test-model",
+                    api_key="test-key",
+                ),
+            )
+        )
+
+        def fake_retrieve(
+            question: str,
+            *,
+            doc_types: list[str] | None,
+            law_names: list[str] | None,
+            intent: str | None = None,
+            search_query: str | None = None,
+            hypothetical_doc: str | None = None,
+            trace=None,
+            top_k: int | None = None,
+        ):
+            del question, law_names, intent, search_query, hypothetical_doc, trace, top_k
+            self.assertEqual(doc_types, ["law", "prec", "detc", "decc", "expc"])
+            return ([], "", "missing", False)
+
+        pipeline._retrieve = fake_retrieve  # type: ignore[method-assign]
+        try:
+            result = pipeline.query_legal_db(
+                "clause text",
+                doc_types=["subcontract"],
+                intent="normative",
+            )
+        finally:
+            pipeline._executor.shutdown(wait=False)
+
+        self.assertEqual(result["document_count"], 0)
+        self.assertEqual(result["filters"]["doc_types"], ["law", "prec", "detc", "decc", "expc"])
+
 
 if __name__ == "__main__":
     unittest.main()
