@@ -675,7 +675,7 @@ def finalize_contract_review(state: ContractReviewGraphState) -> Command[str]:
     )
 
 
-def human_review_contract_findings(state: ContractReviewGraphState, config: RunnableConfig) -> Command[str]:
+def human_review_contract_findings(state: ContractReviewGraphState) -> Command[str]:
     state = _coerce_review_state(state)
     if state.result is None:
         raise ValueError("result is required before human review.")
@@ -694,164 +694,15 @@ def human_review_contract_findings(state: ContractReviewGraphState, config: Runn
         }
     )
     decisions = _parse_human_decisions(resume_payload)
-    
-    # Separate decisions that are feedback
-    feedback_decisions = [d for d in decisions if d.action == "feedback"]
-    
-    if not feedback_decisions:
-        result = _apply_human_decisions(state.result, decisions)
-        return Command(
-            update={
-                "human_decisions": _checkpoint_value(decisions),
-                "result": _checkpoint_value(result),
-                "findings": _checkpoint_value(result.findings),
-                "clause_reviews": _checkpoint_value(result.clause_reviews),
-            },
-            goto=END,
-        )
-
-    # Feedback flow: group comments by clause and regenerate
-    findings_by_id = {f.finding_id: f for f in state.result.findings}
-    feedback_by_clause: dict[str, list[str]] = {}
-    for d in feedback_decisions:
-        finding = findings_by_id.get(d.finding_id)
-        if finding and d.comment.strip():
-            feedback_by_clause.setdefault(finding.clause_id, []).append(d.comment.strip())
-
-    rag_client = state.rag_client or _runtime_config_value(config, "rag_client")
-    generation_client = state.generation_client or _runtime_config_value(config, "generation_client")
-    if rag_client is None:
-        raise ValueError("rag_client is required for feedback regeneration in human review.")
-    if generation_client is None:
-        raise ValueError("generation_client is required for feedback regeneration in human review.")
-
-    units_by_clause_id = {unit.clause.clause_id: unit for unit in state.review_units}
-    all_new_findings = []
-    regenerated_warnings: dict[str, list[str]] = {}
-    regenerated_clause_ids = set(feedback_by_clause.keys())
-
-    for clause_id, feedback_comments in feedback_by_clause.items():
-        unit = units_by_clause_id.get(clause_id)
-        if not unit:
-            continue
-        
-        evidence_result = rag_client.query_legal_db(
-            unit.query,
-            doc_types=state.config.doc_types,
-            law_names=state.config.law_names,
-            intent="normative",
-            search_query=unit.clause_text,
-            top_k=state.config.top_k,
-        )
-        sources = _sources_from_evidence(evidence_result, state.config)
-        prompt = _build_generation_prompt(
-            unit.clause,
-            unit.paragraphs,
-            sources,
-            feedback_comments=feedback_comments,
-        )
-        new_findings, clause_warnings = _generate_review_findings_with_repair(
-            generation_client,
-            prompt=prompt,
-            clause=unit.clause,
-            paragraphs=unit.paragraphs,
-            sources=sources,
-            cfg=state.config,
-        )
-        all_new_findings.extend(new_findings)
-        regenerated_warnings[clause_id] = clause_warnings
-
-    # Merge decisions with the non-regenerated findings
-    status_by_finding_id = {
-        decision.finding_id: _status_from_human_decision(decision)
-        for decision in decisions
-    }
-    
-    retained_findings = []
-    for finding in state.result.findings:
-        if finding.clause_id not in regenerated_clause_ids:
-            new_status = status_by_finding_id.get(finding.finding_id, finding.status)
-            retained_findings.append(finding.model_copy(update={"status": new_status}))
-
-    all_findings = retained_findings + all_new_findings
-
-    new_findings_by_clause: dict[str, list[ContractReviewFinding]] = {}
-    for finding in all_new_findings:
-        new_findings_by_clause.setdefault(finding.clause_id, []).append(finding)
-
-    updated_clause_reviews = []
-    for review in state.result.clause_reviews:
-        if review.clause_id in regenerated_clause_ids:
-            clause_new_findings = new_findings_by_clause.get(review.clause_id, [])
-            clause_new_risk = _max_risk_level(f.risk_level for f in clause_new_findings)
-            clause_warnings = regenerated_warnings.get(review.clause_id, [])
-            updated_clause_reviews.append(
-                review.model_copy(
-                    update={
-                        "findings": clause_new_findings,
-                        "risk_level": clause_new_risk,
-                        "warnings": clause_warnings,
-                    }
-                )
-            )
-        else:
-            clause_findings = [
-                f.model_copy(update={"status": status_by_finding_id.get(f.finding_id, f.status)})
-                for f in review.findings
-            ]
-            clause_risk = _max_risk_level(f.risk_level for f in clause_findings)
-            updated_clause_reviews.append(
-                review.model_copy(
-                    update={
-                        "findings": clause_findings,
-                        "risk_level": clause_risk,
-                    }
-                )
-            )
-
-    hitl_requests = _build_hitl_requests(all_findings, state.config)
-    all_findings = _attach_human_requests(all_findings, hitl_requests)
-    updated_clause_reviews = _replace_clause_review_findings(updated_clause_reviews, all_findings)
-    
-    clause_risk_counts = _clause_risk_counts(updated_clause_reviews)
-    overall_risk_level = _max_risk_level(review.risk_level for review in updated_clause_reviews)
-    
-    warnings = [
-        warning
-        for review in updated_clause_reviews
-        for warning in review.warnings
-    ]
-    review_html = _render_findings_html(
-        all_findings,
-        cfg=state.config,
-        render_document=state.render_document,
-        render_source_path=state.render_source_path,
-        warnings=warnings,
-    )
-
-    result = ContractReviewResult(
-        parse_result=state.result.parse_result,
-        clause_reviews=updated_clause_reviews,
-        findings=all_findings,
-        risk_level=overall_risk_level,
-        clause_risk_counts=clause_risk_counts,
-        review_html=review_html,
-        hitl_requests=hitl_requests,
-        warnings=warnings,
-    )
-
-    goto = "human_review" if state.config.pause_for_hitl and hitl_requests else END
-
+    result = _apply_human_decisions(state.result, decisions)
     return Command(
         update={
             "human_decisions": _checkpoint_value(decisions),
-            "clause_reviews": _checkpoint_value(updated_clause_reviews),
-            "findings": _checkpoint_value(all_findings),
-            "hitl_requests": _checkpoint_value(hitl_requests),
             "result": _checkpoint_value(result),
-            "warnings": warnings,
+            "findings": _checkpoint_value(result.findings),
+            "clause_reviews": _checkpoint_value(result.clause_reviews),
         },
-        goto=goto,
+        goto=END,
     )
 
 
@@ -984,7 +835,6 @@ def _build_generation_prompt(
     clause: ClauseSummary,
     paragraphs: Sequence[ParagraphPreview],
     sources: Sequence[ContractReviewSource],
-    feedback_comments: Sequence[str] | None = None,
 ) -> str:
     evidence = [
         {
@@ -1024,33 +874,27 @@ def _build_generation_prompt(
             }
         ]
     }
-    prompt_parts = [
-        "[clause]",
-        json.dumps(
-            {
-                "clause_id": clause.clause_id,
-                "clause_no": clause.clause_no,
-                "title": clause.title,
-                "paragraphs": paragraph_payload,
-            },
-            ensure_ascii=False,
-        ),
-        "[rag_evidence]",
-        json.dumps(evidence, ensure_ascii=False),
-        "[required_json_schema]",
-        json.dumps(schema, ensure_ascii=False),
-        "[language_requirement]",
-        "사용자에게 표시되는 모든 필드(title, rationale, recommendation, replacement_text, "
-        "full_replacement_text, human_question)는 한국어로 작성하세요.",
-    ]
-    if feedback_comments:
-        prompt_parts.extend([
-            "[human_feedback]",
-            "이전 검토 의견에 대해 사용자가 다음과 같은 피드백/수정 요청을 제공했습니다. "
-            "이 피드백을 적극 반영하여 해당 조항을 다시 검토하고 수정안을 작성해 주세요:\n" +
-            "\n".join(f"- {comment}" for comment in feedback_comments)
-        ])
-    return "\n\n".join(prompt_parts)
+    return "\n\n".join(
+        [
+            "[clause]",
+            json.dumps(
+                {
+                    "clause_id": clause.clause_id,
+                    "clause_no": clause.clause_no,
+                    "title": clause.title,
+                    "paragraphs": paragraph_payload,
+                },
+                ensure_ascii=False,
+            ),
+            "[rag_evidence]",
+            json.dumps(evidence, ensure_ascii=False),
+            "[required_json_schema]",
+            json.dumps(schema, ensure_ascii=False),
+            "[language_requirement]",
+            "사용자에게 표시되는 모든 필드(title, rationale, recommendation, replacement_text, "
+            "full_replacement_text, human_question)는 한국어로 작성하세요.",
+        ]
+    )
 
 
 def _generation_answer(result: Any) -> str:
@@ -1652,8 +1496,6 @@ def _build_hitl_requests(
 ) -> list[ContractReviewHumanRequest]:
     requests: list[ContractReviewHumanRequest] = []
     for finding in findings:
-        if finding.status in ("accepted", "rejected", "feedback"):
-            continue
         if _RISK_ORDER[finding.risk_level] < _RISK_ORDER[cfg.hitl_min_risk_level]:
             continue
         source_citations = [
