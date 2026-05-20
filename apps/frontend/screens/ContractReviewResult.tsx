@@ -89,7 +89,7 @@ const statusConfig: Record<OverallStatus, { label: string; icon: typeof ShieldCh
   safe: { label: "안전함", icon: ShieldCheck, className: "text-emerald-600 dark:text-emerald-400" },
   attention: { label: "검토 권장", icon: AlertTriangle, className: "text-amber-600 dark:text-amber-400" },
   "high-risk": { label: "위험 조항 감지", icon: ShieldAlert, className: "text-rose-600 dark:text-rose-400" },
-  processing: { label: "분석 중...", icon: Loader2, className: "text-blue-600 dark:text-blue-400 animate-spin" },
+  processing: { label: "분석 중...", icon: Loader2, className: "text-blue-600 dark:text-blue-400" },
 };
 
 const STAGE_LABELS: Record<DocumentReviewStage, string> = {
@@ -407,7 +407,7 @@ export default function ContractReviewResult() {
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <div className={cn("flex items-center gap-2 font-semibold text-base", statusConfig[overallStatus].className)}>
-                    <StatusIcon className="h-5 w-5" />
+                    <StatusIcon className={cn("h-5 w-5", overallStatus === "processing" && "animate-spin")} />
                     <span>{statusConfig[overallStatus].label}</span>
                   </div>
                   <Separator orientation="vertical" className="h-5" />

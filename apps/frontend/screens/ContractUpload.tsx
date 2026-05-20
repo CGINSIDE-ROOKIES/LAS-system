@@ -168,7 +168,7 @@ const ContractUpload = () => {
         max_clauses: 10,
         hitl_min_risk_level: "low",
         include_review_html: true,
-        doc_types: contractType ? [contractType] : null,
+        source_doc_type: contractType as DocumentReviewOptions["source_doc_type"],
       };
       
       const response = await createDocumentReview(rawFile, options);
