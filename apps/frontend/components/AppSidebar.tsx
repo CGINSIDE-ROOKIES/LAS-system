@@ -24,10 +24,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 
 const menuItems = [
   { title: "홈",             icon: LayoutDashboard, path: "/"                },
-  { title: "법령 Q&A",       icon: MessageSquare,   path: "/chat"            },
   { title: "계약서 검토",     icon: FileSearch,      path: "/contract-review" },
   { title: "계약서 초안 작성", icon: FilePen,         path: "/contract-draft"  },
-  { title: "히스토리",        icon: Clock,           path: "/history"         },
+  { title: "법령 Q&A",       icon: MessageSquare,   path: "/chat"            },
+  { title: "히스토리",        icon: Clock,           path: "/conversations"   },
   { title: "설정",            icon: Settings,        path: "/settings"        },
 ];
 

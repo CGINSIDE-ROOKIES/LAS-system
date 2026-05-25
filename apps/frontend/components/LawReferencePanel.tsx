@@ -9,10 +9,12 @@ interface LawReferencePanelProps {
 
 export function LawReferencePanel({ citations }: LawReferencePanelProps) {
   // law_name 기준으로 그룹핑
-  const groups = citations.reduce<Record<string, Citation[]>>((acc, c) => {
-    (acc[c.lawName] ??= []).push(c);
-    return acc;
-  }, {});
+  const groups = citations
+    .filter((c) => c.lawName && c.content)
+    .reduce<Record<string, Citation[]>>((acc, c) => {
+      (acc[c.lawName] ??= []).push(c);
+      return acc;
+    }, {});
 
   return (
     <div className="flex h-full flex-col">
