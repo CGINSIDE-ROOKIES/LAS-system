@@ -4,10 +4,13 @@ import Link from "next/link";
 import { useEffect, useState, Fragment } from "react";
 import {
   FilePen, Clock, Check, ArrowRight,
-  Search, Bell, TrendingUp, Newspaper,
+  Search, Bell, TrendingUp, Newspaper, Loader2,
 } from "lucide-react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
+import { getHistory, type HistoryItem } from "@/lib/api-client";
+import { format, isToday, isYesterday } from "date-fns";
+import { ko } from "date-fns/locale";
 
 // ─── 디자인 토큰 ─────────────────────────────────────────────────────────────
 
@@ -53,12 +56,6 @@ const T = {
 
 const MOCK_USER = { name: "씨지인사이드", initial: "C", dept: "경영지원본부 · 법무팀" };
 
-const HISTORY = [
-  { id: 1, q: "근로계약서 작성 시 필수 기재사항은?",            when: "오늘 14:32", tag: "근로기준법", tone: "primary" },
-  { id: 2, q: "하도급 대금 지급 지연 시 이자율은 얼마인가요?", when: "어제",       tag: "하도급법",   tone: "warm"    },
-  { id: 3, q: "파견근로자에게 인정되는 휴게시간 기준",          when: "2일 전",     tag: "파견법",     tone: "amber"   },
-  { id: 4, q: "중대재해처벌법 적용 사업장 기준 정리해줘",        when: "3일 전",     tag: "중대재해",   tone: "rose"    },
-];
 
 const DRAFTS = [
   { id: 1, title: "(주)그린로지스 - 운송 위·수탁 계약서", step: "2/4 단계 · 대금/지급", updated: "10분 전", progress: 52 },
@@ -451,8 +448,91 @@ function FeatureCards() {
 
 // ─── 위젯들 ───────────────────────────────────────────────────────────────────
 
+const LAW_ABBREV: Record<string, string> = {
+  "기간제 및 단시간근로자 보호 등에 관한 법률": "기간제법",
+  "파견근로자 보호 등에 관한 법률": "파견근로자법",
+  "근로자퇴직급여 보장법": "퇴직급여법",
+  "남녀고용평등과 일·가정 양립 지원에 관한 법률": "남녀고용평등법",
+  "하도급거래 공정화에 관한 법률": "하도급법",
+};
+
+function formatWhen(dateStr: string): string {
+  const d = new Date(dateStr);
+  if (isToday(d)) return format(d, "HH:mm");
+  if (isYesterday(d)) return "어제";
+  return format(d, "M월 d일", { locale: ko });
+}
+
+function getLawTag(item: HistoryItem): string | null {
+  const src = item.sources.find((s) => s.doc_type === "law" && s.law_name);
+  if (!src) return null;
+  const name = src.law_name;
+  return LAW_ABBREV[name] ?? (name.length > 7 ? name.slice(0, 7) + "…" : name);
+}
+
+type SessionThread = {
+  id: string;
+  title: string;
+  count: number;
+  lastDate: string;
+  lastLawTag: string | null;
+};
+
+function groupToThreads(items: HistoryItem[]): SessionThread[] {
+  const sessionMap = new Map<string, HistoryItem[]>();
+  const orphans: HistoryItem[] = [];
+
+  for (const item of items) {
+    if (item.session_id) {
+      if (!sessionMap.has(item.session_id)) sessionMap.set(item.session_id, []);
+      sessionMap.get(item.session_id)!.push(item);
+    } else {
+      orphans.push(item);
+    }
+  }
+
+  const threads: SessionThread[] = [];
+
+  for (const [sid, sessionItems] of sessionMap) {
+    const sorted = [...sessionItems].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+    const last = sorted[sorted.length - 1];
+    threads.push({
+      id: sid,
+      title: sorted[0].question,
+      count: sorted.length,
+      lastDate: last.created_at,
+      lastLawTag: getLawTag(last),
+    });
+  }
+
+  for (const item of orphans) {
+    threads.push({
+      id: item.id,
+      title: item.question,
+      count: 1,
+      lastDate: item.created_at,
+      lastLawTag: getLawTag(item),
+    });
+  }
+
+  return threads.sort(
+    (a, b) => new Date(b.lastDate).getTime() - new Date(a.lastDate).getTime()
+  );
+}
+
 function HistoryWidget() {
-  const [hoveredId, setHoveredId] = useState<number | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [threads, setThreads] = useState<SessionThread[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    getHistory({ limit: 30 })
+      .then((r) => setThreads(groupToThreads(r.items).slice(0, 3)))
+      .catch(console.error)
+      .finally(() => setIsLoading(false));
+  }, []);
 
   return (
     <div style={{
@@ -463,10 +543,10 @@ function HistoryWidget() {
     }}>
       <SectionHead
         icon={<Clock size={16} />}
-        title="이어서 이야기하기"
-        sub="최근 챗봇 대화"
+        title="이어서 대화하기"
+        sub="최근 법령 Q&A"
         action={
-          <Link href="/history" style={{
+          <Link href="/conversations" style={{
             display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px",
             borderRadius: 8, border: `1px solid ${T.primary100}`,
             background: T.primary50, color: T.primary700, fontSize: 12.5,
@@ -474,39 +554,56 @@ function HistoryWidget() {
           }}>전체 →</Link>
         }
       />
-      <ul style={{ marginTop: 8, listStyle: "none", padding: 0, margin: 0 }}>
-        {HISTORY.map((h, i) => (
-          <li
-            key={h.id}
-            onMouseEnter={() => setHoveredId(h.id)}
-            onMouseLeave={() => setHoveredId(null)}
-            style={{
-              padding: "11px 10px",
-              marginLeft: -10, marginRight: -10,
-              borderRadius: 8,
-              borderTop: i === 0 ? "none" : `1px solid ${T.borderSoft}`,
-              display: "flex", alignItems: "flex-start", gap: 12,
-              background: hoveredId === h.id ? T.bgCardSoft : "transparent",
-              cursor: "pointer",
-              transition: "background .12s ease",
-            }}
-          >
-            <span style={{ fontSize: 11, color: T.ink400, fontFamily: "monospace", marginTop: 2, minWidth: 24 }}>0{i + 1}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13.5, color: T.ink900, fontWeight: 500, lineHeight: 1.4 }}>{h.q}</div>
-              <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
-                <Pill tone={h.tone} style={{ fontSize: 10.5 }}>{h.tag}</Pill>
-                <span style={{ fontSize: 11.5, color: T.ink400 }}>{h.when}</span>
-              </div>
-            </div>
-            <ArrowRight
-              size={14}
-              color={hoveredId === h.id ? T.primary : T.ink300}
-              style={{ marginTop: 4, flexShrink: 0, transition: "color .12s ease" }}
-            />
-          </li>
-        ))}
-      </ul>
+      {isLoading ? (
+        <div style={{ display: "flex", justifyContent: "center", paddingTop: 24 }}>
+          <Loader2 size={18} color={T.ink400} className="animate-spin" />
+        </div>
+      ) : threads.length === 0 ? (
+        <p style={{ marginTop: 16, fontSize: 13, color: T.ink400, textAlign: "center" }}>아직 대화 내역이 없어요.</p>
+      ) : (
+        <ul style={{ marginTop: 8, listStyle: "none", padding: 0, margin: 0 }}>
+          {threads.map((h, i) => (
+              <li key={h.id} style={{ borderTop: i === 0 ? "none" : `1px solid ${T.borderSoft}` }}>
+                <Link
+                  href={`/conversations?thread=${h.id}`}
+                  onMouseEnter={() => setHoveredId(h.id)}
+                  onMouseLeave={() => setHoveredId(null)}
+                  style={{
+                    padding: "11px 10px",
+                    marginLeft: -10, marginRight: -10,
+                    borderRadius: 8,
+                    display: "flex", alignItems: "flex-start", gap: 12,
+                    background: hoveredId === h.id ? T.bgCardSoft : "transparent",
+                    textDecoration: "none",
+                    transition: "background .12s ease",
+                  }}
+                >
+                  <span style={{ fontSize: 11, color: T.ink400, fontFamily: "monospace", marginTop: 2, minWidth: 24 }}>
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 13.5, color: T.ink900, fontWeight: 500, lineHeight: 1.4,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>{h.title}</div>
+                    <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
+                      {h.lastLawTag && <Pill tone="primary" style={{ fontSize: 10.5 }}>{h.lastLawTag}</Pill>}
+                      {h.count > 1 && (
+                        <span style={{ fontSize: 10.5, color: T.ink400 }}>{h.count}개 질문 ·</span>
+                      )}
+                      <span style={{ fontSize: 11.5, color: T.ink400 }}>{formatWhen(h.lastDate)}</span>
+                    </div>
+                  </div>
+                  <ArrowRight
+                    size={14}
+                    color={hoveredId === h.id ? T.primary : T.ink300}
+                    style={{ marginTop: 4, flexShrink: 0, transition: "color .12s ease" }}
+                  />
+                </Link>
+              </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
