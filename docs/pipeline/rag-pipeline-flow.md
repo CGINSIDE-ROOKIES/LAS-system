@@ -285,7 +285,7 @@ def build_user_prompt_with_limit(
 #### OpenAI 호환 (`openai_compat`)
 
 ```
-POST {LLM_CHAT_COMPLETIONS_URL}
+POST {LLM_URL}
 Authorization: Bearer {LLM_API_KEY}
 {
   "model": "{LLM_MODEL}",
@@ -304,7 +304,8 @@ Authorization: Bearer {LLM_API_KEY}
 #### Gemini (`gemini`)
 
 ```
-POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}
+POST {LLM_URL or generated Gemini endpoint}
+x-goog-api-key: {LLM_API_KEY}
 {
   "contents": [{"role": "user", "parts": [{"text": "..."}]}],
   "systemInstruction": {"parts": [{"text": "..."}]},
@@ -345,14 +346,17 @@ save_qa(conn,
 | `QDRANT_API_KEY` | Qdrant API 키 (옵션) | |
 | `OPENSEARCH_URL` | OpenSearch URL (없으면 BM25 스킵) | `http://opensearch:9200` |
 | `OPENSEARCH_INDEX` | BM25 검색 인덱스명 | `las_laws` |
-| `EMBEDDING_MODEL` | 임베딩 모델명 | `jhgan/ko-sroberta-multitask` |
-| `EMBEDDING_PROVIDER` | `sentence_transformers` \| `openai` | `sentence_transformers` |
+| `EMBEDDING_PROVIDER` | `openai_compat` | `openai_compat` |
+| `EMBEDDING_MODEL` | 임베딩 모델명 | `text-embedding-3-large` |
+| `EMBEDDING_API_KEY` | OpenAI-compatible embeddings API 키 | |
+| `EMBEDDING_BASE_URL` | OpenAI-compatible embeddings base URL | `https://api.openai.com/v1` |
+| `EMBEDDING_DIMENSIONS` | Qdrant 벡터 차원과 일치해야 함 | `1024` |
 | `LLM_PROVIDER` | `openai_compat` \| `gemini` | `openai_compat` |
-| `LLM_CHAT_COMPLETIONS_URL` | OpenAI 호환 엔드포인트 | `http://vllm:8000/v1/chat/completions` |
 | `LLM_MODEL` | 모델명 | `Qwen/Qwen2.5-7B-Instruct` |
+| `LLM_URL` | OpenAI-compatible `/chat/completions` 또는 Gemini endpoint override | `http://vllm:8000/v1/chat/completions` |
 | `LLM_API_KEY` | LLM API 키 | |
-| `GEMINI_API_KEY` | Gemini API 키 (query_parser + Gemini LLM 공용) | |
-| `QUERY_PARSER_MODEL` | Query Parser 모델 (기본: `gemini-2.0-flash-lite`) | |
+| `QUERY_PARSER_LLM_*` | Query Parser 전용 override. 비우면 `LLM_*` 상속 | |
+| `GRAPH_LLM_*` | graph planner 전용 override. 비우면 `QUERY_PARSER_LLM_*`, 그 다음 `LLM_*` 상속 | |
 
 ---
 

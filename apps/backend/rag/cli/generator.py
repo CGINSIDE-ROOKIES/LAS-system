@@ -16,16 +16,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
+from rag_pipeline.env_config import load_backend_env
 from retrieval_common import RetrievalError, http_json
+
+load_backend_env()
 
 DEFAULT_PROVIDER = "openai_compat"
 DEFAULT_MODEL = "gemini-1.5-flash"
-# openai_compat provider의 기본 endpoint. 환경변수/인자로 덮어쓸 수 있다.
-DEFAULT_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 
 
 def _resolve_request_options(
@@ -49,30 +46,39 @@ def _resolve_request_options(
     if resolved_provider == "gemini":
         resolved_model = (
             (model or "").strip()
-            or os.getenv("GEMINI_MODEL", "").strip()
+            or os.getenv("LLM_MODEL", "").strip()
             or DEFAULT_MODEL
         )
         resolved_url = (
             (url or "").strip()
-            or os.getenv("GEMINI_API_URL", "").strip()
+            or os.getenv("LLM_URL", "").strip()
             or f"https://generativelanguage.googleapis.com/v1beta/models/{resolved_model}:generateContent"
         )
-        resolved_api_key = (api_key or "").strip() or os.getenv(
-            "GEMINI_API_KEY", ""
-        ).strip()
-    else:
-        resolved_model = (model or "").strip() or os.getenv("LLM_MODEL", "").strip()
-        resolved_url = (url or "").strip() or os.getenv(
-            "LLM_CHAT_COMPLETIONS_URL", ""
-        ).strip()
         resolved_api_key = (
             (api_key or "").strip()
             or os.getenv("LLM_API_KEY", "").strip()
-            or os.getenv("OPENAI_API_KEY", "").strip()
+        )
+    else:
+        resolved_model = (model or "").strip() or os.getenv("LLM_MODEL", "").strip()
+        resolved_url = (
+            (url or "").strip()
+            or os.getenv("LLM_URL", "").strip()
+        )
+        if not resolved_url:
+            base_url = os.getenv("LLM_BASE_URL", "").strip().rstrip("/")
+            if base_url:
+                resolved_url = (
+                    base_url
+                    if base_url.endswith("/chat/completions")
+                    else f"{base_url}/chat/completions"
+                )
+        resolved_api_key = (
+            (api_key or "").strip()
+            or os.getenv("LLM_API_KEY", "").strip()
         )
         if not resolved_url:
             raise RetrievalError(
-                "openai_compat 사용 시 LLM_CHAT_COMPLETIONS_URL(또는 --url)이 필요합니다."
+                "openai_compat 사용 시 LLM_URL/LLM_BASE_URL(또는 --url)이 필요합니다."
             )
         if not resolved_model:
             raise RetrievalError(
@@ -185,7 +191,7 @@ def generate_answer(
 
     if resolved_provider == "gemini":
         if not resolved_api_key:
-            raise RetrievalError("GEMINI_API_KEY가 필요합니다.")
+            raise RetrievalError("LLM_API_KEY가 필요합니다.")
         payload = _build_gemini_payload(
             prompt_text=prompt_text,
             system_prompt=system_prompt,
@@ -401,7 +407,7 @@ def stream_answer(
     try:
         if resolved_provider == "gemini":
             if not resolved_api_key:
-                raise RetrievalError("GEMINI_API_KEY가 필요합니다.")
+                raise RetrievalError("LLM_API_KEY가 필요합니다.")
             yield from _stream_gemini(
                 prompt_text=prompt_text,
                 system_prompt=system_prompt,
@@ -444,7 +450,7 @@ def parse_args() -> argparse.Namespace:
         default="",
         help=(
             "provider별 URL. "
-            "openai_compat: LLM_CHAT_COMPLETIONS_URL 또는 --url 필수, "
+            "openai_compat: LLM_URL/LLM_BASE_URL 또는 --url 필수, "
             "gemini 기본: Google Generative Language API"
         ),
     )
@@ -459,7 +465,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--api-key",
         default="",
-        help="인증 키 (openai: LLM_API_KEY/OPENAI_API_KEY, gemini: GEMINI_API_KEY)",
+        help="인증 키 (기본: LLM_API_KEY)",
     )
     parser.add_argument("--timeout", type=int, default=120, help="요청 타임아웃(초)")
     parser.add_argument("--max-tokens", type=int, default=256, help="최대 생성 토큰")

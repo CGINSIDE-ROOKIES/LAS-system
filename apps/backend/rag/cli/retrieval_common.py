@@ -10,9 +10,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-# 기본 임베딩 모델: Embeddings API 기본 모델
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
-DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_EMBEDDING_API_BASE_URL = "https://api.openai.com/v1"
 
 # 결과 snippet 최대 길이 (모든 normalize 함수에서 공통 사용)
 SNIPPET_MAX_LEN = 180
@@ -58,7 +57,7 @@ def require_env_or_arg(
     if env_val:
         return env_val
 
-    # 3순위: 하드코딩 fallback
+    # 3순위: 호출자가 지정한 기본값
     if fallback is not None:
         return _clean(fallback)
 
@@ -121,7 +120,7 @@ def _embed_query_openai(
     try:
         return list(res["data"][0]["embedding"])
     except (KeyError, IndexError, TypeError) as exc:
-        raise RetrievalError(f"OpenAI 임베딩 응답 파싱 실패: {exc}\n응답: {res}") from exc
+        raise RetrievalError(f"Embedding API 응답 파싱 실패: {exc}\n응답: {res}") from exc
 
 
 def embed_query(text: str, model_name: str) -> list[float]:
@@ -136,11 +135,14 @@ def embed_query(text: str, model_name: str) -> list[float]:
     if not query_text:
         raise RetrievalError("질문 텍스트가 비어 있습니다.")
 
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    api_key = os.getenv("EMBEDDING_API_KEY", "").strip()
     if not api_key:
-        raise RetrievalError("OPENAI_API_KEY가 필요합니다.")
-    api_base_url = os.getenv("OPENAI_BASE_URL", DEFAULT_OPENAI_API_BASE_URL).strip() or DEFAULT_OPENAI_API_BASE_URL
-    raw_dimensions = os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "").strip()
+        raise RetrievalError("EMBEDDING_API_KEY가 필요합니다.")
+    api_base_url = (
+        os.getenv("EMBEDDING_BASE_URL", "").strip()
+        or DEFAULT_EMBEDDING_API_BASE_URL
+    )
+    raw_dimensions = os.getenv("EMBEDDING_DIMENSIONS", "").strip()
     dimensions = int(raw_dimensions) if raw_dimensions else None
     return _embed_query_openai(query_text, model_name, api_key, api_base_url.rstrip("/"), dimensions)
 

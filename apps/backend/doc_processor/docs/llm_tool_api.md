@@ -157,4 +157,4 @@ assert status.ready, status.missing
 ```
 
 The current Qdrant DB uses 1024-dimensional embeddings, so local runs should
-set `OPENAI_EMBEDDING_DIMENSIONS=1024`.
+set `EMBEDDING_DIMENSIONS=1024`.

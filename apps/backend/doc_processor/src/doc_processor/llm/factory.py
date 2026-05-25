@@ -10,7 +10,10 @@ from ..env import ensure_local_env_loaded
 
 def _profile_env(profile: str, key: str) -> str | None:
     profile_key = f"DOC_PROCESSOR_LLM_{profile.upper()}_{key}"
-    return os.getenv(profile_key) or os.getenv(f"DOC_PROCESSOR_LLM_{key}")
+    value = os.getenv(profile_key) or os.getenv(f"DOC_PROCESSOR_LLM_{key}")
+    if value:
+        return value
+    return None
 
 
 def _profile_float_env(profile: str, key: str) -> float | None:
@@ -18,6 +21,20 @@ def _profile_float_env(profile: str, key: str) -> float | None:
     if raw is None or not raw.strip():
         return None
     return float(raw)
+
+
+def _openai_base_url(profile: str) -> str:
+    base_url = (_profile_env(profile, "BASE_URL") or "").strip()
+    if base_url:
+        return base_url
+
+    url = (
+        _profile_env(profile, "URL")
+        or ""
+    ).strip()
+    if url.endswith("/chat/completions"):
+        return url[: -len("/chat/completions")]
+    return url
 
 
 def get_chat_model(
@@ -33,7 +50,7 @@ def get_chat_model(
 
     provider = (_profile_env(profile, "PROVIDER") or "openai_compat").strip().lower()
     model = (_profile_env(profile, "MODEL") or "").strip()
-    base_url = (_profile_env(profile, "BASE_URL") or "").strip()
+    base_url = _openai_base_url(profile)
     api_key = (_profile_env(profile, "API_KEY") or "").strip()
     resolved_timeout_seconds = timeout_seconds
     if resolved_timeout_seconds is None:
@@ -61,9 +78,8 @@ def get_chat_model(
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         kwargs = {"model": model}
-        resolved_api_key = api_key or os.getenv("GOOGLE_API_KEY", "").strip()
-        if resolved_api_key:
-            kwargs["google_api_key"] = resolved_api_key
+        if api_key:
+            kwargs["google_api_key"] = api_key
         if resolved_timeout_seconds is not None:
             kwargs["timeout"] = resolved_timeout_seconds
         return ChatGoogleGenerativeAI(**kwargs)

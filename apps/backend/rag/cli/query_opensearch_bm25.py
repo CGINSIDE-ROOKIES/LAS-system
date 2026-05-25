@@ -18,11 +18,11 @@ import json
 import os
 import sys
 
-from dotenv import load_dotenv
-
-load_dotenv()
+from rag_pipeline.env_config import load_backend_env
 
 from retrieval_common import RetrievalError, require_env_or_arg, search_bm25
+
+load_backend_env()
 
 
 def print_results(question: str, rows: list[dict[str, object]]) -> None:

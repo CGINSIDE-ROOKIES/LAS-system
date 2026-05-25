@@ -34,7 +34,7 @@
 - Python `==3.13.*`
 - `uv` 사용 권장
 - `.env` 파일에 `LAW_OC=<국가법령정보 API 키>` 필요
-- 임베딩 생성 시 `OPENAI_API_KEY` 필요
+- 임베딩 생성 시 `EMBEDDING_API_KEY` 필요
 
 ### 2-2. 설치(프로젝트 루트 기준)
 
@@ -96,10 +96,10 @@ uv run apps/backend/legal-pipeline/scripts/run_current_law_collection.py --max-r
 
 ```bash
 export EMBEDDING_MODEL="text-embedding-3-large"
-export OPENAI_API_KEY="<YOUR_OPENAI_API_KEY>"
+export EMBEDDING_API_KEY="<YOUR_EMBEDDING_API_KEY>"
 # 선택 사항: 기본 차원 대신 축소할 때만 지정
-# export OPENAI_BASE_URL="https://api.openai.com/v1"
-# export OPENAI_EMBEDDING_DIMENSIONS="1024"
+# export EMBEDDING_BASE_URL="https://api.openai.com/v1"
+# export EMBEDDING_DIMENSIONS="1024"
 ```
 
 ### 3-2. Qdrant 임베딩 실행
@@ -373,12 +373,12 @@ data/
 
 ```env
 NEO4J_URI=bolt://<host>:7687
-NEO4J_USERNAME=neo4j
+NEO4J_USER=neo4j
 NEO4J_PASSWORD=<strong-password>
 NEO4J_DATABASE=neo4j
 ```
 
-예시 파일은 `apps/backend/legal-pipeline/.env.neo4j.example` 를 사용한다.
+예시 값은 `apps/backend/.env.example` 를 사용한다.
 
 ### 5-2. 로컬 검증용 Neo4j 실행
 
@@ -394,7 +394,7 @@ docker compose \
 
 ```env
 NEO4J_URI=bolt://localhost:7687
-NEO4J_USERNAME=neo4j
+NEO4J_USER=neo4j
 NEO4J_PASSWORD=testtest12
 NEO4J_DATABASE=neo4j
 ```
@@ -412,7 +412,7 @@ http://localhost:7474
 권장 절차:
 
 1. VM에 Docker / Docker Compose plugin 설치
-2. `apps/backend/legal-pipeline/.env.neo4j.example`를 복사해 실제 값으로 채움
+2. `apps/backend/.env.example`를 `apps/backend/.env`로 복사해 Neo4j 값을 채움
 3. compose로 Neo4j 기동
 4. dataset 최신화 후 graph export 실행
 5. seed 스크립트로 full reseed 수행
@@ -421,7 +421,7 @@ http://localhost:7474
 
 ```bash
 docker compose \
-  --env-file apps/backend/legal-pipeline/.env.neo4j.example \
+  --env-file apps/backend/.env \
   -f apps/backend/legal-pipeline/docker-compose.neo4j.yml \
   up -d
 ```

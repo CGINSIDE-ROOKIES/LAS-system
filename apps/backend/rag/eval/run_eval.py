@@ -23,15 +23,15 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
-load_dotenv()
 
 import re  # noqa: E402
 
+from rag_pipeline.env_config import load_backend_env  # noqa: E402
 from rag_pipeline.generation.pipeline import RagPipeline  # noqa: E402
 from rag_pipeline.observability.langfuse_client import score_trace  # noqa: E402
+
+load_backend_env()
 
 _ANSWERABLE_RE = re.compile(r'\n?\[ANSWERABLE:(yes|no)\]\s*$', re.IGNORECASE)
 
@@ -154,19 +154,16 @@ def run_ragas(results: list[dict], *, batch_size: int = 5, batch_sleep: float = 
     from ragas.metrics.collections import ContextPrecisionWithoutReference
     from ragas.metrics.collections import Faithfulness
 
-    api_key = (
-        os.getenv("LLM_API_KEY", "").strip()
-        or os.getenv("OPENAI_API_KEY", "").strip()
-    )
+    api_key = os.getenv("LLM_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("LLM_API_KEY 또는 OPENAI_API_KEY가 없습니다. apps/backend/.env를 확인하세요.")
+        raise RuntimeError("LLM_API_KEY가 없습니다. apps/backend/.env를 확인하세요.")
 
     ragas_model = (
         os.getenv("RAGAS_MODEL", "").strip()
         or os.getenv("LLM_MODEL", "").strip()
         or "gpt-4o-mini"
     )
-    base_url = os.getenv("LLM_BASE_URL", "").strip() or os.getenv("OPENAI_BASE_URL", "").strip() or None
+    base_url = os.getenv("LLM_BASE_URL", "").strip() or None
     emb_model = os.getenv("RAGAS_EMBEDDING_MODEL", "").strip() or "text-embedding-3-small"
 
     cache = DiskCacheBackend(cache_dir=str(Path(__file__).parent.parent / "data/staging/.ragas_cache"))

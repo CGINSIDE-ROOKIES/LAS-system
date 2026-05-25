@@ -30,12 +30,9 @@ if str(CLI_DIR) not in sys.path:
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from dotenv import load_dotenv
-
-load_dotenv()
+from rag_pipeline.env_config import load_backend_env
 
 from generator import (
-    DEFAULT_CHAT_COMPLETIONS_URL,
     DEFAULT_MODEL,
     generate_answer,
     stream_answer,
@@ -53,6 +50,8 @@ from retrieval_common import (
     search_bm25,
     search_qdrant,
 )
+
+load_backend_env()
 
 DEFAULT_ANSWER_BASELINE_PROMPT = (
     "당신은 법률 Q&A 보조 시스템입니다.\n"
@@ -238,7 +237,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--timeout", type=int, default=120, help="요청 타임아웃(초)")
 
     p.add_argument("--qdrant-url", default="", help="기본: QDRANT_URL")
-    p.add_argument("--qdrant-collection", default="", help="기본: QDRANT_COLLECTION")
+    p.add_argument("--qdrant-collection", default="", help="기본: QDRANT_COLLECTIONS")
     p.add_argument("--qdrant-api-key", default="", help="기본: QDRANT_API_KEY")
 
     p.add_argument("--opensearch-url", default="", help="기본: OPENSEARCH_URL")
@@ -289,9 +288,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_ANSWER_BASELINE_PROMPT,
         help="생성용 시스템 프롬프트",
     )
-    p.add_argument(
-        "--llm-url", default="", help=f"기본: {DEFAULT_CHAT_COMPLETIONS_URL}"
-    )
+    p.add_argument("--llm-url", default="", help="기본: LLM_URL 또는 LLM_BASE_URL")
     p.add_argument(
         "--llm-provider",
         default="",
@@ -299,9 +296,7 @@ def parse_args() -> argparse.Namespace:
         help="LLM provider (기본: LLM_PROVIDER 또는 openai_compat)",
     )
     p.add_argument("--llm-model", default="", help=f"기본: {DEFAULT_MODEL}")
-    p.add_argument(
-        "--llm-api-key", default="", help="기본: LLM_API_KEY 또는 OPENAI_API_KEY"
-    )
+    p.add_argument("--llm-api-key", default="", help="기본: LLM_API_KEY")
     p.add_argument(
         "--llm-max-input-chars",
         type=int,
@@ -341,7 +336,6 @@ def _run_for_question(args: argparse.Namespace, question: str) -> int:
     raw_collections = (
         args.qdrant_collection
         or os.getenv("QDRANT_COLLECTIONS", "")
-        or os.getenv("QDRANT_COLLECTION", "")
     ).strip()
     if not raw_collections:
         raise SystemExit("Missing required setting: --qdrant-collection or QDRANT_COLLECTIONS")

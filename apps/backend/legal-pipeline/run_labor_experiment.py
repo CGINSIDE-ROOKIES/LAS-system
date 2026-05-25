@@ -3,8 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
-
+from src.common.env import load_backend_env
 from src.common.io_utils import _write_json
 from src.export.dataset_builder import build_and_write_datasets
 from src.pipeline.appendix_pipeline import run_appendix_asset_pipeline
@@ -35,7 +34,7 @@ def _raise_if_invalid(name: str, result) -> None:
 
 
 def main() -> None:
-    load_dotenv()
+    load_backend_env()
 
     oc = os.environ.get("LAW_OC")
     if not oc:

@@ -11,7 +11,7 @@ from typing import Any
 import urllib3
 
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
-DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_EMBEDDING_API_BASE_URL = "https://api.openai.com/v1"
 # snippet 길이 상수는 qdrant/opensearch 정규화 모듈에서 공통으로 사용한다.
 SNIPPET_MAX_LEN = 180
 
@@ -171,11 +171,11 @@ def _embed_query_openai(
     try:
         res = http_json("POST", f"{api_base_url}/embeddings", payload, headers, timeout=30)
     except RetrievalError as exc:
-        raise EmbeddingError(f"OpenAI 임베딩 호출 실패: {exc}") from exc
+        raise EmbeddingError(f"Embedding API 호출 실패: {exc}") from exc
     try:
         return list(res["data"][0]["embedding"])
     except (KeyError, IndexError, TypeError) as exc:
-        raise EmbeddingError(f"OpenAI 임베딩 응답 파싱 실패: {exc}\n응답: {res}") from exc
+        raise EmbeddingError(f"Embedding API 응답 파싱 실패: {exc}\n응답: {res}") from exc
 
 
 def embed_query(
@@ -183,7 +183,7 @@ def embed_query(
     model_name: str,
     *,
     api_key: str | None,
-    api_base_url: str = DEFAULT_OPENAI_API_BASE_URL,
+    api_base_url: str = DEFAULT_EMBEDDING_API_BASE_URL,
     dimensions: int | None = None,
 ) -> list[float]:
     """텍스트를 Embeddings API로 벡터화한다."""
@@ -198,7 +198,7 @@ def embed_query(
         raise EmbeddingError("질문 텍스트가 비어 있습니다.")
 
     if not api_key:
-        raise EmbeddingError("OPENAI_API_KEY가 필요합니다.")
+        raise EmbeddingError("EMBEDDING_API_KEY가 필요합니다.")
     return _embed_query_openai(query_text, model_name, api_key, api_base_url, dimensions)
 
 

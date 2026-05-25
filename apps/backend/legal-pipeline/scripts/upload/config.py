@@ -5,11 +5,11 @@ import os
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
+from src.common.env import load_backend_env
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(PROJECT_ROOT / ".env")
+load_backend_env()
 
 # Qdrant connection
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")

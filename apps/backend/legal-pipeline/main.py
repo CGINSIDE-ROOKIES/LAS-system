@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import os
 
-from dotenv import load_dotenv
-
+from src.common.env import load_backend_env
 from src.export.dataset_builder import build_and_write_datasets
 from src.export.dataset_validation import validate_appendix_merge_outputs
 from src.pipeline.appendix_pipeline import run_appendix_asset_pipeline
@@ -39,7 +38,7 @@ def _env_flag(name: str, default: bool = False) -> bool:
 
 
 def main() -> None:
-    load_dotenv()
+    load_backend_env()
 
     oc = os.environ.get("LAW_OC")
     if not oc:

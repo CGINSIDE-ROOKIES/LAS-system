@@ -450,23 +450,22 @@ class ContractReviewTests(unittest.TestCase):
         self.assertEqual(state.result.findings[0].status, "accepted")
         self.assertEqual(state.result.human_decisions[0].action, "accept")
 
-    def test_env_status_checks_rag_and_bridges_doc_processor_gemini_env(self) -> None:
+    def test_env_status_checks_rag_env(self) -> None:
         with patch("doc_processor.contract_review.ensure_local_env_loaded", lambda: None):
             with patch.dict(
                 os.environ,
                 {
                     "QDRANT_URL": "http://qdrant.test",
                     "QDRANT_COLLECTIONS": "law_article,legal_case",
-                    "OPENAI_API_KEY": "embedding-key",
-                    "OPENAI_EMBEDDING_DIMENSIONS": "1024",
-                    "DOC_PROCESSOR_LLM_PROVIDER": "gemini",
-                    "DOC_PROCESSOR_LLM_MODEL": "gemini-2.5-flash-lite",
-                    "DOC_PROCESSOR_LLM_API_KEY": "gemini-key",
+                    "EMBEDDING_API_KEY": "embedding-key",
+                    "EMBEDDING_DIMENSIONS": "1024",
+                    "LLM_PROVIDER": "gemini",
+                    "LLM_MODEL": "gemini-2.5-flash-lite",
+                    "LLM_API_KEY": "gemini-key",
                 },
                 clear=True,
             ):
                 status = check_contract_review_env()
-                gemini_api_key = os.environ["GEMINI_API_KEY"]
 
         self.assertTrue(status.ready)
         self.assertEqual(status.missing, [])
@@ -474,7 +473,6 @@ class ContractReviewTests(unittest.TestCase):
         self.assertEqual(status.llm_model, "gemini-2.5-flash-lite")
         self.assertEqual(status.qdrant_collections, ["law_article", "legal_case"])
         self.assertEqual(status.embedding_dimensions, 1024)
-        self.assertEqual(gemini_api_key, "gemini-key")
 
     def test_load_and_categorize_forwards_parser_concurrency(self) -> None:
         captured: dict[str, object] = {}

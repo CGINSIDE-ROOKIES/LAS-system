@@ -25,9 +25,7 @@ if str(_CLI_DIR) not in sys.path:
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from dotenv import load_dotenv
-
-load_dotenv()
+from rag_pipeline.env_config import load_backend_env
 
 from query_hybrid_rrf import fuse_rrf
 from retrieval_common import (
@@ -37,6 +35,8 @@ from retrieval_common import (
     search_bm25,
     search_qdrant,
 )
+
+load_backend_env()
 
 DEFAULT_SYSTEM_PROMPT = (
     "당신은 법률 Q&A 보조 시스템입니다.\n"
@@ -269,7 +269,6 @@ def run_single_query(args: argparse.Namespace, question: str) -> int:
     raw_collections = (
         args.qdrant_collection
         or os.getenv("QDRANT_COLLECTIONS", "")
-        or os.getenv("QDRANT_COLLECTION", "")
     ).strip()
     if not raw_collections:
         raise SystemExit("Missing required setting: --qdrant-collection or QDRANT_COLLECTIONS")
@@ -439,7 +438,7 @@ def parse_args() -> argparse.Namespace:
         "--qdrant-url", default="", help="기본: QDRANT_URL 또는 http://localhost:6333"
     )
     p.add_argument(
-        "--qdrant-collection", default="", help="기본: QDRANT_COLLECTION 환경변수"
+        "--qdrant-collection", default="", help="기본: QDRANT_COLLECTIONS 환경변수"
     )
     p.add_argument("--qdrant-api-key", default="", help="기본: QDRANT_API_KEY 환경변수")
 
