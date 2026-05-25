@@ -160,6 +160,8 @@ interface ChatContainerProps {
 
 const STORAGE_KEY = "las_chat_messages";
 const SUGGESTIONS_KEY = "las_chat_suggestions";
+const SESSION_ID_KEY = "las_chat_session_id";
+const RESUME_SESSION_KEY = "las_resume_session";
 
 function loadMessages(): ChatMessage[] {
   try {
@@ -183,13 +185,17 @@ function loadMessages(): ChatMessage[] {
 
 function parseCitations(retrievedDocs: RetrievedDoc[]): Citation[] {
   return retrievedDocs
-    .filter((doc) => doc.doc_type === "law")
+    .filter((doc) => doc.doc_type === "law" && doc.law_name)
     .map((doc) => {
+      const raw = doc.text || doc.snippet || "";
+      if (!raw.trim()) return null;
+
+      // article_no가 있으면 직접 사용, 없으면 텍스트에서 추출
       let articleLabel: string;
       if (doc.article_no) {
         articleLabel = `${doc.law_name} ${doc.article_no}`;
       } else {
-        const noMatch = (doc.text || doc.snippet).match(/조문번호:\s*(제?\d[\d조의]*)/);
+        const noMatch = raw.match(/조문번호:\s*(제?[\d조의]+)/);
         if (noMatch) {
           const extracted = noMatch[1];
           articleLabel = extracted.startsWith("제")
@@ -200,28 +206,23 @@ function parseCitations(retrievedDocs: RetrievedDoc[]): Citation[] {
         }
       }
 
-      const raw = doc.text || doc.snippet;
-      let content = raw;
-      const metaIdx = raw.indexOf("조문제목:");
-      if (metaIdx !== -1) {
-        const afterMeta = raw.slice(metaIdx + "조문제목:".length);
-        const contentMatch = afterMeta.match(/제\d/);
-        if (contentMatch?.index !== undefined) {
-          content = afterMeta.slice(contentMatch.index).trim();
-        }
-      } else {
-        const stripped = raw.replace(/^법령명:[^\n]*조문번호:[^\n]*\s*/i, "").trim();
-        content = stripped;
-      }
+      // 메타데이터 헤더 라인 제거 (법령명, 조문번호, 조문제목)
+      // doc.text는 개행 포함 → ^로 각 줄 첫머리만 제거
+      let content = raw
+        .replace(/^법령명:[^\n]*\n?/i, "")
+        .replace(/^조문번호:[^\n]*\n?/i, "")
+        .replace(/^조문제목:[^\n]*\n?/i, "")
+        .trim();
+
       content = content
         .replace(/\[\[([\s\S]*?)\]\]/g, (_, inner) =>
           inner
-            .split(/,\s*'/)
+            .split(/,\s*\'/)
             .map((s: string) => s.replace(/^'|'$/g, "").trim())
             .filter(Boolean)
             .join("\n")
         )
-        .replace(/([\u2460-\u2473\u2474-\u2487①-⑳])\s+\1/g, "$1")
+        .replace(/([\u2460-\u2473\u2474-\u2487\u2460-\u24FF①-⑳])\s+\1/g, "$1")
         .replace(/(\d+\.)\s+\1/g, "$1")
         .trim();
 
@@ -248,6 +249,7 @@ export function ChatContainer({ onCitationsChange, onQuestionSubmit, onNewChat }
   const followUpContextRef = useRef<FollowUpContext | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
   const suggestionsGenRef = useRef(0);
+  const sessionIdRef = useRef<string | null>(null);
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
@@ -260,6 +262,32 @@ export function ChatContainer({ onCitationsChange, onQuestionSubmit, onNewChat }
   }, [messages, scrollToBottom]);
 
   useEffect(() => {
+    // 히스토리에서 "이어서 질문하기"로 진입한 경우
+    const resumeRaw = sessionStorage.getItem(RESUME_SESSION_KEY);
+    if (resumeRaw) {
+      try {
+        const resume = JSON.parse(resumeRaw);
+        sessionStorage.removeItem(RESUME_SESSION_KEY);
+        sessionStorage.removeItem(STORAGE_KEY);
+        sessionStorage.removeItem(SUGGESTIONS_KEY);
+        sessionStorage.removeItem(SESSION_ID_KEY);
+        if (resume.session_id) {
+          sessionIdRef.current = resume.session_id;
+          sessionStorage.setItem(SESSION_ID_KEY, resume.session_id);
+        }
+        if (Array.isArray(resume.messages) && resume.messages.length > 0) {
+          setMessages(resume.messages);
+          const lastAnswer = [...resume.messages].reverse().find(
+            (m: ChatMessage) => m.role === "assistant" && m.answerData?.citations?.length
+          );
+          if (lastAnswer?.answerData?.citations) {
+            onCitationsChange?.(lastAnswer.answerData.citations as unknown as Citation[]);
+          }
+        }
+        return;
+      } catch {}
+    }
+
     const raw = sessionStorage.getItem("las_followup_context");
     if (raw) {
       try {
@@ -290,6 +318,9 @@ export function ChatContainer({ onCitationsChange, onQuestionSubmit, onNewChat }
         if (stored.length > 0) setMessages(stored);
       }
     } else {
+      const storedSessionId = sessionStorage.getItem(SESSION_ID_KEY);
+      if (storedSessionId) sessionIdRef.current = storedSessionId;
+
       const stored = loadMessages();
       if (stored.length === 0) return;
       setMessages(stored);
@@ -371,8 +402,14 @@ export function ChatContainer({ onCitationsChange, onQuestionSubmit, onNewChat }
       if (Array.isArray(parsed) && parsed.length > 0) lawFilter = parsed;
     } catch {}
 
+    if (!sessionIdRef.current) {
+      sessionIdRef.current = crypto.randomUUID();
+      sessionStorage.setItem(SESSION_ID_KEY, sessionIdRef.current);
+    }
+
     const request = {
       question: userQuestion,
+      session_id: sessionIdRef.current,
       law_filter: lawFilter,
       answer_detail: settings.answerDetail,
       top_k: settings.topK,
@@ -491,7 +528,9 @@ export function ChatContainer({ onCitationsChange, onQuestionSubmit, onNewChat }
   const handleNewChat = useCallback(() => {
     abortRef.current?.abort();
     setMessages([]);
+    sessionIdRef.current = null;
     sessionStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(SESSION_ID_KEY);
     onCitationsChange?.([]);
     setSuggestions(null);
     setSuggestionsLoading(false);
@@ -504,8 +543,10 @@ export function ChatContainer({ onCitationsChange, onQuestionSubmit, onNewChat }
   return (
     <div className="flex h-full flex-col">
       {/* 통합 헤더 — 항상 표시 */}
-      <div className="flex h-10 shrink-0 items-center border-b border-border px-2">
+      <div className="flex h-10 shrink-0 items-center border-b border-border px-2 gap-2">
         <SidebarTrigger />
+        <div className="h-4 w-px bg-border" />
+        <span className="text-sm font-medium text-muted-foreground">법령 Q&A</span>
         {hasMessages && (
           <div className="ml-auto">
             <Button variant="ghost" size="sm" onClick={handleNewChat} disabled={isStreaming}>
