@@ -31,8 +31,10 @@ const Settings = () => {
       <div className="flex min-h-screen w-full">
         <AppSidebar />
         <div className="flex flex-1 flex-col">
-          <header className="flex h-10 items-center border-b border-border px-2">
+          <header className="flex h-10 items-center border-b border-border px-2 gap-2">
             <SidebarTrigger />
+            <div className="h-4 w-px bg-border" />
+            <span className="text-sm font-medium text-muted-foreground">설정</span>
           </header>
 
           <div className="flex-1 overflow-auto bg-muted/30 p-6">

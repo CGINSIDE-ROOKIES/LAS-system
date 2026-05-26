@@ -42,14 +42,14 @@ export function QuestionInput({ onSubmit, disabled }: QuestionInputProps) {
           placeholder="근로계약서 작성 시 필수 기재사항은 무엇인가요?"
           disabled={disabled}
           rows={1}
-          className="w-full resize-none rounded-lg border border-border bg-card px-4 py-3 pr-12 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary/60 focus:outline-none focus:[box-shadow:0_0_0_3px_hsl(var(--primary)/0.08),0_0_10px_hsl(var(--primary)/0.12)] disabled:opacity-50"
-          style={{ minHeight: "44px", maxHeight: "200px" }}
+          className="block w-full resize-none rounded-[14px] border border-input bg-card px-[18px] py-[15px] pr-[52px] text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus:[box-shadow:0_0_0_3px_hsl(var(--primary)/0.1)] disabled:opacity-50 transition-shadow"
+          style={{ minHeight: "52px", maxHeight: "200px", borderColor: "hsl(var(--border))", lineHeight: "1.5" }}
         />
         <Button
           size="icon"
           onClick={handleSubmit}
           disabled={!value.trim() || disabled}
-          className="absolute bottom-3 right-3 h-8 w-8 rounded-md"
+          className="absolute top-1/2 -translate-y-1/2 right-[8px] h-9 w-9 rounded-[10px] hover:bg-primary/90"
         >
           <Send className="h-4 w-4" />
         </Button>
