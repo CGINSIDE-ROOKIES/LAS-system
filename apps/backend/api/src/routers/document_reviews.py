@@ -27,6 +27,7 @@ from src.document_reviews.models import (
 from src.document_reviews.service import (
     DocumentReviewServiceError,
     apply_document_review,
+    regenerate_feedback_suggestion,
     resume_document_review,
     run_document_review_job,
 )
@@ -86,11 +87,16 @@ async def create_document_review(
         review_id,
         "upload_saved",
         {
-            "progress": 0.05,
             "source_name": source_name,
             "source_doc_type": source_doc_type,
             "events_url": _events_url(review_id),
         },
+    )
+    storage.add_event(
+        conn,
+        review_id,
+        "parser_progress",
+        {"phase": "upload_saved", "progress": 0.02},
     )
     conn.commit()
 
@@ -226,13 +232,26 @@ def decide_document_review_suggestion(
 ) -> DocumentReviewSuggestion:
     if storage.get_job(conn, review_id) is None:
         raise HTTPException(status_code=404, detail="Document review not found.")
-    suggestion = storage.update_suggestion_decision(
-        conn,
-        review_id=review_id,
-        finding_id=finding_id,
-        action=request.action,
-        comment=request.comment,
-    )
+    try:
+        if request.action == "feedback":
+            if not (request.comment or "").strip():
+                raise HTTPException(status_code=400, detail="Feedback comment is required.")
+            suggestion = regenerate_feedback_suggestion(
+                conn,
+                review_id=review_id,
+                finding_id=finding_id,
+                comment=request.comment.strip(),
+            )
+        else:
+            suggestion = storage.update_suggestion_decision(
+                conn,
+                review_id=review_id,
+                finding_id=finding_id,
+                action=request.action,
+                comment=request.comment,
+            )
+    except DocumentReviewServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
     if suggestion is None:
         raise HTTPException(status_code=404, detail="Suggestion not found.")
     logger.info(

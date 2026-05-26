@@ -4,6 +4,7 @@ export type DocumentReviewStatus = "queued" | "running" | "hitl_waiting" | "appl
 export type DocumentReviewStage =
   | "upload_saved"
   | "parser_started"
+  | "parser_progress"
   | "parser_completed"
   | "review_started"
   | "review_progress"
@@ -136,6 +137,58 @@ export async function createDocumentReview(
   });
   if (!res.ok) await throwDocumentReviewApiError(res);
   return res.json();
+}
+
+export function createDocumentReviewWithProgress(
+  file: File,
+  options: DocumentReviewOptions | undefined,
+  onUploadProgress: (progress: number) => void
+): Promise<CreateDocumentReviewResponse> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (options) formData.append("options", JSON.stringify(options));
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${getApiBaseUrl()}/api/v1/document-reviews`);
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || event.total <= 0) return;
+      onUploadProgress(Math.min(1, event.loaded / event.total));
+    };
+
+    xhr.onload = () => {
+      let body: unknown = null;
+      try {
+        body = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        body = xhr.responseText;
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300 && body && typeof body === "object") {
+        onUploadProgress(1);
+        resolve(body as CreateDocumentReviewResponse);
+        return;
+      }
+
+      const detail = body && typeof body === "object" && "error" in body
+        ? String((body as { error?: unknown }).error)
+        : body && typeof body === "object" && "detail" in body
+          ? String((body as { detail?: unknown }).detail)
+          : xhr.statusText || "Document review upload failed.";
+      reject(new DocumentReviewApiError(xhr.status, detail, body));
+    };
+
+    xhr.onerror = () => {
+      reject(new DocumentReviewApiError(0, "Network error while uploading document.", null));
+    };
+
+    xhr.onabort = () => {
+      reject(new DocumentReviewApiError(0, "Document review upload was aborted.", null));
+    };
+
+    xhr.send(formData);
+  });
 }
 
 export async function getDocumentReview(reviewId: string): Promise<DocumentReviewSummary> {

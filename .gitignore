@@ -3,6 +3,7 @@ reference-docs/
 .claude/
 .codex/
 .codex
+local-dev
 
 # 개인 Claude 지침 문서
 CLAUDE.md

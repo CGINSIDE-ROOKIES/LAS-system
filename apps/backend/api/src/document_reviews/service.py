@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import difflib
+import hashlib
+import json
 import logging
 from pathlib import Path
 import threading
@@ -36,6 +39,10 @@ _CHECKPOINTER = InMemorySaver()
 _GRAPH = build_contract_review_graph(checkpointer=_CHECKPOINTER)
 _GRAPH_LOCK = threading.RLock()
 _RISK_ORDER = {"none": 0, "low": 1, "mid": 2, "high": 3, "crit": 4}
+_FEEDBACK_REGENERATION_SYSTEM_PROMPT = (
+    "You revise Korean contract review fix suggestions. Return only one JSON object. "
+    "Do not include markdown or explanatory text."
+)
 
 
 class DocumentReviewServiceError(Exception):
@@ -77,7 +84,13 @@ def run_document_review_job(review_id: str, options_payload: dict[str, Any]) -> 
                 conn,
                 review_id,
                 "parser_started",
-                {"progress": 0.10, "preview_url": _preview_url(review_id)},
+                {"preview_url": _preview_url(review_id)},
+            )
+            storage.add_event(
+                conn,
+                review_id,
+                "parser_progress",
+                {"phase": "parse_started", "progress": 0.05},
             )
 
         parse_started_at = time.perf_counter()
@@ -94,6 +107,7 @@ def run_document_review_job(review_id: str, options_payload: dict[str, Any]) -> 
             include_editable_targets=False,
             max_paragraphs=None,
             paragraph_excerpt_length=None,
+            progress_callback=lambda payload: _emit_parser_progress(review_id, payload),
         )
         logger.info(
             "document review parser completed: review_id=%s elapsed=%.2fs accepted=%s source_doc_type=%s clauses=%s subclauses=%s errors=%s",
@@ -133,14 +147,13 @@ def run_document_review_job(review_id: str, options_payload: dict[str, Any]) -> 
                 review_id,
                 "parser_completed",
                 {
-                    "progress": 0.35,
                     "clause_count": parse_result.clause_count,
                     "subclause_count": parse_result.subclause_count,
                     "preview_url": _preview_url(review_id),
                 },
             )
             storage.update_job(conn, review_id, stage="review_started", progress=0.40)
-            storage.add_event(conn, review_id, "review_started", {"progress": 0.40})
+            storage.add_event(conn, review_id, "review_started", {})
 
         review_started_at = time.perf_counter()
         review_result, interrupted = _run_review_graph(
@@ -192,7 +205,6 @@ def run_document_review_job(review_id: str, options_payload: dict[str, Any]) -> 
                 review_id,
                 "review_progress",
                 {
-                    "progress": progress,
                     "reviewed_clauses": reviewed_clauses,
                     "total_clauses": total_clauses,
                     "preview_url": _preview_url(review_id),
@@ -204,7 +216,6 @@ def run_document_review_job(review_id: str, options_payload: dict[str, Any]) -> 
                     review_id,
                     "hitl_waiting",
                     {
-                        "progress": progress,
                         "finding_count": len(review_result.findings),
                         "request_count": len(review_result.hitl_requests),
                         "suggestions_url": _suggestions_url(review_id),
@@ -215,7 +226,7 @@ def run_document_review_job(review_id: str, options_payload: dict[str, Any]) -> 
                     conn,
                     review_id,
                     "completed",
-                    {"progress": 1.0, "preview_url": _preview_url(review_id)},
+                    {"preview_url": _preview_url(review_id)},
                 )
         logger.info(
             "document review job finished: review_id=%s status=%s stage=%s elapsed=%.2fs findings=%s",
@@ -256,7 +267,7 @@ def resume_document_review(
         job["stage"],
     )
     storage.update_job(conn, review_id, status="running", stage="review_progress", progress=0.82)
-    storage.add_event(conn, review_id, "review_progress", {"progress": 0.82, "hitl_resume_started": True})
+    storage.add_event(conn, review_id, "review_progress", {"hitl_resume_started": True})
 
     try:
         with _GRAPH_LOCK:
@@ -300,14 +311,14 @@ def resume_document_review(
         conn,
         review_id,
         "review_progress",
-        {"progress": next_progress, "decisions_applied": len(decisions)},
+        {"decisions_applied": len(decisions)},
     )
     if next_status == "completed":
         storage.add_event(
             conn,
             review_id,
             "completed",
-            {"progress": 1.0, "preview_url": _preview_url(review_id)},
+            {"preview_url": _preview_url(review_id)},
         )
     logger.info(
         "document review resume completed: review_id=%s decisions=%s next_status=%s next_stage=%s accepted_edit=%s",
@@ -322,6 +333,77 @@ def resume_document_review(
         status=next_status,
         stage=next_stage,
         decisions_applied=len(decisions),
+    )
+
+
+def regenerate_feedback_suggestion(
+    conn: psycopg2.extensions.connection,
+    *,
+    review_id: str,
+    finding_id: str,
+    comment: str,
+) -> dict[str, Any] | None:
+    job = _require_job(conn, review_id)
+    suggestion = storage.get_suggestion(conn, review_id, finding_id)
+    if suggestion is None:
+        return None
+
+    payload = dict(suggestion.get("payload") or {})
+    proposed_edit = dict(suggestion.get("proposed_edit") or {})
+    target_id = _feedback_target_id(job, suggestion, proposed_edit)
+    target_kind = str(proposed_edit.get("target_kind") or "paragraph")
+    current_text = _parser_paragraph_text(job.get("parser_result") or {}, target_id)
+    if not target_id or not current_text:
+        raise DocumentReviewServiceError(422, "No editable target was available for this finding.")
+
+    prompt = _build_feedback_regeneration_prompt(
+        suggestion=suggestion,
+        current_text=current_text,
+        previous_new_text=str(proposed_edit.get("new_text") or ""),
+        comment=comment,
+    )
+    answer = get_generation_service().generate(prompt, system_prompt=_FEEDBACK_REGENERATION_SYSTEM_PROMPT)
+    regenerated = _parse_feedback_regeneration(_generation_answer_text(answer))
+    new_text = str(regenerated.get("new_text") or "").strip()
+    if not new_text:
+        raise DocumentReviewServiceError(422, "Feedback regeneration did not return a replacement text.")
+    if new_text == current_text:
+        raise DocumentReviewServiceError(422, "Feedback regeneration returned unchanged text.")
+
+    title = str(regenerated.get("title") or suggestion.get("title") or "")
+    guidance = str(regenerated.get("guidance") or regenerated.get("reason") or suggestion.get("guidance") or "")
+    selected_text = str(regenerated.get("selected_text") or suggestion.get("selected_text") or "")
+    updated_edit = {
+        "edit_type": "text",
+        "target_kind": target_kind,
+        "target_id": target_id,
+        "expected_text_hash": str(proposed_edit.get("expected_text_hash") or _text_hash(current_text)),
+        "new_text": new_text,
+        "reason": guidance or title or "Feedback-regenerated contract review suggestion",
+    }
+    payload.update(
+        {
+            "title": title,
+            "guidance": guidance,
+            "recommendation": guidance,
+            "selected_text": selected_text,
+            "diff": _text_diff(current_text, new_text),
+            "last_feedback": _decision_payload("feedback", comment),
+            "feedback_regeneration": {
+                "status": "completed",
+                "comment": comment,
+                "previous_new_text": str(proposed_edit.get("new_text") or ""),
+            },
+        }
+    )
+    payload.pop("decision", None)
+    return storage.update_suggestion_payload_and_edit(
+        conn,
+        review_id=review_id,
+        finding_id=finding_id,
+        status="pending",
+        payload=payload,
+        proposed_edit=updated_edit,
     )
 
 
@@ -351,7 +433,7 @@ def apply_document_review(
         edited_path,
     )
     storage.update_job(conn, review_id, status="applying", stage="apply_started", progress=0.85)
-    storage.add_event(conn, review_id, "apply_started", {"progress": 0.85, "edit_count": len(edits)})
+    storage.add_event(conn, review_id, "apply_started", {"edit_count": len(edits)})
     conn.commit()
 
     try:
@@ -369,7 +451,7 @@ def apply_document_review(
             stage="failed",
             error=str(exc),
         )
-        storage.add_event(conn, review_id, "failed", {"progress": 0.85, "error": str(exc)})
+        storage.add_event(conn, review_id, "failed", {"error": str(exc)})
         conn.commit()
         raise
 
@@ -388,7 +470,7 @@ def apply_document_review(
             stage="failed",
             error="Accepted edits could not be applied.",
         )
-        storage.add_event(conn, review_id, "failed", {"progress": 0.85, "validation": payload.get("validation")})
+        storage.add_event(conn, review_id, "failed", {"validation": payload.get("validation")})
         conn.commit()
         raise DocumentReviewServiceError(422, payload)
 
@@ -426,7 +508,6 @@ def apply_document_review(
         review_id,
         "apply_completed",
         {
-            "progress": 0.95,
             "edits_applied": result.edits_applied,
             "download_url": _download_url(review_id),
             "preview_url": _preview_url(review_id),
@@ -437,7 +518,6 @@ def apply_document_review(
         review_id,
         "completed",
         {
-            "progress": 1.0,
             "download_url": _download_url(review_id),
             "preview_url": _preview_url(review_id),
         },
@@ -473,13 +553,106 @@ def _run_review_graph(
         config=_contract_config(options),
         render_source_path=str(original_path),
     )
+    graph_config = _graph_config(review_id, options)
+    latest_values: dict[str, Any] | None = None
+    interrupted = False
+    progress_state: dict[str, Any] = {"processed": 0, "total": None}
     with _GRAPH_LOCK:
-        output = _GRAPH.invoke(graph_state, config=_graph_config(review_id, options))
-    interrupted = "__interrupt__" in output
-    state = ContractReviewGraphState.model_validate(output)
+        for mode, chunk in _GRAPH.stream(
+            graph_state,
+            config=graph_config,
+            stream_mode=["updates", "values"],
+        ):
+            if mode == "updates":
+                if "__interrupt__" in chunk:
+                    interrupted = True
+                _emit_review_progress_from_update(review_id, progress_state, chunk)
+            elif mode == "values":
+                latest_values = chunk
+    if latest_values is None:
+        raise ValueError("Contract review graph did not produce a final state.")
+    interrupted = interrupted or "__interrupt__" in latest_values
+    state = ContractReviewGraphState.model_validate(latest_values)
     if state.result is None:
         raise ValueError("Contract review graph did not produce a result.")
     return ContractReviewResult.model_validate(state.result), interrupted
+
+
+def _emit_parser_progress(review_id: str, payload: dict[str, Any]) -> None:
+    try:
+        with db_connection() as conn:
+            storage.add_event(conn, review_id, "parser_progress", payload)
+    except Exception:
+        logger.warning(
+            "failed to persist parser progress event: review_id=%s payload=%s",
+            review_id,
+            payload,
+            exc_info=True,
+        )
+
+
+def _emit_review_progress_from_update(
+    review_id: str,
+    progress_state: dict[str, Any],
+    chunk: dict[str, Any],
+) -> None:
+    prepare_update = chunk.get("prepare_risk_reviews")
+    if isinstance(prepare_update, dict) and "review_units" in prepare_update:
+        total = len(prepare_update.get("review_units") or [])
+        progress_state["total"] = total
+        progress_state["processed"] = 0
+        _persist_review_progress(
+            review_id,
+            {
+                "progress": 0.0 if total else 1.0,
+                "reviewed_clauses": 0,
+                "total_clauses": total,
+            },
+        )
+
+    worker_update = chunk.get("risk_review_worker")
+    if not isinstance(worker_update, dict):
+        return
+    results = worker_update.get("risk_review_results") or []
+    if not results:
+        return
+
+    processed = int(progress_state.get("processed") or 0) + len(results)
+    progress_state["processed"] = processed
+    total = int(progress_state.get("total") or processed)
+    latest = results[-1] if isinstance(results[-1], dict) else {}
+    review = latest.get("review") if isinstance(latest, dict) else {}
+    if hasattr(review, "model_dump"):
+        review = review.model_dump(mode="json")
+    if not isinstance(review, dict):
+        review = {}
+
+    _persist_review_progress(
+        review_id,
+        {
+            "progress": min(processed, total) / max(total, 1),
+            "reviewed_clauses": processed,
+            "total_clauses": total,
+            "clause_id": review.get("clause_id"),
+            "clause_no": review.get("clause_no"),
+            "clause_title": review.get("title"),
+            "risk_level": review.get("risk_level"),
+            "finding_count": len(review.get("findings") or []),
+        },
+    )
+
+
+def _persist_review_progress(review_id: str, payload: dict[str, Any]) -> None:
+    try:
+        with db_connection() as conn:
+            storage.add_event(conn, review_id, "review_progress", payload)
+    except Exception:
+        logger.warning(
+            "failed to persist review progress event: review_id=%s payload=%s",
+            review_id,
+            payload,
+            exc_info=True,
+        )
 
 
 def _contract_config(options: DocumentReviewOptions) -> ContractReviewConfig:
@@ -631,7 +804,6 @@ def _mark_failed(review_id: str, exc: Exception) -> None:
                 review_id,
                 "failed",
                 {
-                    "progress": progress,
                     "error": str(exc),
                     "error_type": type(exc).__name__,
                 },
@@ -650,3 +822,121 @@ def _suggestions_url(review_id: str) -> str:
 
 def _download_url(review_id: str) -> str:
     return f"/api/v1/document-reviews/{review_id}/download"
+
+
+def _build_feedback_regeneration_prompt(
+    *,
+    suggestion: dict[str, Any],
+    current_text: str,
+    previous_new_text: str,
+    comment: str,
+) -> str:
+    payload = suggestion.get("payload") or {}
+    request = {
+        "finding_id": suggestion.get("finding_id"),
+        "risk_level": suggestion.get("risk_level"),
+        "title": suggestion.get("title"),
+        "guidance": suggestion.get("guidance"),
+        "selected_text": suggestion.get("selected_text"),
+        "source_citations": suggestion.get("source_citations") or [],
+        "current_paragraph": current_text,
+        "previous_suggested_paragraph": previous_new_text,
+        "user_feedback": comment,
+        "rationale": payload.get("rationale"),
+        "issue_type": payload.get("issue_type"),
+    }
+    schema = {
+        "title": "short Korean title",
+        "guidance": "Korean explanation of how the new edit reflects the feedback",
+        "selected_text": "exact risky substring from current_paragraph if applicable",
+        "new_text": "full Korean replacement paragraph preserving numbering and scope",
+    }
+    return "\n\n".join(
+        [
+            "[task]",
+            (
+                "Revise the suggested contract edit using the user's feedback. "
+                "Return a full replacement for current_paragraph in new_text. "
+                "Preserve numbering, parties, amounts, dates, and unrelated wording unless feedback requires a change."
+            ),
+            "[request]",
+            json.dumps(request, ensure_ascii=False),
+            "[required_json_schema]",
+            json.dumps(schema, ensure_ascii=False),
+        ]
+    )
+
+
+def _parse_feedback_regeneration(answer: str) -> dict[str, Any]:
+    cleaned = answer.strip()
+    cleaned = cleaned.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start >= 0 and end >= start:
+        cleaned = cleaned[start : end + 1]
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise DocumentReviewServiceError(422, f"Feedback regeneration returned invalid JSON: {exc.msg}") from exc
+    if not isinstance(parsed, dict):
+        raise DocumentReviewServiceError(422, "Feedback regeneration returned a non-object JSON payload.")
+    return parsed
+
+
+def _parser_paragraph_text(parser_result: dict[str, Any], target_id: str) -> str:
+    for paragraph in parser_result.get("paragraphs") or []:
+        if isinstance(paragraph, dict) and paragraph.get("node_id") == target_id:
+            return str(paragraph.get("text_excerpt") or "")
+    return ""
+
+
+def _feedback_target_id(
+    job: dict[str, Any],
+    suggestion: dict[str, Any],
+    proposed_edit: dict[str, Any],
+) -> str:
+    target_id = str(proposed_edit.get("target_id") or "")
+    if target_id:
+        return target_id
+
+    finding_id = suggestion.get("finding_id")
+    result = job.get("contract_review_result") or {}
+    for finding in result.get("findings") or []:
+        if not isinstance(finding, dict) or finding.get("finding_id") != finding_id:
+            continue
+        target_node_ids = finding.get("target_node_ids") or []
+        if target_node_ids:
+            return str(target_node_ids[0])
+        annotation = finding.get("annotation") or {}
+        if isinstance(annotation, dict) and annotation.get("target_id"):
+            return str(annotation["target_id"])
+    return ""
+
+
+def _decision_payload(action: str, comment: str) -> dict[str, str]:
+    return {
+        "action": action,
+        "comment": comment,
+        "decided_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+
+def _generation_answer_text(result: Any) -> str:
+    answer = getattr(result, "answer", None)
+    return answer if isinstance(answer, str) else str(result)
+
+
+def _text_diff(before: str, after: str) -> str:
+    return "\n".join(
+        difflib.unified_diff(
+            before.splitlines(),
+            after.splitlines(),
+            fromfile="current",
+            tofile="suggested",
+            lineterm="",
+        )
+    )
+
+
+def _text_hash(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()

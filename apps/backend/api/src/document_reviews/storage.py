@@ -266,14 +266,15 @@ def save_suggestions_from_result(
                         risk_level = EXCLUDED.risk_level,
                         status = EXCLUDED.status,
                         payload = CASE
-                            WHEN document_review_suggestions.payload ? 'decision'
-                            THEN EXCLUDED.payload || jsonb_build_object(
-                                'decision',
-                                document_review_suggestions.payload->'decision'
-                            )
+                            WHEN document_review_suggestions.payload IS NOT NULL
+                            THEN EXCLUDED.payload || document_review_suggestions.payload
                             ELSE EXCLUDED.payload
                         END,
-                        proposed_edit = EXCLUDED.proposed_edit,
+                        proposed_edit = CASE
+                            WHEN document_review_suggestions.payload ? 'feedback_regeneration'
+                            THEN document_review_suggestions.proposed_edit
+                            ELSE EXCLUDED.proposed_edit
+                        END,
                         updated_at = now()
                 """,
                 (
@@ -364,6 +365,38 @@ def update_suggestion_decision(
             RETURNING finding_id, request_id, clause_id, risk_level, status, payload, proposed_edit
             """,
             (status, Json(payload), review_id, finding_id),
+        )
+        updated = cur.fetchone()
+    return _suggestion_row_to_dict(dict(updated)) if updated else None
+
+
+def update_suggestion_payload_and_edit(
+    conn: psycopg2.extensions.connection,
+    *,
+    review_id: str,
+    finding_id: str,
+    status: str,
+    payload: dict[str, Any],
+    proposed_edit: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            UPDATE document_review_suggestions
+            SET status = %s,
+                payload = %s,
+                proposed_edit = %s,
+                updated_at = now()
+            WHERE review_id = %s AND finding_id = %s
+            RETURNING finding_id, request_id, clause_id, risk_level, status, payload, proposed_edit
+            """,
+            (
+                status,
+                Json(payload),
+                Json(proposed_edit) if proposed_edit is not None else None,
+                review_id,
+                finding_id,
+            ),
         )
         updated = cur.fetchone()
     return _suggestion_row_to_dict(dict(updated)) if updated else None

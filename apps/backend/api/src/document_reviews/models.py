@@ -12,6 +12,7 @@ DocumentReviewStatus = Literal["queued", "running", "hitl_waiting", "applying", 
 DocumentReviewStage = Literal[
     "upload_saved",
     "parser_started",
+    "parser_progress",
     "parser_completed",
     "review_started",
     "review_progress",
@@ -37,7 +38,7 @@ class DocumentReviewOptions(BaseModel):
     max_clause_chars: int = Field(default=4000, ge=500)
     max_source_text_chars: int = Field(default=1200, ge=100)
     max_sources_per_finding: int = Field(default=3, ge=1)
-    max_concurrent_risk_reviews: int = Field(default=4, ge=1, le=32)
+    max_concurrent_risk_reviews: int = Field(default=8, ge=1, le=32)
     max_generation_repair_attempts: int = Field(default=3, ge=1, le=5)
     max_generation_provider_retry_attempts: int = Field(default=3, ge=1, le=8)
     generation_provider_retry_base_delay_sec: float = Field(default=1.0, ge=0.0, le=60.0)

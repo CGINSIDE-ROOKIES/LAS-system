@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from document_processor import DocIR, DocumentInput
 from document_processor.api import (
@@ -69,6 +71,7 @@ def parse_document(
     max_paragraphs: int | None = 120,
     max_editable_targets: int | None = 200,
     paragraph_excerpt_length: int | None = 240,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> ParseDocumentResult:
     source = _resolve_parse_document(document=document, source_path=source_path)
     with _materialize_parse_source(source) as materialized_source_path:
@@ -82,6 +85,7 @@ def parse_document(
                 llm_repair_max_attempts=llm_repair_max_attempts,
                 prompt_profile=prompt_profile,
             ),
+            progress_callback=progress_callback,
         )
 
     result = state.parser_result

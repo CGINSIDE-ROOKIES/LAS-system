@@ -90,7 +90,7 @@ Example options:
 {
   "top_k": 8,
   "max_clauses": 10,
-  "max_concurrent_risk_reviews": 4,
+  "max_concurrent_risk_reviews": 8,
   "hitl_min_risk_level": "low",
   "doc_types": ["law", "prec", "detc", "decc", "expc"],
   "law_names": ["근로기준법"],
