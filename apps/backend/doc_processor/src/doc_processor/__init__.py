@@ -45,6 +45,7 @@ from .contract_review import (
     ClauseReviewResult,
     ContractReviewClients,
     ContractReviewConfig,
+    ContractEditRiskValidationResult,
     ContractReviewEnvStatus,
     ContractReviewFinding,
     ContractReviewGraphState,
@@ -62,6 +63,7 @@ from .contract_review import (
     review_contract_document,
     review_contract_document_from_env,
     review_parsed_contract,
+    validate_contract_edit_risk,
 )
 from .main import build_parser_graph, run_parser
 from .parser_types import (
@@ -92,6 +94,7 @@ __all__ = [
     "ClauseSummary",
     "ContractReviewClients",
     "ContractReviewConfig",
+    "ContractEditRiskValidationResult",
     "ContractReviewEnvStatus",
     "ContractReviewFinding",
     "ContractReviewGraphState",
@@ -154,6 +157,7 @@ __all__ = [
     "review_contract_document_from_env",
     "review_parsed_contract",
     "run_parser",
+    "validate_contract_edit_risk",
     "validate_document_edits",
     "validate_text_annotations",
 ]

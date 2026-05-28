@@ -19,6 +19,7 @@ from doc_processor.contract_review import (
     check_contract_review_env,
     load_and_categorize_contract,
     review_parsed_contract,
+    validate_contract_edit_risk,
 )
 from doc_processor.contract_review import ContractReviewSource
 from doc_processor.api_types import ClauseSummary, ParagraphPreview, ParseDocumentResult
@@ -150,6 +151,76 @@ class ContractReviewTests(unittest.TestCase):
         self.assertEqual(len(result.hitl_requests), 1)
         self.assertEqual(result.hitl_requests[0].kind, "suggested_edit")
         self.assertIn("--- current", result.hitl_requests[0].diff or "")
+
+    def test_validate_contract_edit_risk_reuses_clause_risk_pipeline(self) -> None:
+        parse_result = self._single_clause_parse_result()
+        candidate_text = "계약을 위반하면 위약금 2,000만원을 지급한다."
+        answer = json.dumps(
+            {
+                "findings": [
+                    {
+                        "risk_level": "mid",
+                        "issue_type": "penalty_clause",
+                        "title": "위약금 예정 조항",
+                        "target_node_id": "p1",
+                        "selected_text": "위약금 2,000만원을 지급한다",
+                        "rationale": "위약 예정 금지와 충돌할 수 있다.",
+                        "recommendation": "실손해 기준으로 수정한다.",
+                        "replacement_text": "실제 발생한 손해에 한해 배상한다",
+                        "source_ids": ["law-1"],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+        rag = FakeRagClient()
+
+        result = validate_contract_edit_risk(
+            parse_result,
+            target_node_id="p1",
+            candidate_text=candidate_text,
+            rag_client=rag,
+            generation_client=SequenceGenerationClient([answer]),
+            config=ContractReviewConfig(include_review_html=False),
+        )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.risk_level, "mid")
+        self.assertIn("위약금 예정 조항", result.reason)
+        self.assertEqual(len(rag.queries), 1)
+        self.assertIn(candidate_text, str(rag.queries[0]["search_query"]))
+
+    def test_validate_contract_edit_risk_allows_low_risk_candidate(self) -> None:
+        answer = json.dumps(
+            {
+                "findings": [
+                    {
+                        "risk_level": "low",
+                        "issue_type": "drafting_clarity",
+                        "title": "통지 방식 명확화",
+                        "target_node_id": "p1",
+                        "selected_text": "서면으로 통지한다",
+                        "rationale": "통지 방식 보완이 있으면 더 명확하다.",
+                        "recommendation": "주소와 기한을 명확히 한다.",
+                        "replacement_text": "서면으로 7일 전에 통지한다",
+                        "source_ids": ["law-1"],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+        result = validate_contract_edit_risk(
+            self._single_clause_parse_result(),
+            target_node_id="p1",
+            candidate_text="계약 해지는 서면으로 통지한다.",
+            rag_client=FakeRagClient(),
+            generation_client=SequenceGenerationClient([answer]),
+            config=ContractReviewConfig(include_review_html=False),
+        )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.risk_level, "low")
 
     def test_review_generation_repairs_invalid_json_before_fallback(self) -> None:
         valid_answer = json.dumps(

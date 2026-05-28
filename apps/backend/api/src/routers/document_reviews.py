@@ -30,6 +30,7 @@ from src.document_reviews.service import (
     regenerate_feedback_suggestion,
     resume_document_review,
     run_document_review_job,
+    update_document_review_suggestion_decision,
 )
 
 router = APIRouter(tags=["document-reviews"])
@@ -243,7 +244,7 @@ def decide_document_review_suggestion(
                 comment=request.comment.strip(),
             )
         else:
-            suggestion = storage.update_suggestion_decision(
+            suggestion = update_document_review_suggestion_decision(
                 conn,
                 review_id=review_id,
                 finding_id=finding_id,

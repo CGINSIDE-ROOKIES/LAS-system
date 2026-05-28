@@ -115,6 +115,12 @@ const regeneratedStatusMeta = {
   surface: "border-blue-200 bg-blue-50/45 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.12)]",
 };
 
+const rejectedRegenerationStatusMeta = {
+  label: "재입력 필요",
+  className: "bg-amber-50 text-amber-800 border-amber-200",
+  surface: "border-amber-200 bg-amber-50/50 shadow-[inset_0_0_0_1px_rgba(245,158,11,0.12)]",
+};
+
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -169,16 +175,47 @@ function errorMessage(error: unknown): string {
 }
 
 function hasRegeneratedFeedback(suggestion: DocumentReviewSuggestion): boolean {
-  const regeneration = suggestion.payload?.feedback_regeneration;
+  const regeneration = feedbackRegeneration(suggestion);
   return Boolean(
     regeneration &&
-      typeof regeneration === "object" &&
-      "status" in regeneration &&
       regeneration.status === "completed"
   );
 }
 
+function hasRejectedFeedbackRegeneration(suggestion: DocumentReviewSuggestion): boolean {
+  return feedbackRegeneration(suggestion)?.status === "rejected";
+}
+
+function feedbackRegeneration(suggestion: DocumentReviewSuggestion): Record<string, unknown> | null {
+  const regeneration = suggestion.payload?.feedback_regeneration;
+  if (!regeneration || typeof regeneration !== "object" || Array.isArray(regeneration)) return null;
+  return regeneration as Record<string, unknown>;
+}
+
+function feedbackValidationReason(suggestion: DocumentReviewSuggestion): string {
+  const regeneration = feedbackRegeneration(suggestion);
+  const validation = regeneration?.validation;
+  if (validation && typeof validation === "object" && !Array.isArray(validation)) {
+    const reason = (validation as Record<string, unknown>).reason;
+    if (typeof reason === "string" && reason.trim()) return reason;
+  }
+  return "재생성된 수정안이 중간 이상의 리스크로 재검증되어 반려되었습니다. 피드백을 다시 입력해주세요.";
+}
+
+function feedbackValidationRiskLabel(suggestion: DocumentReviewSuggestion): string {
+  const regeneration = feedbackRegeneration(suggestion);
+  const validation = regeneration?.validation;
+  if (validation && typeof validation === "object" && !Array.isArray(validation)) {
+    const level = (validation as Record<string, unknown>).risk_level;
+    if (typeof level === "string") return riskMeta[level]?.label || level;
+  }
+  return "";
+}
+
 function suggestionStatusMeta(suggestion: DocumentReviewSuggestion) {
+  if (suggestion.status === "pending" && hasRejectedFeedbackRegeneration(suggestion)) {
+    return rejectedRegenerationStatusMeta;
+  }
   if (suggestion.status === "pending" && hasRegeneratedFeedback(suggestion)) {
     return regeneratedStatusMeta;
   }
@@ -594,10 +631,18 @@ export default function ContractReviewPage() {
         setSuggestions((items) =>
           items.map((item) => (item.finding_id === updated.finding_id ? updated : item))
         );
-        setFeedbackOpen((items) => ({ ...items, [suggestion.finding_id]: false }));
         if (action === "feedback") {
-          setFeedbackText((items) => ({ ...items, [suggestion.finding_id]: "" }));
-          toast.success("피드백을 반영한 새 수정안을 생성했습니다. 다시 검토해주세요.");
+          if (hasRejectedFeedbackRegeneration(updated)) {
+            setFeedbackOpen((items) => ({ ...items, [suggestion.finding_id]: true }));
+            setFeedbackText((items) => ({ ...items, [suggestion.finding_id]: comment?.trim() || "" }));
+            toast.error("재생성된 수정안이 재검증을 통과하지 못했습니다.");
+          } else {
+            setFeedbackOpen((items) => ({ ...items, [suggestion.finding_id]: false }));
+            setFeedbackText((items) => ({ ...items, [suggestion.finding_id]: "" }));
+            toast.success("피드백을 반영한 새 수정안을 생성했습니다. 다시 검토해주세요.");
+          }
+        } else {
+          setFeedbackOpen((items) => ({ ...items, [suggestion.finding_id]: false }));
         }
       } catch (err) {
         toast.error(errorMessage(err));
@@ -1002,7 +1047,9 @@ function ReviewCard({
   const risk = riskMeta[suggestion.risk_level || "none"] || riskMeta.none;
   const status = suggestionStatusMeta(suggestion);
   const proposedText = getProposedText(suggestion);
-  const canAccept = Boolean(suggestion.proposed_edit);
+  const validationRejected = hasRejectedFeedbackRegeneration(suggestion);
+  const validationRiskLabel = feedbackValidationRiskLabel(suggestion);
+  const canAccept = Boolean(suggestion.proposed_edit) && !validationRejected;
   const regenerated = hasRegeneratedFeedback(suggestion);
 
   return (
@@ -1032,6 +1079,16 @@ function ReviewCard({
 
       {suggestion.guidance && (
         <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{suggestion.guidance}</p>
+      )}
+
+      {validationRejected && (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-950">
+          <div className="mb-1 flex items-center gap-2 text-xs font-semibold">
+            <AlertCircle className="h-4 w-4 text-amber-600" />
+            피드백 수정안 재검증 실패{validationRiskLabel ? ` · ${validationRiskLabel}` : ""}
+          </div>
+          <p className="text-sm leading-relaxed">{feedbackValidationReason(suggestion)}</p>
+        </div>
       )}
 
       {proposedText && (

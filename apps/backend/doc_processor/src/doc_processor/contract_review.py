@@ -266,6 +266,20 @@ class ClauseReviewResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ContractEditRiskValidationResult(BaseModel):
+    ok: bool
+    risk_level: RiskLevel = "none"
+    failure_threshold: RiskLevel = "mid"
+    target_node_id: str
+    clause_id: str | None = None
+    clause_no: str | None = None
+    reason: str = ""
+    query: str = ""
+    source_count: int = 0
+    findings: list[ContractReviewFinding] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ContractReviewResult(BaseModel):
     parse_result: ParseDocumentResult
     clause_reviews: list[ClauseReviewResult] = Field(default_factory=list)
@@ -433,6 +447,59 @@ def review_parsed_contract(
             rag_client=rag_client,
             generation_client=generation_client,
         )
+    )
+
+
+def validate_contract_edit_risk(
+    parse_result: ParseDocumentResult,
+    *,
+    target_node_id: str,
+    candidate_text: str,
+    rag_client: RagEvidenceClient,
+    generation_client: ReviewGenerationClient,
+    config: ContractReviewConfig | None = None,
+    failure_threshold: RiskLevel = "mid",
+) -> ContractEditRiskValidationResult:
+    cfg = (config or ContractReviewConfig()).model_copy(
+        update={"include_review_html": False, "pause_for_hitl": False}
+    )
+    target_node_id = target_node_id.strip()
+    candidate_text = candidate_text.strip()
+    if not target_node_id:
+        raise ValueError("target_node_id is required for edit risk validation.")
+    if not candidate_text:
+        raise ValueError("candidate_text is required for edit risk validation.")
+
+    clause, paragraphs = _candidate_validation_clause(parse_result, target_node_id, candidate_text)
+    clause_text = _clause_text(clause, paragraphs, cfg.max_clause_chars)
+    unit = ClauseReviewWorkItem(
+        index=0,
+        clause=clause,
+        paragraphs=list(paragraphs),
+        clause_text=clause_text,
+        query=_build_rag_query(clause, clause_text),
+    )
+    review = _review_single_clause_unit(
+        unit,
+        rag_client=rag_client,
+        generation_client=generation_client,
+        cfg=cfg,
+    )
+    threshold = _normalize_risk_level(failure_threshold)
+    risk_level = _normalize_risk_level(review.risk_level)
+    ok = _RISK_ORDER[risk_level] < _RISK_ORDER[threshold]
+    return ContractEditRiskValidationResult(
+        ok=ok,
+        risk_level=risk_level,
+        failure_threshold=threshold,
+        target_node_id=target_node_id,
+        clause_id=review.clause_id,
+        clause_no=review.clause_no,
+        reason="" if ok else _edit_validation_failure_reason(review),
+        query=review.query,
+        source_count=review.source_count,
+        findings=review.findings,
+        warnings=review.warnings,
     )
 
 
@@ -784,6 +851,68 @@ def _review_clause_units(
         member_node_ids=paragraph_ids,
     )
     return [(fallback, parse_result.paragraphs)]
+
+
+def _candidate_validation_clause(
+    parse_result: ParseDocumentResult,
+    target_node_id: str,
+    candidate_text: str,
+) -> tuple[ClauseSummary, list[ParagraphPreview]]:
+    paragraph_by_id = {paragraph.node_id: paragraph for paragraph in parse_result.paragraphs}
+    target = paragraph_by_id.get(target_node_id)
+    if target is None:
+        raise ValueError(f"target_node_id {target_node_id!r} was not found in parse_result paragraphs.")
+
+    clause = next(
+        (item for item in parse_result.clauses if target_node_id in item.member_node_ids),
+        None,
+    )
+    if clause is None and target.clause_id:
+        clause = next((item for item in parse_result.clauses if item.clause_id == target.clause_id), None)
+
+    if clause is None:
+        clause = ClauseSummary(
+            clause_id=target.clause_id or target_node_id,
+            clause_no=target.clause_no,
+            title="Candidate edit validation",
+            start_node_id=target_node_id,
+            end_node_id=target_node_id,
+            member_node_ids=[target_node_id],
+        )
+
+    paragraphs = [
+        paragraph_by_id[node_id]
+        for node_id in clause.member_node_ids
+        if node_id in paragraph_by_id
+    ] or [target]
+    return (
+        clause,
+        [
+            paragraph.model_copy(update={"text_excerpt": candidate_text, "text_length": len(candidate_text)})
+            if paragraph.node_id == target_node_id
+            else paragraph
+            for paragraph in paragraphs
+        ],
+    )
+
+
+def _edit_validation_failure_reason(review: ClauseReviewResult) -> str:
+    if not review.findings:
+        return "재검증 결과 중간 이상의 리스크가 남아 있어 수정안을 반려했습니다."
+
+    finding = max(review.findings, key=lambda item: _RISK_ORDER.get(item.risk_level, 0))
+    risk_label = {
+        "mid": "중간",
+        "high": "높음",
+        "crit": "치명",
+    }.get(finding.risk_level, finding.risk_level)
+    detail = finding.rationale or finding.recommendation or finding.human_question
+    parts = [f"{risk_label} 리스크가 남아 있습니다."]
+    if finding.title:
+        parts.append(finding.title)
+    if detail:
+        parts.append(detail)
+    return " ".join(parts)
 
 
 def _clause_text(clause: ClauseSummary, paragraphs: Sequence[ParagraphPreview], max_chars: int) -> str:
@@ -1679,6 +1808,7 @@ __all__ = [
     "ClauseReviewResult",
     "ContractReviewClients",
     "ContractReviewConfig",
+    "ContractEditRiskValidationResult",
     "ContractReviewEnvStatus",
     "ContractReviewFinding",
     "ContractReviewGraphState",
@@ -1700,4 +1830,5 @@ __all__ = [
     "review_contract_document",
     "review_contract_document_from_env",
     "review_parsed_contract",
+    "validate_contract_edit_risk",
 ]

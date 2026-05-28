@@ -13,14 +13,16 @@ import psycopg2.extensions
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
-from doc_processor.api import TextEdit, apply_document_edits, parse_document
+from doc_processor.api import ParseDocumentResult, TextEdit, apply_document_edits, parse_document
 from doc_processor.contract_review import (
     ClauseReviewResult,
     ContractReviewConfig,
+    ContractEditRiskValidationResult,
     ContractReviewGraphState,
     ContractReviewHumanDecision,
     ContractReviewResult,
     build_contract_review_graph,
+    validate_contract_edit_risk,
 )
 
 from src.db import db_connection
@@ -362,13 +364,44 @@ def regenerate_feedback_suggestion(
         previous_new_text=str(proposed_edit.get("new_text") or ""),
         comment=comment,
     )
-    answer = get_generation_service().generate(prompt, system_prompt=_FEEDBACK_REGENERATION_SYSTEM_PROMPT)
+    generation_client = get_generation_service()
+    answer = generation_client.generate(prompt, system_prompt=_FEEDBACK_REGENERATION_SYSTEM_PROMPT)
     regenerated = _parse_feedback_regeneration(_generation_answer_text(answer))
     new_text = str(regenerated.get("new_text") or "").strip()
     if not new_text:
         raise DocumentReviewServiceError(422, "Feedback regeneration did not return a replacement text.")
     if new_text == current_text:
         raise DocumentReviewServiceError(422, "Feedback regeneration returned unchanged text.")
+
+    validation = _validate_feedback_regenerated_edit(
+        job=job,
+        target_id=target_id,
+        new_text=new_text,
+        generation_client=generation_client,
+    )
+    validation_payload = _feedback_validation_payload(validation)
+    if not validation.ok:
+        payload.update(
+            {
+                "last_feedback": _decision_payload("feedback", comment),
+                "feedback_regeneration": {
+                    "status": "rejected",
+                    "comment": comment,
+                    "previous_new_text": str(proposed_edit.get("new_text") or ""),
+                    "candidate_new_text": new_text,
+                    "validation": validation_payload,
+                },
+            }
+        )
+        payload.pop("decision", None)
+        return storage.update_suggestion_payload_and_edit(
+            conn,
+            review_id=review_id,
+            finding_id=finding_id,
+            status="pending",
+            payload=payload,
+            proposed_edit=proposed_edit or None,
+        )
 
     title = str(regenerated.get("title") or suggestion.get("title") or "")
     guidance = str(regenerated.get("guidance") or regenerated.get("reason") or suggestion.get("guidance") or "")
@@ -393,6 +426,7 @@ def regenerate_feedback_suggestion(
                 "status": "completed",
                 "comment": comment,
                 "previous_new_text": str(proposed_edit.get("new_text") or ""),
+                "validation": validation_payload,
             },
         }
     )
@@ -405,6 +439,92 @@ def regenerate_feedback_suggestion(
         payload=payload,
         proposed_edit=updated_edit,
     )
+
+
+def update_document_review_suggestion_decision(
+    conn: psycopg2.extensions.connection,
+    *,
+    review_id: str,
+    finding_id: str,
+    action: str,
+    comment: str | None = None,
+) -> dict[str, Any] | None:
+    suggestion = storage.get_suggestion(conn, review_id, finding_id)
+    if suggestion is None:
+        return None
+    if action == "accept" and _has_rejected_feedback_regeneration(suggestion):
+        raise DocumentReviewServiceError(
+            409,
+            "재생성된 수정안이 재검증을 통과하지 못했습니다. 피드백을 다시 입력해주세요.",
+        )
+    return storage.update_suggestion_decision(
+        conn,
+        review_id=review_id,
+        finding_id=finding_id,
+        action=action,
+        comment=comment,
+    )
+
+
+def _validate_feedback_regenerated_edit(
+    *,
+    job: dict[str, Any],
+    target_id: str,
+    new_text: str,
+    generation_client: Any,
+) -> ContractEditRiskValidationResult:
+    try:
+        options = DocumentReviewOptions.model_validate(job.get("options") or {})
+        parse_result = ParseDocumentResult.model_validate(job.get("parser_result") or {})
+        config = _contract_config(options).model_copy(
+            update={"include_review_html": False, "pause_for_hitl": False}
+        )
+        return validate_contract_edit_risk(
+            parse_result,
+            target_node_id=target_id,
+            candidate_text=new_text,
+            rag_client=get_rag_pipeline(),
+            generation_client=generation_client,
+            config=config,
+            failure_threshold="mid",
+        )
+    except ValueError as exc:
+        raise DocumentReviewServiceError(422, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("feedback regenerated edit validation failed: target_id=%s", target_id)
+        raise DocumentReviewServiceError(
+            502,
+            "피드백 수정안 재검증에 실패했습니다. 잠시 후 다시 시도해주세요.",
+        ) from exc
+
+
+def _feedback_validation_payload(validation: ContractEditRiskValidationResult) -> dict[str, Any]:
+    return {
+        "passed": validation.ok,
+        "risk_level": validation.risk_level,
+        "failure_threshold": validation.failure_threshold,
+        "reason": validation.reason,
+        "target_node_id": validation.target_node_id,
+        "clause_id": validation.clause_id,
+        "clause_no": validation.clause_no,
+        "source_count": validation.source_count,
+        "warnings": validation.warnings,
+        "findings": [
+            {
+                "risk_level": finding.risk_level,
+                "title": finding.title,
+                "rationale": finding.rationale,
+                "recommendation": finding.recommendation,
+                "source_citations": [source.citation for source in finding.sources if source.citation],
+            }
+            for finding in validation.findings[:3]
+        ],
+    }
+
+
+def _has_rejected_feedback_regeneration(suggestion: dict[str, Any]) -> bool:
+    regeneration = (suggestion.get("payload") or {}).get("feedback_regeneration")
+    return isinstance(regeneration, dict) and regeneration.get("status") == "rejected"
 
 
 def apply_document_review(
@@ -832,6 +952,7 @@ def _build_feedback_regeneration_prompt(
     comment: str,
 ) -> str:
     payload = suggestion.get("payload") or {}
+    previous_rejection = _previous_feedback_rejection(payload)
     request = {
         "finding_id": suggestion.get("finding_id"),
         "risk_level": suggestion.get("risk_level"),
@@ -844,6 +965,9 @@ def _build_feedback_regeneration_prompt(
         "user_feedback": comment,
         "rationale": payload.get("rationale"),
         "issue_type": payload.get("issue_type"),
+        "previous_rejected_candidate": previous_rejection.get("candidate_new_text", ""),
+        "previous_rejection_risk_level": previous_rejection.get("risk_level", ""),
+        "previous_rejection_reason": previous_rejection.get("reason", ""),
     }
     schema = {
         "title": "short Korean title",
@@ -865,6 +989,20 @@ def _build_feedback_regeneration_prompt(
             json.dumps(schema, ensure_ascii=False),
         ]
     )
+
+
+def _previous_feedback_rejection(payload: dict[str, Any]) -> dict[str, str]:
+    regeneration = payload.get("feedback_regeneration")
+    if not isinstance(regeneration, dict) or regeneration.get("status") != "rejected":
+        return {}
+    validation = regeneration.get("validation")
+    if not isinstance(validation, dict):
+        validation = {}
+    return {
+        "candidate_new_text": str(regeneration.get("candidate_new_text") or ""),
+        "risk_level": str(validation.get("risk_level") or ""),
+        "reason": str(validation.get("reason") or ""),
+    }
 
 
 def _parse_feedback_regeneration(answer: str) -> dict[str, Any]:
