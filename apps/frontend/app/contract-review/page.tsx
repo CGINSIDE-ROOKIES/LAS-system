@@ -40,6 +40,7 @@ import { toast } from "sonner";
 
 const SUPPORTED_FORMATS = [".hwp", ".hwpx", ".doc", ".docx", ".pdf"];
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const PREVIEW_BASE_LAYOUT_WIDTH = 860;
 const EVENT_STAGES: DocumentReviewStage[] = [
   "upload_saved",
   "parser_started",
@@ -286,45 +287,38 @@ function ensurePreviewFrameStyle(doc: Document) {
   style.textContent = `
     html,
     body {
-      width: 100% !important;
-      max-width: none !important;
       min-width: 0 !important;
       overflow: hidden !important;
       box-sizing: border-box !important;
     }
 
     body {
-      margin-left: auto !important;
-      margin-right: auto !important;
-    }
-
-    body > * {
-      width: 100% !important;
-      max-width: 100% !important;
+      width: var(--las-preview-layout-width, auto) !important;
+      min-width: var(--las-preview-layout-width, 0) !important;
+      max-width: var(--las-preview-layout-width, none) !important;
+      margin: 0 !important;
       box-sizing: border-box !important;
-    }
-
-    p,
-    div,
-    section,
-    article,
-    main,
-    table,
-    td,
-    th,
-    img,
-    svg,
-    canvas {
-      max-width: 100% !important;
-      box-sizing: border-box !important;
-    }
-
-    table {
-      width: 100% !important;
-      table-layout: auto !important;
+      transform: scale(var(--las-preview-scale, 1));
+      transform-origin: top left;
     }
   `;
   doc.head.appendChild(style);
+}
+
+function previewLayoutWidth(doc: Document, availableWidth: number): number {
+  const body = doc.body;
+  const stored = Number(body.dataset.lasPreviewLayoutWidth || 0);
+  if (stored > 0) return stored;
+
+  const childWidths = Array.from(body.children).map((element) =>
+    Math.ceil(Math.max((element as HTMLElement).scrollWidth, element.getBoundingClientRect().width))
+  );
+  const measuredWidth = Math.ceil(Math.max(body.scrollWidth, ...childWidths));
+  const intrinsicWidth =
+    measuredWidth > availableWidth + 4 ? measuredWidth : PREVIEW_BASE_LAYOUT_WIDTH;
+  const width = Math.ceil(Math.max(PREVIEW_BASE_LAYOUT_WIDTH, intrinsicWidth));
+  body.dataset.lasPreviewLayoutWidth = String(width);
+  return width;
 }
 
 function findPreviewTargetElement(doc: Document, suggestion: DocumentReviewSuggestion): HTMLElement | null {
@@ -424,18 +418,26 @@ export default function ContractReviewPage() {
   const resizePreviewFrame = useCallback(() => {
     const frame = previewFrameRef.current;
     const doc = frame?.contentDocument;
-    if (!frame || !doc?.body) return;
+    if (!frame || !doc?.body || doc.readyState === "loading") return;
     ensurePreviewFrameStyle(doc);
+    const availableWidth = Math.max(
+      1,
+      frame.clientWidth || previewScrollRef.current?.clientWidth || PREVIEW_BASE_LAYOUT_WIDTH
+    );
+    const layoutWidth = previewLayoutWidth(doc, availableWidth);
+    const scale = availableWidth / layoutWidth;
+    doc.documentElement.style.setProperty("--las-preview-layout-width", `${layoutWidth}px`);
+    doc.documentElement.style.setProperty("--las-preview-scale", String(scale));
     const html = doc.documentElement;
-    const nextHeight = Math.ceil(
+    const naturalHeight = Math.ceil(
       Math.max(
-        720,
         html.scrollHeight,
         html.offsetHeight,
         doc.body.scrollHeight,
         doc.body.offsetHeight
       )
     );
+    const nextHeight = Math.max(520, Math.ceil(naturalHeight * scale));
     setPreviewFrameHeight(nextHeight);
   }, []);
 

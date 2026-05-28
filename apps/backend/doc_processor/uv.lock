@@ -176,7 +176,7 @@ requires-dist = [
 [[package]]
 name = "document-processor"
 version = "0.1.0"
-source = { git = "https://github.com/CGINSIDE-ROOKIES/document-processor.git?branch=main#73c4741950f41b6fbf0f64a6a997c1c55756b643" }
+source = { git = "https://github.com/CGINSIDE-ROOKIES/document-processor.git?branch=main#b21dfce9203152bcc0815d41f27af9b1cfdc9d98" }
 dependencies = [
     { name = "jpype1" },
     { name = "pydantic" },
