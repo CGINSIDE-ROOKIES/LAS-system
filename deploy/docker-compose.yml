@@ -1,0 +1,144 @@
+# Coolify runs this file with `--project-directory` set to the repo root,
+# so build contexts here must stay repo-root-relative.
+
+services:
+  backend-api:
+    build:
+      context: apps/backend
+      dockerfile: api/Dockerfile
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - DOCUMENT_REVIEW_STORAGE_DIR=${DOCUMENT_REVIEW_STORAGE_DIR}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - LLM_PROVIDER=${LLM_PROVIDER}
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_URL=${LLM_URL}
+      - LLM_BASE_URL=${LLM_BASE_URL}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_TIMEOUT=${LLM_TIMEOUT}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE}
+      - LAW_SLOT_SCORE_THRESHOLD=${LAW_SLOT_SCORE_THRESHOLD}
+      - QUERY_PARSER_LLM_PROVIDER=${QUERY_PARSER_LLM_PROVIDER}
+      - QUERY_PARSER_LLM_MODEL=${QUERY_PARSER_LLM_MODEL}
+      - QUERY_PARSER_LLM_URL=${QUERY_PARSER_LLM_URL}
+      - QUERY_PARSER_LLM_API_KEY=${QUERY_PARSER_LLM_API_KEY}
+      - QUERY_PARSER_LLM_TIMEOUT=${QUERY_PARSER_LLM_TIMEOUT}
+      - QUERY_PARSER_LLM_STRICT=${QUERY_PARSER_LLM_STRICT}
+      - GRAPH_QUERY_MODE=${GRAPH_QUERY_MODE}
+      - GRAPH_LLM_PROVIDER=${GRAPH_LLM_PROVIDER}
+      - GRAPH_LLM_MODEL=${GRAPH_LLM_MODEL}
+      - GRAPH_LLM_URL=${GRAPH_LLM_URL}
+      - GRAPH_LLM_API_KEY=${GRAPH_LLM_API_KEY}
+      - GRAPH_LLM_TIMEOUT=${GRAPH_LLM_TIMEOUT}
+      - GRAPH_LLM_MAX_TOKENS=${GRAPH_LLM_MAX_TOKENS}
+      - GRAPH_LLM_TEMPERATURE=${GRAPH_LLM_TEMPERATURE}
+      - DOC_PROCESSOR_LLM_PROVIDER=${DOC_PROCESSOR_LLM_PROVIDER}
+      - DOC_PROCESSOR_LLM_MODEL=${DOC_PROCESSOR_LLM_MODEL}
+      - DOC_PROCESSOR_LLM_URL=${DOC_PROCESSOR_LLM_URL}
+      - DOC_PROCESSOR_LLM_BASE_URL=${DOC_PROCESSOR_LLM_BASE_URL}
+      - DOC_PROCESSOR_LLM_API_KEY=${DOC_PROCESSOR_LLM_API_KEY}
+      - DOC_PROCESSOR_LLM_TIMEOUT_SECONDS=${DOC_PROCESSOR_LLM_TIMEOUT_SECONDS}
+      - DOC_PROCESSOR_LLM_STRUCTURED_METHOD=${DOC_PROCESSOR_LLM_STRUCTURED_METHOD}
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY}
+      - EMBEDDING_BASE_URL=${EMBEDDING_BASE_URL}
+      - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS}
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_COLLECTIONS=${QDRANT_COLLECTIONS}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - QDRANT_VECTOR_NAME_MAP=${QDRANT_VECTOR_NAME_MAP}
+      - OPENSEARCH_URL=${OPENSEARCH_URL}
+      - OPENSEARCH_INDEX=${OPENSEARCH_INDEX}
+      - OPENSEARCH_API_KEY=${OPENSEARCH_API_KEY}
+      - OPENSEARCH_USERNAME=${OPENSEARCH_USERNAME}
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD}
+      - OPENSEARCH_SEARCH_TEXT_FIELD=${OPENSEARCH_SEARCH_TEXT_FIELD}
+      - NEO4J_URI=${NEO4J_URI}
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - LANGFUSE_HOST=${LANGFUSE_HOST}
+    volumes:
+      - document-review-storage:/app/storage/document_reviews
+
+  law-updater:
+    build:
+      context: apps/backend/law-updater
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    environment:
+      - LAW_OC=${LAW_OC}
+      - LAW_API_BASE_URL=${LAW_API_BASE_URL}
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY}
+      - EMBEDDING_BASE_URL=${EMBEDDING_BASE_URL}
+      - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS}
+      - EMBEDDING_MAX_INPUT_TOKENS=${EMBEDDING_MAX_INPUT_TOKENS}
+      - EMBEDDING_MAX_BATCH_TOKENS=${EMBEDDING_MAX_BATCH_TOKENS}
+      - EMBEDDING_MAX_RETRIES=${EMBEDDING_MAX_RETRIES}
+      - EMBEDDING_RETRY_BASE_DELAY_SEC=${EMBEDDING_RETRY_BASE_DELAY_SEC}
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - OPENSEARCH_URL=${OPENSEARCH_URL}
+      - OPENSEARCH_API_KEY=${OPENSEARCH_API_KEY}
+      - OPENSEARCH_USERNAME=${OPENSEARCH_USERNAME}
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD}
+    volumes:
+      - law-updater-data:/app/data
+    command: ["python", "-m", "http.server", "8080", "--bind", "0.0.0.0", "--directory", "/tmp"]
+
+  frontend:
+    build:
+      context: apps/frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    environment:
+      - HOSTNAME=0.0.0.0
+      - ALLOWED_FRAME_ORIGINS=${ALLOWED_FRAME_ORIGINS}
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+      - BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL}
+
+volumes:
+  law-updater-data:
+  document-review-storage:

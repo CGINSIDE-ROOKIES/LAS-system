@@ -1,3 +1,13 @@
+# doc-processor
+reference-docs/
+.claude/
+.codex/
+.codex
+
+# 개인 Claude 지침 문서
+CLAUDE.md
+results/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -98,7 +108,7 @@ ipython_config.py
 #   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
 #   This is especially recommended for binary packages to ensure reproducibility, and is more
 #   commonly ignored for libraries.
-#uv.lock
+# uv.lock
 
 # poetry
 #   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
@@ -205,3 +215,32 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Node / Monorepo
+node_modules/
+.pnpm-store/
+.turbo/
+.next/
+*.tsbuildinfo
+
+# Windows ADS metadata
+*:Zone.Identifier
+
+# doc-processor
+apps/backend/doc-processor/tests/python-hwpx-docs/
+
+# legal-pipeline
+apps/backend/legal-pipeline/data/
+apps/backend/legal-pipeline/.local/
+apps/backend/legal-pipeline/CODEX.md
+apps/backend/legal-pipeline/scripts/experiment*.py
+
+# rag
+apps/backend/rag/docs/
+apps/backend/rag/data/**
+!apps/backend/rag/data/dropbox/
+!apps/backend/rag/data/staging/
+!apps/backend/rag/data/dropbox/.gitkeep
+!apps/backend/rag/data/dropbox/README.md
+!apps/backend/rag/data/staging/.gitkeep
+!apps/backend/rag/data/staging/eval_set.csv

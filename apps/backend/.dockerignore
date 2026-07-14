@@ -1,0 +1,32 @@
+.git
+.env
+.env.*
+.venv
+**/.venv
+__pycache__
+**/__pycache__
+.pytest_cache
+**/.pytest_cache
+.mypy_cache
+**/.mypy_cache
+.ruff_cache
+**/.ruff_cache
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+**/*.egg-info
+*.ipynb
+**/.ipynb_checkpoints
+
+# Not used by the API image build, but currently dominates the build context.
+doc-processor-old
+legal-pipeline
+
+# 나중에 배포하면 이거 지우기!!!
+doc-processor
+
+# Keep the API image context focused on the files copied by api/Dockerfile.
+api/.venv
+rag/data
+rag/cli

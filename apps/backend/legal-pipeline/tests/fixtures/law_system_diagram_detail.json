@@ -1,0 +1,7 @@
+{
+  "root_law_name": "근로기준법",
+  "children": [
+    { "law_name": "근로기준법 시행령" },
+    { "law_name": "근로기준법 시행규칙" }
+  ]
+}

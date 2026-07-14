@@ -1,0 +1,15 @@
+[project]
+name = "law-updater"
+version = "0.1.0"
+description = "Slim runtime for the incremental law update workflow"
+requires-python = "==3.13.*"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "httpx>=0.28.1",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "qdrant-client>=1.17.1",
+    "xmltodict>=1.0.4",
+    "numpy>=2.4.3",
+    "tiktoken>=0.12.0",
+]

@@ -1,0 +1,9 @@
+node_modules
+.next
+.turbo
+.git
+tsconfig.tsbuildinfo
+README.md
+.gitignore
+.env
+.env.*

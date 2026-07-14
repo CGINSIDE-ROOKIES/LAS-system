@@ -1,0 +1,113 @@
+from __future__ import annotations
+
+from copy import deepcopy
+
+from document_processor import DocIR, ParagraphIR
+
+from ..parser_types import (
+    ClauseEntry,
+    DocTargetRef,
+    ParagraphCategory,
+    ParserAnalysis,
+    ParserDocumentMeta,
+    ParserNodeMeta,
+    WorkflowMeta,
+)
+
+
+def clause_entry_to_targets(entry: ClauseEntry) -> list[DocTargetRef]:
+    return [DocTargetRef(node_id=node_id) for node_id in entry.member_node_ids]
+
+
+def resolve_targets_to_paragraphs(
+    doc: DocIR,
+    targets: list[DocTargetRef],
+) -> list[ParagraphIR]:
+    doc.ensure_node_identity()
+    by_node = {paragraph.node_id: paragraph for paragraph in doc.paragraphs}
+    resolved: list[ParagraphIR] = []
+    for target in targets:
+        paragraph = by_node.get(target.node_id)
+        if paragraph is not None:
+            resolved.append(paragraph)
+    return resolved
+
+
+def resolve_clause_entry(
+    doc: DocIR,
+    entry: ClauseEntry,
+) -> list[ParagraphIR]:
+    return resolve_targets_to_paragraphs(doc, clause_entry_to_targets(entry))
+
+
+def attach_parser_metadata_to_doc(
+    doc: DocIR,
+    analysis: ParserAnalysis,
+) -> DocIR:
+    annotated = doc.model_copy(deep=True)
+    paragraph_map = {paragraph.node_id: paragraph for paragraph in analysis.paragraphs}
+
+    annotated.meta = _merge_meta(
+        annotated.meta,
+        parser_doc=ParserDocumentMeta(
+            relevance=analysis.relevance,
+            clause_rule_name=analysis.clause_rule_name,
+            subclause_rule_name=analysis.subclause_rule_name,
+            clause_entries=deepcopy(analysis.clause_entries),
+            boundary_suspect_node_ids=list(analysis.boundary_suspect_node_ids),
+            ambiguous_label_node_ids=list(analysis.ambiguous_label_node_ids),
+            notes=list(analysis.notes),
+        ),
+    )
+
+    for paragraph in annotated.paragraphs:
+        current = paragraph_map.get(paragraph.node_id)
+        if current is None:
+            continue
+        paragraph.meta = _merge_meta(
+            paragraph.meta,
+            parser=ParserNodeMeta(
+                category=current.category,
+                clause_id=current.clause_id,
+                clause_no=current.clause_no,
+                subclause_id=current.subclause_id,
+                subclause_no=current.subclause_no,
+                clause_rule_name=current.clause_rule_name,
+                subclause_rule_name=current.subclause_rule_name,
+                spans=deepcopy(current.spans),
+                candidate_labels=list(current.candidate_labels),
+                boundary_suspect=current.boundary_suspect,
+                split_suggestions=deepcopy(current.split_suggestions),
+                notes=list(current.notes),
+            ),
+        )
+        for table in paragraph.tables:
+            table.meta = _merge_meta(
+                table.meta,
+                parser=ParserNodeMeta(
+                    category=current.category,
+                    clause_id=current.clause_id,
+                    clause_no=current.clause_no,
+                    subclause_id=current.subclause_id,
+                    subclause_no=current.subclause_no,
+                    clause_rule_name=current.clause_rule_name,
+                    subclause_rule_name=current.subclause_rule_name,
+                    boundary_suspect=current.boundary_suspect,
+                    notes=["Inherited from owning paragraph during parser stage."],
+                ),
+            )
+    return annotated
+
+
+def _merge_meta(
+    current: WorkflowMeta | None,
+    *,
+    parser: ParserNodeMeta | None = None,
+    parser_doc: ParserDocumentMeta | None = None,
+) -> WorkflowMeta:
+    base = current.model_copy(deep=True) if current is not None else WorkflowMeta()
+    if parser is not None:
+        base.parser = parser
+    if parser_doc is not None:
+        base.parser_doc = parser_doc
+    return base
